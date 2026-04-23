@@ -246,6 +246,10 @@ export function PortfolioView({
 				setLoadingDetail(false)
 			}).catch((e) => {
 				console.error("[haiku-browse] Failed to load deeplinked intent:", e)
+				Sentry.captureException(e, {
+					tags: { component: "haiku-browse", provider: provider.name, kind: "get-intent-deeplink" },
+					extra: { slug: location.intent },
+				})
 				setIntentError(`Failed to load intent "${location.intent}": ${(e as Error).message}`)
 				setLoadingDetail(false)
 			})
@@ -548,6 +552,10 @@ export function PortfolioView({
 					router.push(browseUrl({ intent: slug }))
 				}
 			} catch (e) {
+				Sentry.captureException(e, {
+					tags: { component: "haiku-browse", provider: provider.name, kind: "get-intent" },
+					extra: { slug },
+				})
 				setIntentError(
 					`Error loading intent "${slug}": ${(e as Error).message}`,
 				)

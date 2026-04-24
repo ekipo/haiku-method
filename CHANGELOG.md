@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.105.7] - 2026-04-24
+
+### Added
+- Programmatic feedback API with OpenAPI specification for integrating H·AI·K·U feedback with external systems and automating recovery workflows
+- Studio-level review agents that automatically enforce consistency across stages without manual intervention
+- Autonomous feedback assessor in every stage for independent closure decisions instead of manual sign-off
+- Standalone review UI package for independent deployment and flexible tool integration
+
+### Fixed
+- Tailwind v4 build compatibility and TypeScript compilation errors in CI pipeline
+
 ## [1.105.6] - 2026-04-23
 
 ### Fixed

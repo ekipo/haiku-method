@@ -5,10 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.105.9] - 2026-04-25
 
-### Changed
-- Hardware (`hwdev`) studio now uses [tscircuit](https://tscircuit.com) as its EDA platform. Design stage hats, outputs, and review agents have been updated so schematics and PCBs are authored as TypeScript/React (`.tsx`) circuit code, previewed with `tsci dev`, and exported to Gerbers / pick-and-place / BOM via the `tsci` CLI. The circuit source is now the canonical design artifact — committed manufacturing exports must regenerate from it.
+### Added
+- Hardware design workflows now support PCB layout and schematic capture through tscircuit EDA platform integration.
 
 ## [1.105.8] - 2026-04-24
 

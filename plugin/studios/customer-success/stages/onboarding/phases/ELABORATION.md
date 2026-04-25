@@ -2,12 +2,14 @@
 
 ## Criteria Guidance
 
-Good criteria examples:
+### Good criteria — concrete and verifiable
+
 - "Onboarding plan includes a success milestone checklist with measurable outcomes for each week"
 - "Technical setup guide covers all integration points with verified configuration steps"
 - "Training materials address at least 3 distinct user personas with role-specific workflows"
 
-Bad criteria examples:
+### Bad criteria — vague (no clear check)
+
 - "Customer is onboarded"
 - "Setup is done"
 - "Training was provided"

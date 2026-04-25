@@ -2,12 +2,14 @@
 
 ## Criteria Guidance
 
-Good criteria examples:
+### Good criteria — concrete and verifiable
+
 - "Row-count reconciliation shows zero discrepancy between source and target for every entity"
 - "Spot-check validation compares at least 100 randomly sampled records per entity with field-level diff"
 - "Performance benchmarks show target query latency within 10% of source for critical paths"
 
-Bad criteria examples:
+### Bad criteria — vague (no clear check)
+
 - "Data looks correct"
 - "Validation is complete"
 - "Performance is acceptable"

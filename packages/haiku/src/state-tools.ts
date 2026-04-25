@@ -46,6 +46,7 @@ import { logSessionEvent, writeHaikuMetadata } from "./session-metadata.js"
 import { sealIntentState } from "./state-integrity.js"
 import {
 	listStudios,
+	readHatDefs,
 	readOperationDefs,
 	readReflectionDefs,
 	readStageArtifactDefs,
@@ -2226,6 +2227,24 @@ export interface StageIteration {
  *  must resolve. */
 export const MAX_STAGE_ITERATIONS = 2
 
+/**
+ * Maximum number of bolts (full hat-sequence iterations) a unit can run.
+ *
+ * Used by THREE distinct rejection paths — keep them coupled here so the
+ * limit doesn't silently diverge if one is tuned:
+ *   - `haiku_unit_advance_hat`: per-hat `run_quality_gates: true` auto-reject
+ *     when gates fail (counts as a bolt; same hat retries).
+ *   - `haiku_unit_reject_hat`: explicit reject by the agent (drops back one
+ *     hat, increments bolt).
+ *   - `haiku_unit_increment_bolt`: agent-driven increment (rare; legacy).
+ *
+ * Exceeding this cap surfaces `max_bolts_exceeded` to the user — the unit
+ * needs structural intervention (spec rewrite, manual revert, split), not
+ * another retry. Tune at this single source if the cap proves wrong in
+ * practice; do NOT inline a different number elsewhere.
+ */
+export const MAX_UNIT_BOLTS = 5
+
 /** Build a loop-detection signature from a list of feedback titles.
  *  Stable hash of the sorted, normalized title set. */
 export function computeFeedbackSignature(titles: string[]): string {
@@ -4098,6 +4117,55 @@ export const stateToolDefs = [
 			required: ["intent", "stage", "unit"],
 		},
 	},
+	{
+		name: "haiku_decision_record",
+		description:
+			"Record an elaboration decision in the stage's decision_log, OR declare 'no architectural decisions in scope' for the stage. Used in collaborative-mode stages to track meaningful human-AI knowledge-unification moments instead of counting interaction turns. Each entry is an architectural choice the user picked between options, OR a choice the agent made and surfaced for veto-style approval. Padding questions don't count.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				stage: {
+					type: "string",
+					description:
+						"Stage name. Defaults to the intent's active_stage when omitted.",
+				},
+				no_decisions: {
+					type: "boolean",
+					description:
+						"When true, declare that no architectural decisions are in scope for this stage. `rationale` (≥10 chars) is required. The agent should use this honestly when the work is purely conventional with no real choices to make.",
+				},
+				decision: {
+					type: "string",
+					description:
+						"Short title of the decision being recorded (required unless no_decisions=true). Example: 'Authentication strategy'.",
+				},
+				options: {
+					type: "array",
+					items: { type: "string" },
+					description:
+						"≥2 concrete alternatives considered (required unless no_decisions=true). A 'decision' with only one option isn't a decision — it's just doing the work.",
+				},
+				choice: {
+					type: "string",
+					description:
+						"The chosen option (required unless no_decisions=true). Should match one of the entries in `options`.",
+				},
+				source: {
+					type: "string",
+					enum: ["user", "autonomous-acknowledged"],
+					description:
+						"Who made the call. 'user' = the user picked between options the agent presented. 'autonomous-acknowledged' = the agent chose and surfaced the choice for veto-style approval (the user reviewed and didn't push back).",
+				},
+				rationale: {
+					type: "string",
+					description:
+						"Optional for decisions (recommended for future-reader provenance); required when no_decisions=true.",
+				},
+			},
+			required: ["intent"],
+		},
+	},
 	// Knowledge tools
 	{
 		name: "haiku_knowledge_list",
@@ -4827,6 +4895,124 @@ export function handleStateTool(
 			const nextIdx = currentIdx + 1
 			const isLastHat = nextIdx >= stageHats.length
 
+			// ── Per-hat opt-in quality gates with auto-reject ─────────────
+			// A hat may declare `run_quality_gates: true` in its frontmatter.
+			// When the agent calls advance_hat from such a hat, the FSM runs
+			// the unit's quality_gates BEFORE allowing the transition. On
+			// failure, the FSM auto-rejects the hat (bolt+1, same hat retries)
+			// rather than returning an error and asking the agent to fix-and-
+			// retry. This eliminates the agent decision point ("is this gate
+			// failure something I fix here, or do I reject_hat?") — gate fail
+			// always means "this hat's output didn't pass; same hat, next bolt."
+			//
+			// Opt-in by hat (not unit-wide) so early hats like a planner that
+			// haven't produced verifiable artifacts yet don't trip on gates
+			// the builder will satisfy later. The builder hat is the typical
+			// declarer.
+			//
+			// Runs harness-agnostic: hookless harnesses already run gates at
+			// the LAST hat's advance unconditionally (see below); this layer
+			// adds an EARLIER opt-in checkpoint AND swaps the failure mode
+			// from agent-retry to auto-reject. For Claude Code (hooks), the
+			// Stop hook still runs gates as a backstop after the tool call
+			// completes — but with the boolean set, the auto-reject already
+			// fired here so the Stop hook sees a clean state.
+			if (currentHat) {
+				// Defer the intent.md read + frontmatter parse until we know we
+				// have a current hat — most advance_hat calls hit this path,
+				// but skipping the I/O for the no-hat edge case keeps the
+				// hot path lean.
+				const intentFile = `${intentDir(args.intent as string)}/intent.md`
+				const { data: iFm } = parseFrontmatter(readFileSync(intentFile, "utf8"))
+				const gateStudio = (iFm.studio as string) || ""
+				if (gateStudio) {
+					const hatDefs = readHatDefs(gateStudio, advStage)
+					const hatDef = hatDefs[currentHat]
+					if (hatDef?.run_quality_gates === true) {
+						const gateResult = runInlineQualityGates(
+							args.intent as string,
+							advPath,
+						)
+						if (gateResult) {
+							const currentBolt = (unitFm.bolt as number) || 1
+							if (currentBolt + 1 > MAX_UNIT_BOLTS) {
+								return text(
+									JSON.stringify({
+										error: "max_bolts_exceeded",
+										reason: "quality_gate_auto_reject",
+										bolt: currentBolt,
+										max: MAX_UNIT_BOLTS,
+										failures: gateResult.failures,
+										message: `Quality gates failed on hat '${currentHat}' and the unit has hit ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — the gates are catching real issues this hat cannot resolve in another bolt.\n\n${gateResult.failures.map((f) => `- ${f.name}: '${f.command}' exited ${f.exit_code}${f.output ? `\n  ${f.output.split("\n").slice(0, 3).join("\n  ")}` : ""}`).join("\n")}`,
+									}),
+								)
+							}
+
+							const reason = `auto-reject: quality_gate_failed (${gateResult.failures.map((f) => f.name).join(", ")})`
+							completeUnitIteration(advPath, "reject", reason)
+							setFrontmatterField(advPath, "hat", currentHat)
+							setFrontmatterField(advPath, "bolt", currentBolt + 1)
+							setFrontmatterField(advPath, "hat_started_at", timestamp())
+							startUnitIteration(advPath, currentHat)
+							sealIntentState(args.intent as string)
+							{
+								const sf = args.state_file as string | undefined
+								if (sf)
+									logSessionEvent(sf, {
+										event: "hat_auto_rejected_gate",
+										intent: args.intent,
+										stage: advStage,
+										unit: args.unit,
+										hat: currentHat,
+										bolt: currentBolt + 1,
+										failed_gates: gateResult.failures.map((f) => f.name),
+									})
+							}
+							emitTelemetry("haiku.hat.auto_reject_gate", {
+								intent: args.intent as string,
+								stage: advStage,
+								unit: args.unit as string,
+								hat: currentHat,
+								bolt: String(currentBolt + 1),
+								failed_gate_count: String(gateResult.failures.length),
+							})
+							const autoRejectGit = gitCommitState(
+								`haiku: auto-reject ${args.unit as string} on ${currentHat} (gate fail) — bolt ${currentBolt + 1}`,
+							)
+							syncSessionMetadata(
+								args.intent as string,
+								args.state_file as string | undefined,
+							)
+							const resultPath = resultPathFor({
+								unit: args.unit as string,
+								hat: currentHat,
+								bolt: currentBolt,
+							})
+							writeResultFile(resultPath, {
+								action: "continue_unit",
+								intent: args.intent,
+								stage: advStage,
+								unit: args.unit,
+								hat: currentHat,
+								bolt: currentBolt + 1,
+								reason,
+								_auto_rejected: "quality_gate_failed",
+								_failed_gates: gateResult.failures.map((f) => ({
+									name: f.name,
+									command: f.command,
+									exit_code: f.exit_code,
+									output: f.output.split("\n").slice(0, 5).join("\n"),
+								})),
+								_push_warning: pushWarning(autoRejectGit) || undefined,
+							})
+							return text(
+								`FSM Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nFSM Result: ${resultPath}\n\nDo NOT add prose or summary. Parent reads the file to drive the rebolt — gates failed (${gateResult.failures.map((f) => f.name).join(", ")}), bolt ${currentBolt + 1}/${MAX_UNIT_BOLTS}, retrying ${currentHat}.`,
+							)
+						}
+					}
+				}
+			}
+
 			if (isLastHat) {
 				// ── AUTO-COMPLETE: This was the last hat ──
 
@@ -5307,14 +5493,13 @@ export function handleStateTool(
 			// hatch. Must run before the scope gate so a repeatedly-rejected
 			// unit with a committed scope violation can still hit MAX_BOLTS
 			// and escalate to the user instead of deadlocking.
-			const MAX_BOLTS_FAIL = 5
-			if (currentBolt + 1 > MAX_BOLTS_FAIL) {
+			if (currentBolt + 1 > MAX_UNIT_BOLTS) {
 				return text(
 					JSON.stringify({
 						error: "max_bolts_exceeded",
 						bolt: currentBolt,
-						max: MAX_BOLTS_FAIL,
-						message: `Unit has exceeded ${MAX_BOLTS_FAIL} bolt iterations. Escalate to the user — this unit may need to be redesigned, split, or have a persistent scope violation manually reverted (\`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\` in the unit worktree).`,
+						max: MAX_UNIT_BOLTS,
+						message: `Unit has exceeded ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — this unit may need to be redesigned, split, or have a persistent scope violation manually reverted (\`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\` in the unit worktree).`,
 					}),
 				)
 			}
@@ -5338,7 +5523,7 @@ export function handleStateTool(
 					: null
 				if (scopeResult) {
 					// Persisted counter of scope-violation returns from reject_hat.
-					// Accumulates across calls so MAX_BOLTS_FAIL trips even when
+					// Accumulates across calls so MAX_UNIT_BOLTS trips even when
 					// the agent never clears the violation. Reset to 0 on any
 					// successful scope-clean reject (see below).
 					const { data: attemptsFm } = parseFrontmatter(
@@ -5350,13 +5535,13 @@ export function handleStateTool(
 					setFrontmatterField(failPath, "scope_reject_attempts", newAttempts)
 					sealIntentState(args.intent as string)
 
-					if (newAttempts >= MAX_BOLTS_FAIL) {
+					if (newAttempts >= MAX_UNIT_BOLTS) {
 						return text(
 							JSON.stringify({
 								error: "max_bolts_exceeded",
 								reason: "persistent_scope_violation",
 								attempts: newAttempts,
-								max: MAX_BOLTS_FAIL,
+								max: MAX_UNIT_BOLTS,
 								violations: scopeResult.violations,
 								message: `Unit has hit ${newAttempts} consecutive scope-violation rejects. Escalate to the user. The worktree still contains out-of-scope commits that must be reverted manually: \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\` in the unit worktree.`,
 							}),
@@ -5368,12 +5553,12 @@ export function handleStateTool(
 							error: "unit_scope_violation_on_reject",
 							bolt: currentBolt,
 							scope_reject_attempts: newAttempts,
-							max_attempts: MAX_BOLTS_FAIL,
+							max_attempts: MAX_UNIT_BOLTS,
 							violations: scopeResult.violations,
 							scope: scopeResult.scope,
 							message:
 								`Cannot reject hat: the unit worktree still contains ${scopeResult.violations.length} out-of-scope write(s) that must be reverted first. ` +
-								`Attempt ${newAttempts}/${MAX_BOLTS_FAIL} — after ${MAX_BOLTS_FAIL} scope-violation rejects, the FSM escalates to the user.\n\n` +
+								`Attempt ${newAttempts}/${MAX_UNIT_BOLTS} — after ${MAX_UNIT_BOLTS} scope-violation rejects, the FSM escalates to the user.\n\n` +
 								`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
 								`Revert the out-of-bounds commits in the unit worktree: drop all unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\`, or amend a single file out with \`git rm <file> && git commit --amend --no-edit\`, or \`git revert --no-edit <commit-sha>\` for a whole commit. NOTE: \`git checkout HEAD -- <file>\` is a NO-OP on committed files and will not clear the violation. After the revert, call reject_hat again.`,
 						}),
@@ -5493,15 +5678,14 @@ export function handleStateTool(
 			const { data } = parseFrontmatter(readFileSync(path, "utf8"))
 			const current = (data.bolt as number) || 0
 
-			// Enforce max bolt limit
-			const MAX_BOLTS_INC = 5
-			if (current + 1 > MAX_BOLTS_INC) {
+			// Enforce max bolt limit (module-level MAX_UNIT_BOLTS)
+			if (current + 1 > MAX_UNIT_BOLTS) {
 				return text(
 					JSON.stringify({
 						error: "max_bolts_exceeded",
 						bolt: current,
-						max: MAX_BOLTS_INC,
-						message: `Unit has exceeded ${MAX_BOLTS_INC} bolt iterations. Escalate to the user — this unit may need to be redesigned or split.`,
+						max: MAX_UNIT_BOLTS,
+						message: `Unit has exceeded ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — this unit may need to be redesigned or split.`,
 					}),
 				)
 			}
@@ -5516,6 +5700,141 @@ export function handleStateTool(
 				bolt: String(current + 1),
 			})
 			return text(String(current + 1))
+		}
+
+		case "haiku_decision_record": {
+			const intentArg = args.intent as string
+			const requestedStage = args.stage as string | undefined
+			const stage = requestedStage || resolveActiveStage(intentArg)
+			if (!stage) {
+				return text(
+					JSON.stringify({
+						error: "no_active_stage",
+						message:
+							"No stage specified and no active stage found on the intent.",
+					}),
+				)
+			}
+
+			const stageDir = join(intentDir(intentArg), "stages", stage)
+			const stateFile = join(stageDir, "state.json")
+			if (!existsSync(stateFile)) {
+				return text(
+					JSON.stringify({
+						error: "stage_state_missing",
+						message: `Stage state file not found: ${stateFile}`,
+					}),
+				)
+			}
+			const stageState = JSON.parse(readFileSync(stateFile, "utf8")) as Record<
+				string,
+				unknown
+			>
+
+			const noDecisions = args.no_decisions === true
+			const rationale = (args.rationale as string | undefined)?.trim()
+
+			if (noDecisions) {
+				if (!rationale || rationale.length < 10) {
+					return text(
+						JSON.stringify({
+							error: "rationale_required",
+							message:
+								"no_decisions=true requires a rationale of at least 10 characters explaining why no architectural decisions are in scope for this stage. State the convention or constraint that makes the work routine (e.g. 'all units follow the team's standard CRUD scaffolding; no architectural choices remain after design stage').",
+						}),
+					)
+				}
+				stageState.elaboration_no_decisions = true
+				stageState.elaboration_no_decisions_rationale = rationale
+				stageState.elaboration_no_decisions_at = timestamp()
+				writeJson(stateFile, stageState)
+				sealIntentState(intentArg)
+				emitTelemetry("haiku.elaboration.no_decisions_declared", {
+					intent: intentArg,
+					stage,
+				})
+				return text(
+					JSON.stringify({
+						ok: true,
+						intent: intentArg,
+						stage,
+						no_decisions: true,
+						rationale,
+					}),
+				)
+			}
+
+			const decision = (args.decision as string | undefined)?.trim()
+			const options = args.options as string[] | undefined
+			const choice = (args.choice as string | undefined)?.trim()
+			const source = args.source as string | undefined
+
+			if (!decision || !options || !choice || !source) {
+				return text(
+					JSON.stringify({
+						error: "missing_fields",
+						message:
+							"haiku_decision_record requires `decision`, `options`, `choice`, and `source` (or `no_decisions: true` with `rationale`).",
+					}),
+				)
+			}
+
+			if (!Array.isArray(options) || options.length < 2) {
+				return text(
+					JSON.stringify({
+						error: "options_too_few",
+						message:
+							"`options` must be an array of at least 2 concrete alternatives. A 'decision' with only one option isn't a decision — it's just doing the work. If the work is forced, use `no_decisions: true` with a rationale instead.",
+					}),
+				)
+			}
+
+			if (!options.includes(choice)) {
+				return text(
+					JSON.stringify({
+						error: "choice_not_in_options",
+						message: `\`choice\` must match one of the entries in \`options\`. Got choice=${JSON.stringify(choice)}; options=${JSON.stringify(options)}. The decision-log is provenance — recording a choice that wasn't in the presented alternatives corrupts the very property the log exists to preserve.`,
+					}),
+				)
+			}
+
+			if (source !== "user" && source !== "autonomous-acknowledged") {
+				return text(
+					JSON.stringify({
+						error: "invalid_source",
+						message:
+							'`source` must be "user" (the user picked between the options) or "autonomous-acknowledged" (you chose and surfaced the choice for the user to veto, and they did not push back).',
+					}),
+				)
+			}
+
+			const log = ((stageState.decision_log as unknown[]) || []) as Array<
+				Record<string, unknown>
+			>
+			log.push({
+				decision,
+				options,
+				choice,
+				source,
+				rationale: rationale || null,
+				recorded_at: timestamp(),
+			})
+			stageState.decision_log = log
+			writeJson(stateFile, stageState)
+			sealIntentState(intentArg)
+			emitTelemetry("haiku.decision.recorded", {
+				intent: intentArg,
+				stage,
+				source,
+			})
+			return text(
+				JSON.stringify({
+					ok: true,
+					intent: intentArg,
+					stage,
+					decision_count: log.length,
+				}),
+			)
 		}
 
 		// ── Knowledge ──

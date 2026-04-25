@@ -140,6 +140,9 @@ function resolveStudioFilePath(subpath: string): string | null {
 const FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"### FSM Contracts (REQUIRED — global framework rules)",
 	"",
+	"> ## ⟁ NO UNIT ADVANCES WITHOUT A VERIFICATION PATH.",
+	"> Every acceptance criterion pairs with a command, condition, or review-agent mandate that proves it. No exceptions.",
+	"",
 	"These rules apply to **every studio and every stage**. They are enforced by the framework, not by prose. Re-stating them in per-studio files is forbidden (they would drift).",
 	"",
 	"#### Unit file naming",
@@ -199,37 +202,158 @@ const FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"- `haiku_unit_advance_hat` / `haiku_unit_reject_hat` are called by subagents inside each hat; they return the result path the parent reads to drive the next action.",
 	"- `haiku_feedback` / `haiku_feedback_update` / `haiku_feedback_reject` / `haiku_feedback_delete` are the sole channels for logging and resolving review findings.",
 	"- Branch topology, merge semantics, worktree creation, and stage-branch enforcement are owned by the FSM — the agent does not `git checkout`, `git merge`, or create branches manually during stage work.",
+	"",
+	"#### Unit content quality (validated at advance)",
+	"",
+	"- Placeholder strings are forbidden in unit specs and frontmatter. The FSM rejects unit advancement when any of these appear: `TBD`, `tbd`, `similar to`, `add error handling`, `etc.`, or a literal `...` placeholder. Either write the concrete value or surface it as a question.",
+	"- Every acceptance criterion MUST be testable: include the command or condition that proves it. `tests pass` is rejected; the verify-command must be concrete and exit-code-driven (e.g. `pnpm test --run path/to/file` exits 0, or `pytest tests/foo.py` exits 0, or `cargo test --test bar` exits 0 — match the project's actual stack).",
+	"- Criteria are drafted as **pairs**: the goal-prose lives in the unit body under `## Completion criteria`; the executable check lives in the unit's `quality_gates:` frontmatter. Two coupled fields, written together at elaboration time. Per-stage ELABORATION.md files supply domain-specific examples; this contract supplies the rule.",
+	"- A criterion that cannot be expressed as a command/condition is a spec gap — surface it (`ask_user_visual_question` or reject the elaborate phase), do not paper over with prose.",
+	"",
+	"##### Specific-but-unverifiable criteria (a common failure mode)",
+	"",
+	"Criteria that *sound* concrete but have no executable check produce specs that look complete but the FSM cannot enforce. Watch for these shapes — they apply across every studio:",
+	"",
+	'- "X is well-organized" / "Output is clean" — no command proves "well-organized"',
+	'- "Performance is acceptable" / "Process is fast" — needs a numeric threshold AND a measurement command (e.g. `p95 < 200ms`)',
+	'- "X is user-friendly" / "Output is professional" — needs a review pass or a literal allow-list of acceptable phrasings',
+	'- "Coverage is comprehensive" / "Treatment is thorough" — needs a structural check counting items, not a subjective judgment',
+	"",
+	"Per-studio ELABORATION.md files may add domain-specific bad-unverifiable examples (e.g. design's *Visual hierarchy is clear*, product's *Behavior is intuitive*). The ones above are universal; do not restate them in studio files.",
+	"",
+	"#### Red flags (STOP and re-read this contract if you catch yourself thinking)",
+	"",
+	"- \"I'll write `TBD` for the parts I'm unsure about\" — placeholders block advancement; write the concrete value or surface it as a question.",
+	'- "I\'ll add `similar to unit-XX` to save typing" — copy the relevant content explicitly; cross-references rot when the source changes.',
+	'- "The criteria are obvious; I\'ll keep them prose" — every criterion needs a command or condition that proves it.',
+	'- "This unit can be huge; the executor will figure it out" — units that take more than one bolt to scope are decomposition failures, not execution failures.',
+	'- "I\'ll batch the missing info as assumptions in the spec" — assumptions become silent regressions; ask the user instead.',
 ].join("\n")
 
 const FSM_CONTRACTS_EXECUTE_BLOCK = [
 	"### FSM Contracts (REQUIRED — reminder during execute)",
 	"",
+	"> ## ⟁ NO ADVANCE WITHOUT VERIFICATION.",
+	"> Run the gate command, read the exit code, *then* call `haiku_unit_advance_hat`. Hedged advances burn bolts on broken work.",
+	"",
 	"- The agent operates inside ONE hat at a time. Each hat runs in a fresh subagent with the hat's mandate loaded from `hats/{hat}.md`. Hat context does not leak across hats — that isolation is the framework's defense against self-reinforcing errors.",
 	"- After the hat's work is done, the subagent calls `haiku_unit_advance_hat` (success) or `haiku_unit_reject_hat { reason }` (failure). The FSM writes the result; the subagent does not.",
-	"- Quality gates run automatically at `haiku_unit_advance_hat`. A failing gate blocks the advance with a concrete error — fix the failure, don't retry the tool call.",
+	"- Quality gates run automatically at the end of the hat sequence (last hat's `haiku_unit_advance_hat`). A failing gate at unit completion blocks the advance with a concrete error — fix the failure, don't retry the tool call.",
+	"- **Per-hat opt-in gates.** A hat may declare `run_quality_gates: true` in its frontmatter. When it does, gates run on THAT hat's `advance_hat` (not just the last hat's), AND failure auto-rejects: bolt counter increments, the same hat retries, no agent decision required. Bolt cap (5) still applies. This is the framework's way of saying \"this hat produces verifiable artifacts; gates are part of its definition of done.\"",
 	"- Cross-unit writes within a stage are forbidden without explicit `inputs:` / `outputs:` declarations on the unit.",
+	"",
+	"#### Verification before advance",
+	"",
+	"- Before calling `haiku_unit_advance_hat`, RUN the gate command(s) and READ the exit code. Do not advance on the assumption that the build/tests/lints pass — if your hat declares `run_quality_gates: true`, the FSM auto-rejects on gate failure and burns one of your 5 bolts.",
+	"- Your one-line return summary MUST contain a verb of completed action (`edited X`, `added Y test`, `updated Z`) and ZERO hedging words: `should`, `seems`, `probably`, `might`, `looks like`. Hedging means you are not sure — call `haiku_unit_reject_hat` with that uncertainty as the reason instead of advancing with hedged language.",
+	"",
+	"#### Red flags (STOP and re-read this contract if you catch yourself thinking)",
+	"",
+	'- "I\'ll skip the gate just this once" — the gate is the contract; bypass is a scope violation.',
+	"- \"I'll touch the related file too while I'm here\" — out-of-scope edits create regressions other hats cannot see; if it's broken, log it via the next review.",
+	"- **Did you re-run the gate command and read the exit code 0?** If not, you don't know whether the build/tests/lints actually pass — \"probably\" isn't evidence. Re-run before calling `haiku_unit_advance_hat`.",
+	"- \"Another hat's responsibility overlaps with mine, I'll cover it\" — stay in your lane; another hat will catch what you skip.",
+	'- "The user said go fast, so I\'ll abbreviate the work" — speed comes from fewer rejections, not skipped steps.',
 ].join("\n")
 
 const FSM_CONTRACTS_REVIEW_BLOCK = [
 	"### FSM Contracts (REQUIRED — reminder during review)",
+	"",
+	"> ## ⟁ REVIEWERS LOG, NEVER EDIT.",
+	"> Your only output channel is `haiku_feedback`. Any file write is a scope violation, regardless of how trivial the fix looks.",
 	"",
 	"- Review agents MUST NOT write, edit, or create any file. Their ONLY output channel is `haiku_feedback`. Any file write is a scope violation.",
 	"- Conditional review: each agent's `applies_to:` frontmatter (glob list) scopes it to matching output kinds. The FSM filters agents whose scope doesn't match; agents without `applies_to:` always run.",
 	'- Findings with concrete reproducible claims (file:line + gate command + proposed fix) accelerate resolution. Vague concerns ("looks wrong") are less actionable — prefer concrete.',
 	"- **Scope routing is mandatory.** If a finding's root cause is in a different stage than the one being reviewed (e.g. a design reviewer notices an inception assumption is wrong), pass `upstream_stage: \"<stage-name>\"` to `haiku_feedback`. The FSM surfaces cross-stage findings to the human rather than routing them through this stage's fix loop — the wrong hats cannot fix a different stage's artifacts.",
 	`- A stage's retry budget is TIGHT: agent-invoked rejection cycles are capped at ${MAX_STAGE_ITERATIONS} iterations (\`MAX_STAGE_ITERATIONS=${MAX_STAGE_ITERATIONS}\`). Beyond that, the framework escalates to the human — repeated rejections indicate a spec problem the pre-execute review should have caught, and the correct response is to fix the plan, not keep building against a broken plan.`,
+	"",
+	"#### Red flags (STOP and re-read this contract if you catch yourself thinking)",
+	"",
+	'- "This finding is trivial, I\'ll just fix it myself" — file write = scope violation; log it as feedback no matter how small.',
+	"- \"The mandate doesn't quite cover this, but it's clearly wrong\" — if it's in your mandate's spirit, log it; if not, leave it for another agent.",
+	"- **Did you open the artifact at HEAD, or are you reading the diff alone?** The diff lies about deletions, renames, and unchanged-but-relevant context. Read both — the diff for what changed, the artifact for the surrounding code that constrains the change.",
+	'- "I\'ll batch related concerns into one finding" — atomic findings let the fix loop dispatch in parallel; merged findings serialize.',
+	"- \"This finding's root cause is upstream, I'll route it through this stage's hats anyway\" — set `upstream_stage:` so the framework surfaces it; this stage's hats cannot fix the wrong stage's artifacts.",
+	"- \"It's not on my checklist, so I'll skip it\" — if your mandate has `interpretation: lens`, the checklist is examples; the mandate is the lens. In-spirit findings count.",
+	'- "I was dispatched, I should find something" — out-of-mandate findings are noise; zero findings is a valid result for a clean review.',
+	'- "It passes the literal check but it\'s clearly wrong" — the spirit-violation IS the finding. State the spirit-violation explicitly in the body.',
 ].join("\n")
 
 const FSM_CONTRACTS_FIX_LOOP_BLOCK = [
 	"### FSM Contracts (REQUIRED — reminder during fix loop)",
 	"",
+	"> ## ⟁ NO FIX WITHOUT INVESTIGATION.",
+	"> Read the artifact, verify the finding, state the gap *before* editing. Bolts spent on guesses don't come back.",
+	"",
 	"- The fix loop runs the stage's `fix_hats:` sequence against every eligible pending finding in parallel. Each finding's hat chain is serial (e.g. designer → feedback-assessor); chains run in parallel across findings. The feedback file IS the scope — do NOT synthesize a new unit spec.",
 	'- Every hat in the sequence reads the feedback body + the flagged artifact path and acts within its mandate. The sequence typically ends with a `feedback-assessor` hat that independently verifies the fix and, if satisfied, calls `haiku_feedback_update { status: "closed", closed_by: "fix-loop:<bolt-id>" }`.',
 	"- If the feedback-assessor is NOT satisfied, it leaves the feedback open (no `closed_by`, no status change). The FSM increments the bolt counter and may dispatch another loop, up to 3 bolts per finding. Exceeding 3 escalates to the human.",
 	"- A fix-loop hat is NOT a unit hat. Do NOT call `haiku_unit_advance_hat` or `haiku_unit_reject_hat` — those are for unit execution. The fix-loop is orchestrated by the parent; each fix hat completes its work and returns, and the parent calls `haiku_run_next` after every wave completes to advance.",
-	'- If a fix hat discovers the finding is actually invalid or already addressed, call `haiku_feedback_reject { reason: "<concrete reason>" }` instead of editing artifacts. A stale finding should be rejected, not silently dropped.',
 	"- Parallel chains may edit the same artifact concurrently. Each final hat validates closure independently — a chain whose fix was clobbered by another chain will leave its finding open, and the next bolt will retry. Budget is spent, not lost.",
+	"",
+	"#### Per-hat action rules live in the subagent prompts",
+	"",
+	"This contract covers dispatch coordination, the bolt cap, and the per-finding scoping rule. The action-rules each fix-mode hat follows during its own work — investigate root cause before editing, verify the finding against the artifact before fixing (and `haiku_feedback_reject` if the finding is stale or invalid), no hedging in summaries, no out-of-scope edits — live as numbered steps in the per-hat subagent prompts emitted below. Every fix-mode hat reads its own rules; this block exists so the dispatching agent understands the contract its subagents will follow.",
 ].join("\n")
+
+/**
+ * Read the `interpretation:` field from a hat-like frontmatter file.
+ * Returns "lens" | "strict" | undefined (unset).
+ *
+ * Universal field on hat/review-agent/fix-hat frontmatter. Default behavior
+ * (unset) preserves the prior dispatch prompt — no silent migration.
+ */
+function readInterpretation(
+	filePath: string | undefined,
+): "lens" | "strict" | undefined {
+	if (!filePath || !existsSync(filePath)) return undefined
+	try {
+		const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
+		const v = data.interpretation
+		if (v === "lens" || v === "strict") return v
+		return undefined
+	} catch {
+		return undefined
+	}
+}
+
+/**
+ * Build the interpretive block injected into a dispatch prompt right after
+ * the agent's mandate is inlined. Returns "" when interpretation is unset
+ * (no block emitted) so existing prompts stay byte-stable for hats/agents
+ * that don't opt in.
+ *
+ * Two modes:
+ *   - "lens" — mandate is a lens, not a checklist. In-spirit findings count;
+ *     out-of-mandate findings do not. Default for review-style work.
+ *   - "strict" — mandate is the literal checklist. Findings MUST tie to a
+ *     named item. For compliance / scope-limited reviews where false
+ *     positives carry weight.
+ */
+function buildInterpretationBlock(mode: "lens" | "strict" | undefined): string {
+	if (!mode) return ""
+	if (mode === "lens") {
+		return [
+			"## Mandate interpretation: LENS",
+			"",
+			"Your mandate above is a **lens**, not a checklist.",
+			"",
+			"- **In-spirit findings count.** A finding obviously within your mandate's lens but not listed as an explicit checklist item is IN scope. The mandate names representative concerns, not the exhaustive set.",
+			"- **Out-of-mandate findings are NOT in scope, even if visible.** If your glob matched a file but the change has nothing to do with your lens, return zero findings. Inventing findings to justify dispatch is a scope violation, not thoroughness.",
+			"- **Letter and spirit are not separable.** A change that technically passes a literal check but obviously violates what the check exists to enforce IS a finding. State the spirit-violation explicitly in the body so the fix loop knows what to address.",
+		].join("\n")
+	}
+	return [
+		"## Mandate interpretation: STRICT",
+		"",
+		"Your mandate above is a **literal checklist**.",
+		"",
+		'- Findings MUST be tied to a specific named item in your mandate. Do NOT extend to "in-spirit" issues — for this review, false positives carry the same weight as false negatives.',
+		"- If you see something concerning outside the checklist, do NOT log it through this agent. Log it through a different review agent if one exists, or surface it as an out-of-scope observation in your summary.",
+		"- Cite the specific checklist item each finding maps to in the `body:` field so the fix loop can verify scope.",
+	].join("\n")
+}
 
 /**
  * Render the parent's concurrency-capped dispatch discipline for a parallel
@@ -2968,15 +3092,27 @@ export function runNext(slug: string): OrchestratorAction {
 			// All feedback addressed + units validated — fall through to normal elaborate flow
 		}
 
-		// Enforce collaborative elaboration — minimum turn count
-		if (elaborationMode === "collaborative" && updatedTurns < 3) {
-			return {
-				action: "elaboration_insufficient",
-				intent: slug,
-				stage: currentStage,
-				turns: updatedTurns,
-				required: 3,
-				message: `Collaborative elaboration requires engaging the user. ${updatedTurns} turn(s) so far — engage the user at least ${3 - updatedTurns} more time(s) before finalizing units.`,
+		// Enforce collaborative elaboration — measure decisions, not turns.
+		//
+		// The prior turn-count gate (`elaboration_turns < 3`) was Goodhart-prone:
+		// agents padded with low-information questions to satisfy the counter.
+		// The new gate measures what we actually want — knowledge-unification
+		// moments where the human's input shaped the plan, OR an honest
+		// declaration that no architectural decisions are in scope. The
+		// `elaboration_turns` counter still ticks for telemetry, but it no
+		// longer gates advancement.
+		if (elaborationMode === "collaborative") {
+			const decisionLog = (stageState.decision_log as unknown[]) || []
+			const noDecisionsDeclared = stageState.elaboration_no_decisions === true
+			if (decisionLog.length === 0 && !noDecisionsDeclared) {
+				return {
+					action: "elaboration_insufficient",
+					intent: slug,
+					stage: currentStage,
+					turns: updatedTurns,
+					decisions_recorded: decisionLog.length,
+					message: `Collaborative elaboration advances when (a) at least one decision has been recorded in the stage's \`decision_log\` via \`haiku_decision_record\`, OR (b) you have honestly declared that no architectural decisions are in scope via \`haiku_decision_record { no_decisions: true, rationale: "..." }\`. ${updatedTurns} turn(s) so far, 0 decisions recorded. A decision is a real architectural choice between concrete options — either user-resolved (the user picked) or autonomous-acknowledged (you chose and surfaced the choice for veto-style approval, the user did not push back). Padding questions don't count. If the work is genuinely conventional with no choices to make, declare no_decisions=true with a rationale.`,
+				}
 			}
 		}
 
@@ -5900,13 +6036,20 @@ function buildRunInstructions(
 					)
 					lines.push(
 						"",
+						"## Scope (STRICT)",
+						"",
+						`- You research **only** the axis defined by the "${a.name}" template. Other discovery artifacts in this stage are being researched by **sibling subagents in parallel** — do NOT investigate adjacent domains, do NOT pre-empt their work, do NOT leave notes for them.`,
+						"- If you encounter information that belongs primarily in a sibling artifact, do NOT write it to the sibling's file path — that creates merge conflicts at the integrator step. Note it briefly as a *context boundary* in your own artifact (e.g. *\"depends on auth model — see security artifact\"*) and let the sibling agent author the substance. Cross-cutting constraints that genuinely shape multiple axes (security boundaries, hard dependencies) should be noted in your artifact too, in the boundary section, so they're not lost if the sibling misses them.",
+						"- Your write path is ONE file at the template's `location:`. Any other file write — sibling artifacts, intent.md, unit specs, knowledge files outside your `location:` — is a scope violation.",
+						"- Do NOT attempt to summarize or synthesize across sibling artifacts. The elaborate phase does that on the next FSM tick, after all discovery merges back.",
+						"",
 						"## Instructions",
 						"",
 						"1. Research the problem space along the axis defined by your template.",
 						"2. Use the template's Content Guide as the document structure.",
 						"3. Meet the template's Quality Signals as your acceptance bar.",
 						"4. Write the populated document to the stage's discovery path as defined in the template's `location:` frontmatter above — **inside your isolation worktree** when one is allocated. **This is your ONLY write path** — any file written elsewhere is a scope violation.",
-						"5. Be thorough — this artifact informs all downstream work.",
+						"5. Be thorough on YOUR axis — this artifact informs all downstream work. Thoroughness within scope is the goal; thoroughness across scope is a violation.",
 					)
 					fanOutText += `${emitSubagentDispatchBlock({
 						unit: "discovery",
@@ -5953,35 +6096,73 @@ function buildRunInstructions(
 				)
 			}
 
+			// Approach selection — present 2-3 approaches when there is a real
+			// architectural choice in front of the agent. Iteration === 1 only
+			// (iter > 1 paths returned earlier). The instruction is permissive:
+			// stages with a single forced approach skip it after stating why.
+			sections.push(
+				[
+					"## Approach Selection (before decomposing units)",
+					"",
+					"If this stage has a meaningful architectural choice in front of it (e.g. *which* data model, *which* auth strategy, *which* deployment topology), pause and articulate **2–3 approaches** before drafting units. Each approach gets:",
+					"",
+					"- one-sentence description of what's built and how",
+					"- the tradeoff axis the choice turns on (speed/safety, cost/flexibility, reversibility, etc.)",
+					"- a recommendation with one-sentence justification",
+					"",
+					elaboration === "collaborative"
+						? `**In collaborative mode:** Use \`ask_user_visual_question\` to let the user pick. Record the resolved choice via \`haiku_decision_record\` (source: \`user\`). Only after the user picks (or you've stated explicitly that no architectural choice exists at this stage) should you draft units.`
+						: "**In autonomous mode:** Choose the approach independently and state your rationale in one sentence. Do NOT prompt the user — autonomous mode means the agent decides. If the choice has cross-cutting risk, surface it inline in the elaborate output so a reviewer can challenge it later.",
+					"",
+					"**Skip this only when:** discovery has already narrowed to a single forced approach, OR the stage's work is mechanical (no architectural choice — e.g. a runbook against a fixed deployment pipeline). In that case, state the forced approach in one sentence in the elaborate output and proceed to unit decomposition.",
+					"",
+					"**Do NOT** dump three full design docs as units and ask the reviewer to pick later. The choice is upstream of decomposition; commit to one approach, then decompose it.",
+				].join("\n"),
+			)
+
 			sections.push(
 				`## Scope\n\nAll units MUST be within this stage's domain. Work belonging to other stages goes in the discovery document, not in units.\n\n## Mechanics\n\n${
 					elaboration === "collaborative"
-						? "Mode: **collaborative** — you MUST engage the user iteratively before finalizing.\n\n" +
-							"## MANDATORY: Use tools for questions — NEVER plain text for structured choices\n\n" +
-							"When you have questions for the user, you MUST use the correct tool:\n\n" +
-							"| Question type | Tool | Example |\n" +
-							"|---|---|---|\n" +
-							`| Scope decisions, tradeoffs, A/B/C choices | \`AskUserQuestion\` with options[] | "Should we support X or Y?" |\n` +
-							"| Specs, comparisons, detailed options (markdown) | `ask_user_visual_question` MCP tool | Domain model review, architecture options |\n" +
-							"| Visual artifacts, wireframes, designs | `ask_user_visual_question` with image_paths | Side-by-side design comparison |\n" +
-							"| Design direction with previews | `pick_design_direction` MCP tool | Wireframe variants |\n" +
-							`| Simple open-ended clarification (no known options) | Conversation text | "Tell me more about the use case" |\n\n` +
-							"### ALWAYS provide pre-selected options\n\n" +
-							"When using `AskUserQuestion`, you MUST provide an `options` array with concrete choices the user can pick from. " +
-							"You already know the domain — translate your knowledge into selectable options instead of forcing the user to type freeform answers. " +
-							'Include an "Other (let me specify)" option when the list may not be exhaustive.\n\n' +
-							'**Good:** `AskUserQuestion({ question: "Which auth strategy?", options: ["OAuth 2.0 + PKCE", "Magic link (passwordless)", "SSO via SAML", "Other (let me specify)"] })`\n' +
-							'**Bad:** Typing "Which auth strategy should we use? We could do OAuth, magic links, or SSO..." as plain text.\n\n' +
-							"### One question per tool call — break up compound questions\n\n" +
-							"If you have multiple independent questions (e.g., auth strategy AND database choice AND caching layer), " +
-							"do NOT combine them into a single long message. Instead:\n" +
-							"- Use **separate `AskUserQuestion` calls** for each independent decision, OR\n" +
-							"- Use **one `ask_user_visual_question` call** with multiple entries in the `questions[]` array (each with its own options) when the decisions are related and benefit from being seen together\n\n" +
-							"Never dump multiple questions as numbered plain-text paragraphs.\n\n" +
-							`**Violation:** Outputting numbered questions, option lists, or "A) ... B) ... C) ..." as conversation text. ` +
-							"If you catch yourself typing options inline, STOP and use `AskUserQuestion` with an `options` array instead.\n\n"
-						: "Mode: **autonomous** — elaborate independently. When you DO need user input (blockers, ambiguity), " +
-							"use `AskUserQuestion` with pre-selected `options[]` — never plain-text option lists.\n\n"
+						? "Mode: **collaborative** — knowledge unification with the user happens at decision points, not as ritual. (H·AI·K·U = Human + AI Knowledge **Unification**.)\n\n" +
+							"### What collaboration means here\n\n" +
+							"This stage advances when at least one **decision** is recorded in the stage's `decision_log` (via `haiku_decision_record`), OR you honestly declare `no_decisions: true` with a rationale. A decision is a real architectural choice between concrete options — not a question for the sake of asking. Two valid sources:\n\n" +
+							'- **`source: "user"`** — you presented options the user couldn\'t reasonably resolve from the codebase, and they picked.\n' +
+							'- **`source: "autonomous-acknowledged"`** — you made the call from clear conventions and surfaced the choice for veto-style approval, and the user did not push back.\n\n' +
+							"Both count. The user feels meaningfully involved when they shape real decisions OR review and accept your reasoned choices — not when they're interrogated about defaults.\n\n" +
+							"### Quality bar for user-facing questions\n\n" +
+							"Every question to the user MUST clear this bar before being asked:\n\n" +
+							"- **Real decision**: it can't be answered by reading the codebase, manifest files, prior stages' outputs, or existing conventions.\n" +
+							'- **≥2 concrete options**: you\'ve articulated the alternatives. *"Should we add tests?"* fails (one-option default). *"Cypress or Playwright?"* passes.\n' +
+							"- **Tradeoff axis**: each option carries a known tradeoff (speed/safety, cost/flexibility, reversibility, etc.). If all options are equivalent, the choice doesn't need user input.\n" +
+							'- **Records as a decision**: after the user picks, call `haiku_decision_record { decision, options, choice, source: "user", rationale? }`.\n\n' +
+							"#### Banned question patterns (do NOT ask these)\n\n" +
+							'- **Yes/no on defaults**: *"Should we follow your existing patterns?"* (obvious yes), *"Want tests?"* (covered by quality gates).\n' +
+							'- **Codebase-answerable**: *"What test runner do you use?"* — read `package.json` / `pyproject.toml` / `Cargo.toml`.\n' +
+							'- **Permission-asking**: *"Is it OK if I extend the User model?"* — make the choice and surface it autonomously instead.\n' +
+							'- **Confirmation-seeking**: *"Does this approach sound good?"* with no concrete alternatives to compare against.\n\n' +
+							"### One question at a time (NEVER batch)\n\n" +
+							"Even when you have multiple questions, ask ONE, wait for the answer, then ask the next. Cognition breaks down for both sides if a deeper conversation has to happen on each — batched questions get half-answers and lose context when any one branches.\n\n" +
+							'- **DO**: `AskUserQuestion({ question: "Auth strategy?", options: [...] })` → wait → `AskUserQuestion({ question: "Database?", options: [...] })`.\n' +
+							"- **DO NOT**: batch questions in a single `ask_user_visual_question` call with multiple entries in `questions[]`. The visual layout doesn't help if any one branches into a deeper conversation.\n" +
+							'- **DO NOT**: dump numbered questions as plain text (*"1. Auth? 2. Database? 3. Caching?"*). Use the structured tool, one at a time.\n\n' +
+							"### Surface autonomous decisions for veto-style approval\n\n" +
+							"For decisions you can resolve from the codebase or clear conventions, don't ask — **decide and surface**:\n\n" +
+							'1. State the decision: *"I\'m using `<library X>` for HTTP because `package.json` already includes it."*\n' +
+							'2. State the alternative considered: *"(Considered `<library Y>`, but no existing usage.)"*\n' +
+							"3. Invite veto: *\"Reply 'change' if you'd prefer otherwise.\"*\n" +
+							'4. If no pushback by the next turn, call `haiku_decision_record { source: "autonomous-acknowledged", ... }`.\n\n' +
+							"Most decisions in a routine stage should be autonomous-acknowledged; only the genuinely-unresolvable ones earn a user-facing question. The user gets agency without busy-work.\n\n" +
+							"### Honest no-decisions declaration\n\n" +
+							'If the work is purely conventional with NO architectural choices in scope (a doc update following an established style guide; a routine ops runbook against a fixed pipeline), call `haiku_decision_record { intent: "...", no_decisions: true, rationale: "<why this stage has no choices>" }` and proceed. **Faking a decision to satisfy the gate is the failure mode this design exists to prevent** — be honest.\n\n' +
+							"### Tools for asking (when a question is genuinely needed)\n\n" +
+							"| Question type | Tool |\n" +
+							"|---|---|\n" +
+							"| Scope decisions, tradeoffs, A/B/C choices | `AskUserQuestion` with `options[]` |\n" +
+							"| Specs, comparisons, detailed options (markdown) | `ask_user_visual_question` MCP tool |\n" +
+							"| Visual artifacts, wireframes, designs | `ask_user_visual_question` with `image_paths` |\n" +
+							"| Design direction with previews | `pick_design_direction` MCP tool |\n\n" +
+							'Always provide pre-selected `options[]`. Include an *"Other (let me specify)"* option when the list may not be exhaustive. Never dump option lists as plain conversation text.\n\n'
+						: "Mode: **autonomous** — elaborate independently. When you DO need user input (genuine blockers, ambiguity that the codebase can't resolve), use `AskUserQuestion` with pre-selected `options[]` — never plain-text option lists. Autonomous mode does not require `haiku_decision_record` calls; the gate only enforces decisions in collaborative mode.\n\n"
 				}**Elaboration produces the PLAN, not the deliverables:**\n1. Research the problem space and write discovery artifacts to \`knowledge/\`\n2. Define units with scope, completion criteria, and dependencies — NOT the actual work product\n   - A unit spec says WHAT will be produced and HOW to verify it\n   - The execution phase produces the actual deliverables\n   - Do NOT write full specs, schemas, or implementations during elaboration\n3. Write unit files to \`.haiku/intents/${slug}/stages/${stage}/units/\`\n4. Call \`haiku_run_next { intent: "${slug}" }\` — the orchestrator validates and opens the review gate\n\n**Unit file naming convention (REQUIRED):**\nFiles MUST be named \`unit-NN-slug.md\` where:\n- \`NN\` is a zero-padded sequence number (01, 02, 03...)\n- \`slug\` is a kebab-case descriptor (e.g., \`user-auth\`, \`data-model\`)\n- Example: \`unit-01-data-model.md\`, \`unit-02-api-endpoints.md\`\n\nFiles that don't match this pattern will not appear in the review UI and will block advancement.`,
 			)
 
@@ -6228,7 +6409,11 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			if (stagePath) prompt.push(inlineFile(stagePath, "Stage scope"))
 			if (executionPath)
 				prompt.push(inlineFile(executionPath, "Execute-phase focus"))
-			if (hatPath) prompt.push(inlineFile(hatPath, `Hat: ${hat}`))
+			if (hatPath) {
+				prompt.push(inlineFile(hatPath, `Hat: ${hat}`))
+				const hatInterp = buildInterpretationBlock(readInterpretation(hatPath))
+				if (hatInterp) prompt.push("", hatInterp)
+			}
 			prompt.push(inlineFile(unitAbsPath, `Unit spec: ${unit}`))
 			if (outputsDir)
 				prompt.push(`- Stage output templates — \`${outputsDir}/\``)
@@ -6494,7 +6679,13 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					if (stagePath) prompt.push(inlineFile(stagePath, "Stage scope"))
 					if (executionPath)
 						prompt.push(inlineFile(executionPath, "Execute-phase focus"))
-					if (hatPath) prompt.push(inlineFile(hatPath, `Hat: ${firstHat}`))
+					if (hatPath) {
+						prompt.push(inlineFile(hatPath, `Hat: ${firstHat}`))
+						const hatInterp = buildInterpretationBlock(
+							readInterpretation(hatPath),
+						)
+						if (hatInterp) prompt.push("", hatInterp)
+					}
 					prompt.push(inlineFile(unitAbsPath, `Unit spec: ${unitName}`))
 					if (outputsDir)
 						prompt.push(`- Stage output templates — \`${outputsDir}/\``)
@@ -6806,7 +6997,13 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 				if (stagePath) prompt.push(inlineFile(stagePath, "Stage scope"))
 				if (executionPath)
 					prompt.push(inlineFile(executionPath, "Execute-phase focus"))
-				if (hatPath) prompt.push(inlineFile(hatPath, `Hat: ${hat}`))
+				if (hatPath) {
+					prompt.push(inlineFile(hatPath, `Hat: ${hat}`))
+					const hatInterp = buildInterpretationBlock(
+						readInterpretation(hatPath),
+					)
+					if (hatInterp) prompt.push("", hatInterp)
+				}
 				prompt.push(inlineFile(unitAbsPath, `Unit spec: ${unitName}`))
 				if (outputsDir)
 					prompt.push(`- Stage output templates — \`${outputsDir}/\``)
@@ -6956,6 +7153,8 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					"### Review Agent Fan-Out (REQUIRED)\n\n**Spawn exactly one subagent per review agent in parallel — no duplicates.** Each `<subagent>` block below is a complete prompt — relay verbatim. Prompts are path-based so the parent context stays small.\n",
 				)
 				for (const [name, mandatePath] of Object.entries(agentPaths)) {
+					const interpretation = readInterpretation(mandatePath)
+					const interpretiveBlock = buildInterpretationBlock(interpretation)
 					const reviewLines: string[] = [
 						`You are the **${name}** review agent for stage "${stage}" of intent "${slug}".`,
 						"",
@@ -6963,6 +7162,11 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 						"Your review mandate is embedded in this prompt.",
 						"",
 						inlineFile(mandatePath, `Mandate: ${name}`),
+					]
+					if (interpretiveBlock) {
+						reviewLines.push("", interpretiveBlock)
+					}
+					reviewLines.push(
 						"",
 						"## Write scope (STRICT)",
 						"**You MUST NOT write, edit, or create any file.** Your ONLY output channel is the `haiku_feedback` MCP tool. If you're tempted to fix an issue yourself, log it as feedback instead. Any file write is a scope violation.",
@@ -6970,7 +7174,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 						"## Instructions",
 						"",
 						"1. Use your mandate (above) as the lens for this review.",
-					]
+					)
 					let reviewStep = 2
 					if (isGitRepo()) {
 						reviewLines.push(
@@ -7147,6 +7351,10 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					}
 					if (hatPath && existsSync(hatPath)) {
 						promptLines.push(inlineFile(hatPath, `Hat mandate: ${hat}`))
+						const fixInterp = buildInterpretationBlock(
+							readInterpretation(hatPath),
+						)
+						if (fixInterp) promptLines.push("", fixInterp)
 					}
 					// Inline the feedback body so the subagent reads the finding
 					// directly from its prompt — no fan-out read required.
@@ -7178,15 +7386,22 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					}
 					if (isLast) {
 						promptLines.push(
-							`${step++}. **Assess closure independently.** Read the edited artifact(s) and decide, through the lens of the finding, whether the fix resolves the finding as written.`,
-							`${step++}. If resolved: call \`haiku_feedback_update { intent: "${slug}", stage: "${fixStage}", feedback_id: "${fbId}", status: "closed", closed_by: "fix-loop:${fbId}:bolt-${fixBolt}" }\`.`,
-							`${step++}. If NOT resolved: leave the feedback status as-is (the FSM will count this bolt and decide whether to dispatch another).`,
-							`${step++}. If the finding is actually invalid (e.g. the reviewer misread the artifact): call \`haiku_feedback_reject { intent: "${slug}", stage: "${fixStage}", feedback_id: "${fbId}", reason: "<concrete reason>" }\` INSTEAD of closing it.`,
-							`${step++}. Return a one-line summary: \`fix-assessor: closed | open | rejected — <reason>\`.`,
+							`${step++}. **Assess closure (two-stage, both must pass).**`,
+							`   - **Stage A — Spec match.** Read the edited artifact(s) and the feedback body. Does the edit make the finding's requirement true as written? A partial gesture is not a fix.`,
+							`   - **Stage B — Quality / regression.** Inspect the diff (\`git show HEAD\`). Does the edit introduce a regression — broken neighboring behavior, scope creep into unrelated files, banned patterns, or violations of the stage's quality rules?`,
+							`${step++}. **Decide:**`,
+							`   - **A passes AND B passes** → call \`haiku_feedback_update { intent: "${slug}", stage: "${fixStage}", feedback_id: "${fbId}", status: "closed", closed_by: "fix-loop:${fbId}:bolt-${fixBolt}" }\`.`,
+							`   - **A fails** → leave the feedback status as-is (the FSM counts this bolt and may dispatch another).`,
+							`   - **A passes, B fails** → leave the feedback open AND log the regression as a new finding via \`haiku_feedback({ intent: "${slug}", stage: "${fixStage}", title: "<regression from fix-loop:${fbId}>", body: "<diff hunk + concrete impact>", origin: "adversarial-review", author: "fix-assessor" })\`. Do NOT close the original — the fix is not complete until both stages pass.`,
+							`   - **Finding is invalid** (reviewer misread the artifact) → call \`haiku_feedback_reject { intent: "${slug}", stage: "${fixStage}", feedback_id: "${fbId}", reason: "<concrete reason>" }\` INSTEAD of closing.`,
+							`${step++}. Return a one-line summary: \`fix-assessor: closed | open | rejected — <reason>\`. Use a verb of completed action; zero hedging words (\`should\`, \`seems\`, \`probably\`).`,
 						)
 					} else {
 						promptLines.push(
-							`${step++}. Apply the fix within your hat's mandate. Save changes. Return a one-line summary of what you changed.`,
+							`${step++}. **Verify the finding before editing.** Read the flagged artifact at the file:line refs in the feedback body. Three failure modes route to \`haiku_feedback_reject\` instead of an edit:\n   - **Stale / misread**: the file no longer matches what the reviewer flagged, or the citation points at the wrong location → \`haiku_feedback_reject { intent: "${slug}", stage: "${fixStage}", feedback_id: "${fbId}", reason: "stale — <what changed>" }\` or \`"misread — <what they cited vs. what's there>"\`.\n   - **Ambiguous / unclear** — *high bar*: rejection is **terminal and permanent**, the finding is gone with no in-band channel for the reviewer to clarify. Reject for ambiguity ONLY when (a) NO charitable interpretation exists, OR (b) multiple interpretations are equally plausible AND each requires a *materially different* fix (not just minor variations). On close calls — when one interpretation is clearly the most charitable given the reviewer's mandate, the surrounding artifact context, and the file:line refs — proceed with that interpretation, **state it as an explicit assumption in your bolt summary** ("assumed the finding meant X based on Y"), and let the assessor's two-stage closure check catch wrong interpretations on bolt N+1. The bolt cap (${MAX_FIX_LOOP_BOLTS}) is the safety net.\n     - When you DO reject for true ambiguity, structure the reason as a clarification request the reviewer can act on: \`"needs clarification — original concern: <one-line restate>; specific ambiguity: <what's unclear>; suggested clarification format: <example, e.g. 'name the input field and the validation rule'>"\`.\n     - ✗ Body says: *"the validation is weak"* → genuinely vague; no charitable interpretation isolates a target. Reject with the structured clarification format.\n     - ✗ Body says: *"rename it to foo"* in one place and *"rename it to bar"* elsewhere → two interpretations with materially different fixes. Reject.\n     - ✓ Body says: *"the validation accepts negative quantities; it must reject them with HTTP 400 and message 'quantity must be positive'"* → actionable. Proceed.\n     - ✓ Body says: *"the error handling here is weak"* with a file:line ref pointing at a try/catch swallowing all exceptions → charitable interpretation is clear (swallow → narrow + rethrow). Proceed; state the assumption in your summary.\n   - **Invalid**: the finding describes correct behavior or doesn't identify a real defect → \`haiku_feedback_reject { ... reason: "<concrete reason invalid>" }\`.\n\n   Otherwise the finding is actionable — proceed. Do NOT acknowledge the finding in prose ("good catch", "you're right"); the fix in code is the acknowledgement.`,
+							`${step++}. **Investigate.**\n   - Read the flagged artifact at the references in the feedback body. Establish the **current state** — what makes the finding true right now.\n   - Establish the **desired state** — what specifically would make the finding false.\n   - State the **gap** in one sentence. That's the root cause; the fix is a transition from current to desired.\n   - Look for a **comparable working sibling** — another artifact in this stage, an approved template, a passing test, a previously-shipped version, anything that demonstrates the desired state in a related context. Note the relevant differences. Skip this substep only if the artifact is genuinely greenfield with no comparable reference.${fixBolt > 1 ? `\n   - Bolt ${fixBolt} > 1: read \`git show HEAD\` for the prior bolt's edit. **Did you find a meaningfully different root cause from the prior attempt?** If yes, plan a different shape and proceed. If no, you're about to burn a bolt repeating the prior approach — call \`haiku_feedback_reject\` with reason "needs human escalation — N attempts converged on same surface fix" instead of editing.` : ""}`,
+							`${step++}. **Apply the fix** within your hat's mandate. Edit ONLY the artifact(s) flagged by the finding — out-of-scope edits are a scope violation; if you notice a separate issue, log it via \`haiku_feedback\` rather than editing it now. Save changes.`,
+							`${step++}. Return a one-line summary using a verb of completed action (\`edited X\`, \`added Y\`, \`updated Z\`). Zero hedging words (\`should\`, \`seems\`, \`probably\`, \`might\`).`,
 						)
 					}
 
@@ -7247,6 +7462,8 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			for (const name of agents) {
 				const mandatePath = agentPaths[name]
 				if (!mandatePath) continue
+				const interpretation = readInterpretation(mandatePath)
+				const interpretiveBlock = buildInterpretationBlock(interpretation)
 				const reviewLines: string[] = [
 					`You are the **${name}** studio-level review agent for intent "${slug}".`,
 					"",
@@ -7254,6 +7471,11 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					"Your review mandate is embedded in this prompt. You audit the WHOLE intent — every stage's artifacts — against the studio's standards.",
 					"",
 					inlineFile(mandatePath, `Mandate: ${name}`),
+				]
+				if (interpretiveBlock) {
+					reviewLines.push("", interpretiveBlock)
+				}
+				reviewLines.push(
 					"",
 					"## Write scope (STRICT)",
 					"**You MUST NOT write, edit, or create any file.** Your ONLY output channel is the `haiku_feedback` MCP tool. If you're tempted to fix an issue yourself, log it as feedback instead. Any file write is a scope violation.",
@@ -7267,7 +7489,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					"2. Review through your mandate's lens.",
 					`3. For each issue you find, call \`haiku_feedback({ intent: "${slug}", title: "<short>", body: "<full with file:line refs>", origin: "studio-review", author: "${name}" })\`. Omit \`stage\` to log at intent scope. Include \`upstream_stage: "<name>"\` only if the finding's root cause lives in a single stage.`,
 					"4. Return only a summary count of how many findings you logged.",
-				]
+				)
 				const prompt = reviewLines.join("\n")
 				const studioReviewModel = resolveReviewAgentModel({
 					mandatePath,
@@ -7397,6 +7619,10 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					)
 					if (hatPath && existsSync(hatPath)) {
 						promptLines.push(inlineFile(hatPath, `Fix-hat mandate: ${hat}`))
+						const studioFixInterp = buildInterpretationBlock(
+							readInterpretation(hatPath),
+						)
+						if (studioFixInterp) promptLines.push("", studioFixInterp)
 					}
 					if (existsSync(fbAbsPath)) {
 						promptLines.push(
@@ -7425,15 +7651,22 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					}
 					if (isLast) {
 						promptLines.push(
-							`${step++}. **Assess closure independently.** Decide whether the fix resolves the finding as written.`,
-							`${step++}. If resolved: call \`haiku_feedback_update { intent: "${slug}", feedback_id: "${fbId}", status: "closed", closed_by: "intent-fix:${fbId}:bolt-${fixBolt}" }\` — omit \`stage\`.`,
-							`${step++}. If NOT resolved: leave status unchanged.`,
-							`${step++}. If the finding is actually invalid: call \`haiku_feedback_reject { intent: "${slug}", feedback_id: "${fbId}", reason: "<concrete reason>" }\` — omit \`stage\`.`,
-							`${step++}. Return \`fix-assessor: closed | open | rejected — <reason>\`.`,
+							`${step++}. **Assess closure (two-stage, both must pass).**`,
+							`   - **Stage A — Spec match.** Does the edit make the finding's requirement true as written?`,
+							`   - **Stage B — Quality / regression.** Inspect the diff (\`git show HEAD\`). Does the edit introduce a regression — broken neighboring behavior, scope creep, or violations of studio-wide standards?`,
+							`${step++}. **Decide:**`,
+							`   - **A passes AND B passes** → call \`haiku_feedback_update { intent: "${slug}", feedback_id: "${fbId}", status: "closed", closed_by: "intent-fix:${fbId}:bolt-${fixBolt}" }\` — omit \`stage\`.`,
+							`   - **A fails** → leave status unchanged (the FSM counts this bolt).`,
+							`   - **A passes, B fails** → leave the original open AND log the regression as a new finding via \`haiku_feedback({ intent: "${slug}", title: "<regression from intent-fix:${fbId}>", body: "<diff hunk + impact>", origin: "studio-review", author: "fix-assessor" })\`. Omit \`stage\` (intent scope).`,
+							`   - **Finding is invalid** → call \`haiku_feedback_reject { intent: "${slug}", feedback_id: "${fbId}", reason: "<concrete reason>" }\` — omit \`stage\`.`,
+							`${step++}. Return \`fix-assessor: closed | open | rejected — <reason>\`. Verb of completed action; zero hedging.`,
 						)
 					} else {
 						promptLines.push(
-							`${step++}. Apply the fix within your mandate. Save changes. Return a one-line summary.`,
+							`${step++}. **Verify the finding before editing.** Read the flagged artifact(s) and check three failure modes routing to \`haiku_feedback_reject\` (omit \`stage\` — intent scope) instead of an edit:\n   - **Stale / misread**: the artifact no longer matches what the reviewer flagged, or the citation points at the wrong location → reason: \`"stale — <what changed>"\` or \`"misread — <what they cited vs. what's there>"\`.\n   - **Ambiguous / unclear** — *high bar*: rejection is **terminal and permanent**, the finding is gone with no in-band channel for the reviewer to clarify. Reject for ambiguity ONLY when NO charitable interpretation exists OR multiple equally-plausible interpretations would require materially different cross-stage fixes. On close calls — when one interpretation is clearly the most charitable given the reviewer's mandate, the surrounding artifact context, and how the concern surfaces across stages — proceed with that interpretation, state it as an explicit assumption in your bolt summary, and let the assessor's two-stage closure check catch wrong interpretations on the next bolt (cap: ${MAX_FIX_LOOP_BOLTS}). When you DO reject for true ambiguity, structure the reason as a clarification request the reviewer can act on: \`"needs clarification — original concern: <one-line restate>; specific ambiguity: <what's unclear>; suggested clarification format: <example>"\`.\n   - **Invalid**: the finding describes correct cross-stage behavior or doesn't identify a real defect → reason: \`"<concrete reason invalid>"\`.\n\n   Otherwise the finding is actionable — proceed. Do NOT acknowledge the finding in prose ("good catch", "you're right").`,
+							`${step++}. **Investigate.**\n   - Read the flagged artifact(s). Establish the **current state** — what makes the finding true right now.\n   - Establish the **desired state** — what specifically would make the finding false.\n   - State the **gap** in one sentence. That's the root cause; the fix is a transition from current to desired across whichever stages the finding spans.\n   - Look for a **comparable working sibling** — another stage's artifact that already meets the studio-wide standard, an approved template, a previously-shipped intent that handled this concern correctly. Note the relevant differences. Skip this substep only if the concern is genuinely novel with no comparable reference.${fixBolt > 1 ? `\n   - Bolt ${fixBolt} > 1: read \`git show HEAD\` for the prior bolt's edit. **Did you find a meaningfully different root cause from the prior attempt?** If yes, plan a different shape and proceed. If no, call \`haiku_feedback_reject\` with reason "needs human escalation — N attempts converged on same surface fix" instead of editing.` : ""}`,
+							`${step++}. **Apply the fix** within your mandate. Edit ONLY the artifact(s) the finding flags — out-of-scope edits are a scope violation; log unrelated issues via \`haiku_feedback\` rather than editing them now. Save changes.`,
+							`${step++}. Return a one-line summary using a verb of completed action. Zero hedging (\`should\`, \`seems\`, \`probably\`, \`might\`).`,
 						)
 					}
 
@@ -7681,7 +7914,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 		}
 
 		case "escalate": {
-			const escStage = action.stage as string
+			const escStage = action.stage as string | null
 			const escReason = (action.reason as string) || "unknown"
 			const escIteration = (action.iteration as number) || 0
 			const escMax = (action.max_iterations as number) || MAX_STAGE_ITERATIONS
@@ -7692,18 +7925,33 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					title: string
 				}>) || []
 
+			const isIntentScope = !escStage
+			const scopeLabel = isIntentScope
+				? `intent ${slug} (studio-level fix loop)`
+				: escStage
 			const header =
 				escReason === "loop_detected"
-					? `## Escalation: Loop Detected in ${escStage}`
-					: `## Escalation: Iteration Limit Exceeded in ${escStage}`
+					? `## Escalation: Loop Detected in ${scopeLabel}`
+					: escReason === "fix_loop_cap_exceeded"
+						? `## Escalation: Fix-Loop Bolt Cap Exceeded in ${scopeLabel}`
+						: `## Escalation: Iteration Limit Exceeded in ${scopeLabel}`
 
 			const itemList =
 				escPending.length > 0
 					? `\n\n### Still-pending feedback\n\n${escPending.map((p) => `- **${p.feedback_id}** — ${p.title}`).join("\n")}`
 					: ""
 
+			const rejectExample = isIntentScope
+				? "`haiku_feedback_reject { intent, feedback_id, reason }` — dismiss specific items that shouldn't block (omit `stage` for intent-scope findings)"
+				: "`haiku_feedback_reject { intent, stage, feedback_id, reason }` — dismiss specific items that shouldn't block"
+
+			const capLine =
+				escReason === "fix_loop_cap_exceeded"
+					? `the fix loop spent its full ${MAX_FIX_LOOP_BOLTS}-bolt budget on ${escPending.length || "the"} finding(s) without satisfying the closure check`
+					: `iteration ${escIteration} of ${escMax} (max) or repeated feedback signature detected`
+
 			sections.push(
-				`${header}\n\n${escMessage}${itemList}\n\n### STOP\n\n**Do NOT call \`haiku_run_next\` again.** The autonomous loop is halted by design — iteration ${escIteration} of ${escMax} (max) or repeated feedback signature detected. Surface this to the user and wait for them to choose:\n\n1. \`haiku_feedback_reject { intent, stage, feedback_id, reason }\` — dismiss specific items that shouldn't block\n2. \`haiku_revisit { intent: "${slug}" }\` — user-invoked revisit (uncapped) to force another cycle\n3. Terminate the intent or mark the stage complete manually\n4. Adjust the unit spec or criteria if the finding set is genuinely unreachable\n\nReport the situation and the options above. Do NOT decide autonomously.`,
+				`${header}\n\n${escMessage}${itemList}\n\n### STOP\n\n**Do NOT call \`haiku_run_next\` again.** The autonomous loop is halted by design — ${capLine}. Repeated bolts converging on the same surface fix is exactly what the cap exists to catch; another bolt without a different root-cause hypothesis will fail the same way. Surface this to the user and wait for them to choose:\n\n1. ${rejectExample}\n2. \`haiku_revisit { intent: "${slug}" }\` — user-invoked revisit (uncapped) to force another cycle\n3. Terminate the intent or mark the stage complete manually\n4. Adjust the unit spec or criteria if the finding set is genuinely unreachable${isIntentScope ? "\n5. Edit the studio fix-hat mandates if the hats are structurally unable to close this class of finding" : ""}\n\nReport the situation and the options above. Do NOT decide autonomously.`,
 			)
 			break
 		}
@@ -7804,8 +8052,13 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 					"",
 					"- **Missing inputs**: unit declares a sweep/audit but its `inputs:` list only covers a subset of files the rule must apply to. Flag when enforcement scope < rule scope.",
 					"- **Prose-only gates**: `quality_gates:` entries that are strings instead of executable `{name, command}` objects. These won't actually enforce anything — the FSM skips them.",
-					"- **Unfalsifiable criteria**: 'responsive design done' vs 'breakpoints at 375/768/1280 with screenshots'. Gates must be measurable.",
-					"- **Sibling conflicts**: two pending units claim to produce or modify the same output with different rules.",
+					"- **Unfalsifiable criteria**: 'responsive design done' vs 'breakpoints at 375/768/1280 with screenshots'. Gates must be measurable. Also flag criteria that LOOK concrete but have no apparent verification path — neither a `quality_gates:` entry, nor a review-agent mandate, nor a stage-appropriate approval condition (visual approval for design, behavioral test for product) plausibly covers them. Name each such criterion and propose a pairing in the suggested fix.",
+					"- **Sibling conflicts** between pending units — watch for any of these shapes, not just same-output drift:",
+					"  - **Same-output drift**: two units produce or modify the same output (file path, schema, route, artifact) under different rules.",
+					"  - **Contradictory criteria**: two units describe the same component or behavior but their acceptance criteria diverge (one says `p95 < 100ms`, another says `async, no latency target`).",
+					"  - **Inverted assumptions**: unit A asserts X is true; unit B requires X to be false (one says feature uses pattern P, another says feature MUST NOT use pattern P).",
+					"  - **Overlapping inputs, opposite intent**: two units take the same input file/artifact but encode opposite intent for it (e.g. one strengthens a constraint the other relaxes).",
+					"  - **Within-stage drift**: naming, types, or contracts that vary across sibling units when the mandate calls for consistency (cross-stage drift is the studio-level reviewer's beat; within-stage drift is yours).",
 					"- **Missing `closes:`** on revisit cycles: every new pending unit MUST reference at least one pending FB via `closes: [FB-NN]`.",
 					"- **Coverage gaps**: completed + pending together miss something in-scope for your mandate. Suggest a new unit.",
 					"",

@@ -198,6 +198,192 @@ Analysis stage.
 `,
 )
 
+// ── Per-hat run_quality_gates auto-reject fixture ─────────────────────────
+// Multi-hat stage where the middle hat (`builder`) declares
+// run_quality_gates: true. advance_hat from builder runs the unit's
+// quality_gates; failure auto-rejects (bolt+1, same hat); success advances.
+mkdirSync(join(haikuRoot, "studios", "software", "stages", "gated", "hats"), {
+	recursive: true,
+})
+writeFileSync(
+	join(haikuRoot, "studios", "software", "stages", "gated", "STAGE.md"),
+	`---
+name: gated
+hats: [planner, builder, reviewer]
+unit_types: [research]
+---
+
+Gated stage with builder running quality gates.
+`,
+)
+writeFileSync(
+	join(
+		haikuRoot,
+		"studios",
+		"software",
+		"stages",
+		"gated",
+		"hats",
+		"planner.md",
+	),
+	`---
+name: planner
+stage: gated
+studio: software
+---
+
+Planner.
+`,
+)
+writeFileSync(
+	join(
+		haikuRoot,
+		"studios",
+		"software",
+		"stages",
+		"gated",
+		"hats",
+		"builder.md",
+	),
+	`---
+name: builder
+stage: gated
+studio: software
+run_quality_gates: true
+---
+
+Builder with gate enforcement.
+`,
+)
+writeFileSync(
+	join(
+		haikuRoot,
+		"studios",
+		"software",
+		"stages",
+		"gated",
+		"hats",
+		"reviewer.md",
+	),
+	`---
+name: reviewer
+stage: gated
+studio: software
+---
+
+Reviewer.
+`,
+)
+mkdirSync(join(intentDirPath, "stages", "gated", "units"), { recursive: true })
+writeFileSync(
+	join(intentDirPath, "stages", "gated", "state.json"),
+	JSON.stringify(
+		{
+			stage: "gated",
+			status: "active",
+			phase: "execute",
+			started_at: "2026-04-04T18:05:00Z",
+			completed_at: null,
+			gate_entered_at: null,
+			gate_outcome: null,
+		},
+		null,
+		2,
+	),
+)
+// Builder hat, gates that fail — should auto-reject (bolt+1, same hat)
+writeFileSync(
+	join(intentDirPath, "stages", "gated", "units", "unit-01-gates-fail.md"),
+	`---
+name: unit-01-gates-fail
+type: research
+status: active
+depends_on: []
+bolt: 1
+hat: builder
+hat_started_at: 2020-01-01T00:00:00Z
+quality_gates:
+  - name: always-fail
+    command: "false"
+outputs:
+  - knowledge/findings.md
+---
+
+## Completion Criteria
+
+- [x] Gates fail
+`,
+)
+// Builder hat, gates that pass — should advance normally to reviewer
+writeFileSync(
+	join(intentDirPath, "stages", "gated", "units", "unit-02-gates-pass.md"),
+	`---
+name: unit-02-gates-pass
+type: research
+status: active
+depends_on: []
+bolt: 1
+hat: builder
+hat_started_at: 2020-01-01T00:00:00Z
+quality_gates:
+  - name: always-pass
+    command: "true"
+outputs:
+  - knowledge/findings.md
+---
+
+## Completion Criteria
+
+- [x] Gates pass
+`,
+)
+// Builder hat at bolt 5, gates fail — should hit max_bolts_exceeded
+writeFileSync(
+	join(intentDirPath, "stages", "gated", "units", "unit-03-gates-cap.md"),
+	`---
+name: unit-03-gates-cap
+type: research
+status: active
+depends_on: []
+bolt: 5
+hat: builder
+hat_started_at: 2020-01-01T00:00:00Z
+quality_gates:
+  - name: always-fail
+    command: "false"
+outputs:
+  - knowledge/findings.md
+---
+
+## Completion Criteria
+
+- [x] Gates exhaust
+`,
+)
+// Planner hat (no boolean), gates that would fail — should advance normally
+writeFileSync(
+	join(intentDirPath, "stages", "gated", "units", "unit-04-no-boolean.md"),
+	`---
+name: unit-04-no-boolean
+type: research
+status: active
+depends_on: []
+bolt: 1
+hat: planner
+hat_started_at: 2020-01-01T00:00:00Z
+quality_gates:
+  - name: always-fail
+    command: "false"
+outputs:
+  - knowledge/findings.md
+---
+
+## Completion Criteria
+
+- [x] Gates skipped because hat opts out
+`,
+)
+
 // Create second intent for list testing
 const intent2Dir = join(haikuRoot, "intents", "second-intent")
 mkdirSync(intent2Dir, { recursive: true })
@@ -245,10 +431,21 @@ providers:
 `,
 )
 
-// Stub git so gitCommitState doesn't fail or actually commit
+// Stub git so gitCommitState doesn't fail or actually commit. `rev-parse
+// --show-toplevel` returns the current working directory so callers like
+// runInlineQualityGates resolve a usable cwd; everything else exits 0.
 process.env.PATH = `${join(tmp, "fake-bin")}:${process.env.PATH}`
 mkdirSync(join(tmp, "fake-bin"), { recursive: true })
-writeFileSync(join(tmp, "fake-bin", "git"), "#!/bin/sh\nexit 0\n")
+writeFileSync(
+	join(tmp, "fake-bin", "git"),
+	`#!/bin/sh
+if [ "$1" = "rev-parse" ] && [ "$2" = "--show-toplevel" ]; then
+  pwd
+  exit 0
+fi
+exit 0
+`,
+)
 chmodSync(join(tmp, "fake-bin", "git"), 0o755)
 
 process.chdir(projDir)
@@ -1033,6 +1230,256 @@ body
 			/* non-JSON success response is fine */
 		}
 		assert.ok(!errored, `expected success, got: ${text}`)
+	})
+
+	// ── haiku_unit_advance_hat: per-hat run_quality_gates auto-reject ─────────
+
+	console.log("\n=== haiku_unit_advance_hat: run_quality_gates auto-reject ===")
+
+	test("auto-rejects when builder hat with run_quality_gates fails gates", () => {
+		const result = handleStateTool("haiku_unit_advance_hat", {
+			intent: intentSlug,
+			unit: "unit-01-gates-fail",
+		})
+		const text = getTextResult(result)
+		// Response is the FSM Result envelope path; the persisted state should
+		// show bolt+1, hat unchanged.
+		const fmRaw = readFileSync(
+			join(intentDirPath, "stages", "gated", "units", "unit-01-gates-fail.md"),
+			"utf8",
+		)
+		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
+		assert.ok(
+			/^bolt: 2$/m.test(fm),
+			`expected bolt: 2 after auto-reject, got: ${fm}`,
+		)
+		assert.ok(
+			/^hat: builder$/m.test(fm),
+			`expected hat to remain builder, got: ${fm}`,
+		)
+		assert.ok(
+			text.includes("FSM Result written to:"),
+			`expected FSM Result envelope, got: ${text}`,
+		)
+		assert.ok(
+			text.includes("gates failed") || text.includes("always-fail"),
+			`expected gate-fail context in envelope, got: ${text}`,
+		)
+	})
+
+	test("advances normally when builder hat with run_quality_gates passes gates", () => {
+		const result = handleStateTool("haiku_unit_advance_hat", {
+			intent: intentSlug,
+			unit: "unit-02-gates-pass",
+		})
+		const text = getTextResult(result)
+		// Response is JSON error or success — gates passed, so advance
+		// proceeds. The unit's hat should now be reviewer (the next hat),
+		// bolt should remain 1.
+		const fmRaw = readFileSync(
+			join(intentDirPath, "stages", "gated", "units", "unit-02-gates-pass.md"),
+			"utf8",
+		)
+		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
+		assert.ok(
+			/^bolt: 1$/m.test(fm),
+			`expected bolt to remain 1 after gate-pass advance, got: ${fm}`,
+		)
+		assert.ok(
+			/^hat: reviewer$/m.test(fm),
+			`expected hat to advance to reviewer, got: ${fm}`,
+		)
+		// Should NOT contain auto-reject markers
+		assert.ok(
+			!text.includes("always-fail"),
+			`expected no gate-fail context, got: ${text}`,
+		)
+	})
+
+	test("returns max_bolts_exceeded when run_quality_gates fail at bolt 5", () => {
+		const result = handleStateTool("haiku_unit_advance_hat", {
+			intent: intentSlug,
+			unit: "unit-03-gates-cap",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "max_bolts_exceeded")
+		assert.strictEqual(parsed.reason, "quality_gate_auto_reject")
+		assert.strictEqual(parsed.bolt, 5)
+		assert.ok(
+			Array.isArray(parsed.failures) && parsed.failures.length > 0,
+			"expected failures array",
+		)
+	})
+
+	test("hats without run_quality_gates do not trigger gate auto-reject", () => {
+		const result = handleStateTool("haiku_unit_advance_hat", {
+			intent: intentSlug,
+			unit: "unit-04-no-boolean",
+		})
+		const text = getTextResult(result)
+		const fmRaw = readFileSync(
+			join(intentDirPath, "stages", "gated", "units", "unit-04-no-boolean.md"),
+			"utf8",
+		)
+		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
+		// Planner doesn't declare the boolean, so gates aren't checked
+		// here — advance proceeds despite the always-fail gate definition.
+		assert.ok(
+			/^bolt: 1$/m.test(fm),
+			`expected bolt to remain 1 (no auto-reject), got: ${fm}`,
+		)
+		assert.ok(
+			/^hat: builder$/m.test(fm),
+			`expected hat to advance to builder (next), got: ${fm}`,
+		)
+		assert.ok(
+			!text.includes("always-fail"),
+			`expected no gate-fail context (gates skipped), got: ${text}`,
+		)
+	})
+
+	// ── haiku_decision_record ────────────────────────────────────────────────
+
+	console.log("\n=== haiku_decision_record ===")
+
+	test("records a user-sourced decision", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "Auth strategy",
+			options: ["OAuth 2.0 + PKCE", "Magic link", "SSO"],
+			choice: "OAuth 2.0 + PKCE",
+			source: "user",
+			rationale: "Mobile-first app, OAuth flows are well-supported",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.ok, true)
+		assert.strictEqual(parsed.decision_count, 1)
+
+		// State file should have decision_log appended
+		const state = JSON.parse(
+			readFileSync(
+				join(intentDirPath, "stages", "inception", "state.json"),
+				"utf8",
+			),
+		)
+		assert.ok(Array.isArray(state.decision_log))
+		assert.strictEqual(state.decision_log.length, 1)
+		assert.strictEqual(state.decision_log[0].source, "user")
+		assert.strictEqual(state.decision_log[0].choice, "OAuth 2.0 + PKCE")
+	})
+
+	test("records an autonomous-acknowledged decision", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "HTTP client library",
+			options: ["axios", "fetch (native)"],
+			choice: "axios",
+			source: "autonomous-acknowledged",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.ok, true)
+		// Decoupled from prior-test ordering: any non-zero count means the
+		// append succeeded. The user-sourced test above asserts strict ==1.
+		assert.ok(
+			parsed.decision_count >= 1,
+			`expected decision_count >= 1, got ${parsed.decision_count}`,
+		)
+	})
+
+	test("rejects decision with fewer than 2 options", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "Forced choice",
+			options: ["only one"],
+			choice: "only one",
+			source: "user",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "options_too_few")
+	})
+
+	test("rejects decision when choice is not in options (provenance integrity)", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "Auth strategy",
+			options: ["OAuth", "magic link"],
+			choice: "SAML", // not in options — fabricated
+			source: "user",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "choice_not_in_options")
+	})
+
+	test("rejects decision with invalid source", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "Bad source",
+			options: ["a", "b"],
+			choice: "a",
+			source: "made-up-source",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "invalid_source")
+	})
+
+	test("rejects decision missing required fields", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			decision: "Incomplete",
+			// missing options, choice, source
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "missing_fields")
+	})
+
+	test("declares no_decisions with rationale", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			no_decisions: true,
+			rationale:
+				"This stage follows the team's standard inception template; no architectural choices remain after the discovery doc.",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.ok, true)
+		assert.strictEqual(parsed.no_decisions, true)
+
+		const state = JSON.parse(
+			readFileSync(
+				join(intentDirPath, "stages", "inception", "state.json"),
+				"utf8",
+			),
+		)
+		assert.strictEqual(state.elaboration_no_decisions, true)
+		assert.ok(state.elaboration_no_decisions_rationale.length > 10)
+	})
+
+	test("rejects no_decisions without rationale", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			no_decisions: true,
+			// missing rationale
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "rationale_required")
+	})
+
+	test("rejects no_decisions with too-short rationale", () => {
+		const result = handleStateTool("haiku_decision_record", {
+			intent: intentSlug,
+			stage: "inception",
+			no_decisions: true,
+			rationale: "no",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "rationale_required")
 	})
 
 	// ── unknown tool ──────────────────────────────────────────────────────────

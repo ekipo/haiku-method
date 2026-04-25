@@ -2,12 +2,14 @@
 
 ## Criteria Guidance
 
-Good criteria examples:
+### Good criteria — concrete and verifiable
+
 - "Work breakdown structure elaborates every in-scope deliverable to work packages of 40 hours or less"
 - "Resource allocation maps each work package to a named owner with confirmed availability"
 - "Critical path is identified with float calculations and contingency buffers at high-risk junctions"
 
-Bad criteria examples:
+### Bad criteria — vague (no clear check)
+
 - "Plan is done"
 - "Resources are assigned"
 - "Timeline is set"

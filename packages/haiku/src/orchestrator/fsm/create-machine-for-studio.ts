@@ -20,6 +20,7 @@
 
 import { type AnyStateMachine, createMachine } from "xstate"
 import type { OrchestratorAction } from "../../orchestrator.js"
+import { buildFsmActions } from "./actions.js"
 import {
 	buildStageSubMachine,
 	type StateConfigObject,
@@ -147,21 +148,33 @@ function buildStudioMachineConfig(studio: StudioConfig): StateConfigObject {
 export function createMachineForStudio(studio: StudioConfig): StudioMachine {
 	const config = buildStudioMachineConfig(studio)
 
-	const machine = createMachine({
-		id: `haiku-fsm-${studio.dir}`,
-		types: {} as {
-			context: FsmContext
-			events: StudioMachineEvent
-			output: OrchestratorAction
+	const machine = createMachine(
+		{
+			id: `haiku-fsm-${studio.dir}`,
+			types: {} as {
+				context: FsmContext
+				events: StudioMachineEvent
+				output: OrchestratorAction
+			},
+			initial: "select_studio",
+			context: ({ input }) => input as FsmContext,
+			// xstate v5 expects `states` typed against its
+			// StateNodeConfig, but our buildStudioMachineConfig returns a
+			// generic object shape for type-system simplicity. The cast is
+			// safe because state-builders.ts only emits xstate-shaped
+			// configs.
+			states: config.states as never,
 		},
-		initial: "select_studio",
-		context: ({ input }) => input as FsmContext,
-		// xstate v5 expects `states` typed against its StateNodeConfig,
-		// but our buildStudioMachineConfig returns a generic object
-		// shape for type-system simplicity. The cast is safe because
-		// state-builders.ts only emits xstate-shaped configs.
-		states: config.states as never,
-	})
+		{
+			// Action implementations — names referenced by entry: in the
+			// state config resolve here. Visualizer reads only the names;
+			// runtime gets these. Cast to never because xstate v5's
+			// MachineImplementationsActions generic is keyed off the
+			// machine's event union; our actions accept ActionContext +
+			// untyped event payloads at runtime.
+			actions: buildFsmActions() as never,
+		},
+	)
 
 	return {
 		studio: studio.dir,

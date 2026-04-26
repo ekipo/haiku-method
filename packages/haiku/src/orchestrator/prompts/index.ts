@@ -45,6 +45,8 @@ import review_fix from "./review_fix.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
 import spec_validation_failed from "./spec_validation_failed.js"
+import start_stage from "./start_stage.js"
+import start_unit from "./start_unit.js"
 import type { PromptBuilder } from "./types.js"
 import unit_inputs_missing from "./unit_inputs_missing.js"
 import unit_naming_invalid from "./unit_naming_invalid.js"
@@ -88,6 +90,11 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["safe_intent_repair", safe_intent_repair],
 	["select_studio", select_studio],
 	["spec_validation_failed", spec_validation_failed],
+	["start_stage", start_stage],
+	// Same builder serves both — start_unit branches on action.action
+	// to add the haiku_unit_start step.
+	["continue_unit", start_unit],
+	["start_unit", start_unit],
 	["unit_inputs_missing", unit_inputs_missing],
 	["unit_naming_invalid", unit_naming_invalid],
 	["unresolved_dependencies", unresolved_dependencies],

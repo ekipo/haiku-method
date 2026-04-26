@@ -82,24 +82,18 @@ import {
 	isRemoteReviewEnabled,
 	verifyTunnelJWT,
 } from "./tunnel.js"
+import {
+	extractTunnelToken,
+	requireTunnelAuth,
+	verifyFeedbackMutationAuth,
+} from "./http/auth.js"
+import {
+	rejectUnsafePathParam,
+	resolvePathSafe,
+	serveFile,
+	serveUnderRoot,
+} from "./http/path-safety.js"
 
-// ── MIME and well-known constants ────────────────────────────────────────
-
-const MIME_TYPES: Record<string, string> = {
-	".html": "text/html; charset=utf-8",
-	".css": "text/css; charset=utf-8",
-	".js": "application/javascript; charset=utf-8",
-	".json": "application/json; charset=utf-8",
-	".svg": "image/svg+xml",
-	".png": "image/png",
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif": "image/gif",
-	".webp": "image/webp",
-	".md": "text/markdown; charset=utf-8",
-	".txt": "text/plain; charset=utf-8",
-	".pdf": "application/pdf",
-}
 
 const SESSION_CANCEL_LOG_PATH = "/tmp/haiku-session-cancel.log"
 
@@ -320,162 +314,7 @@ function parseBodyWithSchema<S extends ZodTypeAny>(
 	return { ok: true, data: result.data as z.infer<S> }
 }
 
-// ── Filesystem path-safe resolver (shared across asset serves) ──────────
 
-async function resolvePathSafe(
-	root: string,
-	requested: string,
-): Promise<{ ok: true; path: string } | { ok: false }> {
-	const resolvedRoot = resolve(root)
-	const resolved = resolve(resolvedRoot, requested)
-	if (!resolved.startsWith(`${resolvedRoot}/`) && resolved !== resolvedRoot) {
-		return { ok: false }
-	}
-	try {
-		const realResolved = await realpath(resolved).catch(() => null)
-		const realBase = await realpath(resolvedRoot).catch(() => resolvedRoot)
-		if (
-			!realResolved ||
-			(!realResolved.startsWith(`${realBase}/`) && realResolved !== realBase)
-		) {
-			return { ok: false }
-		}
-		return { ok: true, path: realResolved }
-	} catch {
-		return { ok: false }
-	}
-}
-
-/**
- * Schema-level path refinement. Rejects adversarial `..`, `%2e%2e`,
- * null-byte, and backslash fixtures before we even reach the filesystem.
- * Returns a reply on rejection, or null when the path is safe.
- */
-function rejectUnsafePathParam(
-	reply: FastifyReply,
-	sessionId: string,
-	filePath: string,
-): boolean {
-	const parsed = FileServeParamsSchema.safeParse({ sessionId, path: filePath })
-	if (parsed.success) return false
-	reply.status(403).send({ error: "forbidden_path_traversal" })
-	return true
-}
-
-async function serveFile(reply: FastifyReply, realPath: string): Promise<void> {
-	try {
-		const data = await readFile(realPath)
-		const ext = extname(realPath).toLowerCase()
-		const contentType = MIME_TYPES[ext] ?? "application/octet-stream"
-		reply.header("Content-Type", contentType)
-		// SVG defense-in-depth: the feedback attachment schema already
-		// rejects `svg+xml` on POST (see FeedbackCreateRequestSchema),
-		// but a legacy intent directory could still contain `.svg`
-		// files from before that rejection, and `/mockups/`,
-		// `/wireframe/`, `/stage-artifacts/` also route through here
-		// for arbitrary session files. Browsers execute `<script>` in
-		// inline-rendered SVGs under the serving origin — in tunnel
-		// mode that's the reviewer's privileged tab. Force the
-		// browser to download instead of render, so a malicious SVG
-		// can't run JavaScript against the tunnel origin.
-		if (ext === ".svg") {
-			reply.header("Content-Disposition", "attachment")
-		}
-		reply.send(data)
-	} catch {
-		reply.status(404).send("Not found")
-	}
-}
-
-async function serveUnderRoot(
-	reply: FastifyReply,
-	rootDir: string,
-	filePath: string,
-): Promise<void> {
-	const safe = await resolvePathSafe(rootDir, filePath)
-	if (!safe.ok) {
-		reply.status(403).send({ error: "forbidden_path_traversal" })
-		return
-	}
-	return serveFile(reply, safe.path)
-}
-
-// ── Tunnel-auth extraction and enforcement ──────────────────────────────
-
-function extractTunnelToken(req: FastifyRequest): string | null {
-	const authz = req.headers.authorization
-	if (authz) {
-		const m = authz.match(/^Bearer\s+(.+)$/i)
-		if (m) {
-			const raw = m[1].trim()
-			if (raw) return raw
-		}
-	}
-	const t = (req.query as Record<string, string | undefined>)?.t
-	return t?.trim() || null
-}
-
-function requireTunnelAuth(
-	req: FastifyRequest,
-	reply: FastifyReply,
-	expectedSid: string | null,
-): boolean {
-	if (!isRemoteReviewEnabled()) return true
-	const token = extractTunnelToken(req)
-	if (!token) {
-		reply.status(401).send({ error: "unauthorized", reason: "missing_token" })
-		return false
-	}
-	const result = verifyTunnelJWT(token, expectedSid)
-	if (!result.ok) {
-		reply.status(401).send({ error: "unauthorized", reason: result.reason })
-		return false
-	}
-	return true
-}
-
-function verifyFeedbackMutationAuth(
-	req: FastifyRequest,
-	reply: FastifyReply,
-	intent: string,
-): boolean {
-	// Local (non-tunneled) mode binds loopback-only. Any caller reaching
-	// us already has localhost access, so no extra gate is needed.
-	if (!isRemoteReviewEnabled()) return true
-
-	// Tunnel mode: `requireTunnelAuth` has already validated the bearer
-	// JWT before we get here. Extract the session id from the JWT claims
-	// — that's the session this request is bound to, full stop. No
-	// separate `X-Haiku-Session-Id` header required; the JWT is the only
-	// source of truth.
-	const token = extractTunnelToken(req)
-	if (!token) {
-		reply.status(401).send({ error: "unauthorized", reason: "missing_token" })
-		return false
-	}
-	const verified = verifyTunnelJWT(token, null)
-	if (!verified.ok) {
-		reply.status(401).send({ error: "unauthorized", reason: verified.reason })
-		return false
-	}
-	const sessionId = verified.payload.sid
-	const session = getSession(sessionId)
-	if (!session) {
-		reply
-			.status(403)
-			.send({ error: "forbidden_cross_session", reason: "unknown_session" })
-		return false
-	}
-	const sessionIntent =
-		session.session_type === "review" ? session.intent_slug : undefined
-	if (sessionIntent !== intent) {
-		reply
-			.status(403)
-			.send({ error: "forbidden_cross_session", reason: "intent_mismatch" })
-		return false
-	}
-	return true
-}
 
 // ── E2E encryption wrapper (Fastify onSend hook) ────────────────────────
 

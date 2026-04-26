@@ -1,0 +1,37 @@
+// MCP tool definition types.
+//
+// Every tool exported from this package describes itself as a `ToolDef`
+// (or its async-result variant). The registry in `./index.ts` collects
+// the per-tool default exports into `allTools[]` for MCP registration
+// and `toolByName` for dispatch from `handleTool()`.
+
+export interface ToolInputSchema {
+	readonly type: "object"
+	readonly properties?: Readonly<Record<string, unknown>>
+	readonly required?: readonly string[]
+}
+
+/** Standard MCP tool response: text content blocks plus optional error flag. */
+export interface ToolResult {
+	content: Array<{ type: "text"; text: string }>
+	isError?: boolean
+	/** Optional structured payload some MCP clients surface alongside text. */
+	structuredContent?: Record<string, unknown>
+}
+
+/** Handler signature: receives the raw arg bag (post path-traversal
+ *  validation) and returns a ToolResult, sync or async. */
+export type ToolHandler = (
+	args: Record<string, unknown>,
+) => ToolResult | Promise<ToolResult>
+
+export interface ToolDef {
+	/** Tool name as exposed to the MCP client (e.g. "haiku_run_next"). */
+	readonly name: string
+	/** Description shown to the agent in tool listings. */
+	readonly description: string
+	/** JSON-Schema-shaped input schema (kept literal for MCP transport). */
+	readonly inputSchema: ToolInputSchema
+	/** Handler — invoked from the central dispatch with the raw args bag. */
+	readonly handle: ToolHandler
+}

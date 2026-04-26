@@ -31,7 +31,7 @@ import {
 import { useApiClient } from "../../api/context"
 import { Card, SectionHeading } from "../../atoms/Card"
 import { Input } from "../../atoms/Input"
-import { SubmitSuccess } from "../../components/SubmitSuccess"
+import { SubmitSuccess } from "../../molecules/SubmitSuccess"
 import { tryCloseTab } from "../../lib/tryCloseTab"
 
 interface Props {

@@ -20,7 +20,7 @@
 
 import { useEffect, useRef } from "react"
 import { useAnnounce } from "../a11y/live-regions"
-import { statusDotClasses as canonicalStatusDotClasses } from "./feedback/tokens"
+import { statusDotClasses as canonicalStatusDotClasses } from "../components/feedback/tokens"
 
 /**
  * A finding's status as surfaced by the feedback-assessor. This is a subset of

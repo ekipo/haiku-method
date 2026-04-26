@@ -39,9 +39,9 @@ import {
 	it,
 	vi,
 } from "vitest"
-import { LiveRegionShell, POLITE_REGION_ID } from "../../../a11y"
-import { installMatchMediaStub } from "../../../a11y/__tests__/matchMedia.stub"
-import { injectCanonicalTouchTargetCss } from "../../../a11y/__tests__/touch-target-css"
+import { LiveRegionShell, POLITE_REGION_ID } from "../../a11y"
+import { installMatchMediaStub } from "../../a11y/__tests__/matchMedia.stub"
+import { injectCanonicalTouchTargetCss } from "../../a11y/__tests__/touch-target-css"
 import { AgentFeedbackToggle } from "../AgentFeedbackToggle"
 
 beforeAll(() => {

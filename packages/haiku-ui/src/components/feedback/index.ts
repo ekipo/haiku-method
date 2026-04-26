@@ -26,8 +26,8 @@ export type { FeedbackSheetProps } from "./FeedbackSheet"
 export { FeedbackSheet } from "./FeedbackSheet"
 export type { FeedbackStatusBadgeProps } from "../../atoms/FeedbackStatusBadge"
 export { FeedbackStatusBadge } from "../../atoms/FeedbackStatusBadge"
-export type { FeedbackSummaryBarProps } from "./FeedbackSummaryBar"
-export { FeedbackSummaryBar } from "./FeedbackSummaryBar"
+export type { FeedbackSummaryBarProps } from "../../molecules/FeedbackSummaryBar"
+export { FeedbackSummaryBar } from "../../molecules/FeedbackSummaryBar"
 export type { FeedbackOrigin, FeedbackStatus } from "./tokens"
 export {
 	feedbackStatusColors,

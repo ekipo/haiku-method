@@ -40,9 +40,9 @@ import {
 	FeedbackSheet,
 } from "../../../components/feedback"
 import type { InlineCommentEntry } from "../../../components/InlineComments"
-import { SessionEndedOverlay } from "../../../components/SessionEndedOverlay"
-import { StageProgressStrip } from "../../../components/StageProgressStrip"
-import { SubmitSuccess } from "../../../components/SubmitSuccess"
+import { SessionEndedOverlay } from "../../../molecules/SessionEndedOverlay"
+import { StageProgressStrip } from "../../../molecules/StageProgressStrip"
+import { SubmitSuccess } from "../../../molecules/SubmitSuccess"
 import { ThemeToggle } from "../../../atoms/ThemeToggle"
 import { FeedbackProvider } from "../../../hooks/FeedbackContext"
 import { useSession, useSessionWebSocket } from "../../../hooks/useSession"

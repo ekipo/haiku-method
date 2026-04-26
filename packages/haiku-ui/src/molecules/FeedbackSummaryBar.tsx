@@ -7,10 +7,10 @@
  */
 
 import { useMemo } from "react"
-import { focusRingCompactClass, touchTargetClass } from "../../a11y"
+import { focusRingCompactClass, touchTargetClass } from "../a11y"
 import type { FeedbackItemData } from "../../types"
-import type { FeedbackStatus } from "./tokens"
-import { statusDotClasses } from "./tokens"
+import type { FeedbackStatus } from "../components/feedback/tokens"
+import { statusDotClasses } from "../components/feedback/tokens"
 
 const VISIBLE_STATUSES: ReadonlyArray<FeedbackStatus> = [
 	"pending",

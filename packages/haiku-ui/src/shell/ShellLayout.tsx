@@ -11,7 +11,7 @@
  */
 
 import { FooterBar, Main } from "../a11y"
-import { Header } from "../components/Header"
+import { Header } from "../molecules/Header"
 import { PageTitleProvider, useShellTitle } from "./PageTitleContext"
 
 export function ShellLayout({

@@ -26,8 +26,8 @@ import {
 	FeedbackSheet,
 } from "../../components/feedback"
 import type { InlineCommentEntry } from "../../components/InlineComments"
-import { StageProgressStrip } from "../../components/StageProgressStrip"
-import { SubmitSuccess } from "../../components/SubmitSuccess"
+import { StageProgressStrip } from "../../molecules/StageProgressStrip"
+import { SubmitSuccess } from "../../molecules/SubmitSuccess"
 import { ThemeToggle } from "../../atoms/ThemeToggle"
 import { FeedbackProvider } from "../../hooks/FeedbackContext"
 import { useFeedback } from "../../hooks/useFeedback"

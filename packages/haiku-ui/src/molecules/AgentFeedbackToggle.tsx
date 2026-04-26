@@ -51,7 +51,7 @@ import {
 	touchTargetClass,
 	useAnnounce,
 	useReducedMotion,
-} from "../../a11y"
+} from "../a11y"
 
 export interface AgentFeedbackToggleProps
 	extends Omit<

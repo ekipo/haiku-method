@@ -8,10 +8,10 @@
 
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { injectCanonicalTouchTargetCss } from "../../../a11y/__tests__/touch-target-css"
+import { injectCanonicalTouchTargetCss } from "../../a11y/__tests__/touch-target-css"
 import { FeedbackSummaryBar } from "../FeedbackSummaryBar"
-import { type FeedbackStatus, TOKEN_HASH } from "../tokens"
-import { mockItems } from "./mockItems"
+import { type FeedbackStatus, TOKEN_HASH } from "../../components/feedback/tokens"
+import { mockItems } from "../../components/feedback/__tests__/mockItems"
 
 // FB-65: inject the canonical `.touch-target` CSS so `getComputedStyle` can
 // resolve min-height/min-width against the shipped rule (jsdom has no layout

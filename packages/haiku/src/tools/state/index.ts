@@ -38,6 +38,7 @@ import haiku_unit_get from "./haiku_unit_get.js"
 import haiku_unit_increment_bolt from "./haiku_unit_increment_bolt.js"
 import haiku_unit_list from "./haiku_unit_list.js"
 import haiku_unit_set from "./haiku_unit_set.js"
+import haiku_unit_start from "./haiku_unit_start.js"
 import haiku_version_info from "./haiku_version_info.js"
 
 export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
@@ -70,6 +71,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 			haiku_unit_increment_bolt,
 			haiku_unit_list,
 			haiku_unit_set,
+			haiku_unit_start,
 			haiku_version_info,
 		] satisfies ToolDef[]
 	).map((t) => [t.name, t]),

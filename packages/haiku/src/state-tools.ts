@@ -149,6 +149,7 @@ import {
 	validateUnitScope,
 } from "./state/scope.js"
 import { stateToolDefs } from "./state/tool-defs.js"
+import { stateToolHandlers } from "./tools/state/index.js"
 
 export { stateToolDefs }
 import {
@@ -325,79 +326,24 @@ export function handleStateTool(
 	const validationError = validateSlugArgs(args)
 	if (validationError) return validationError
 
+	// Per-tool handlers in tools/state/* take priority over the legacy
+	// switch. Migrated tools live in their own file with defineTool();
+	// the switch below handles the rest until they all migrate.
+	const perToolHandler = stateToolHandlers.get(name)
+	if (perToolHandler) {
+		const result = perToolHandler.handle(args)
+		// Per-tool handlers may be sync; legacy contract is sync, so
+		// preserve that. If a future handler returns a promise, await it.
+		if (result instanceof Promise) {
+			throw new Error(
+				`Tool '${name}' returned a Promise but handleStateTool is synchronous`,
+			)
+		}
+		return result
+	}
+
 	switch (name) {
-		// ── Intent ──
-		case "haiku_intent_get": {
-			const file = join(intentDir(args.slug as string), "intent.md")
-			if (!existsSync(file)) return text("")
-			const { data } = parseFrontmatter(readFileSync(file, "utf8"))
-			const val = data[args.field as string]
-			return text(
-				val == null
-					? ""
-					: typeof val === "object"
-						? JSON.stringify(val)
-						: String(val),
-			)
-		}
-		case "haiku_intent_list": {
-			const root = findHaikuRoot()
-			const intentsDir = join(root, "intents")
-			if (!existsSync(intentsDir)) return text("[]")
-			const includeArchived = args.include_archived === true
-			// Single-pass: listVisibleIntents already parsed each intent.md once
-			// for the archived-flag filter. Reuse the parsed `data` object for
-			// the response body — do NOT call parseFrontmatter again.
-			const entries = listVisibleIntents(intentsDir, { includeArchived })
-			// Resolve the current-checkout intent once — the pickup/revisit
-			// skills use this to skip the "which intent?" prompt when the
-			// user's git branch already names the intent.
-			const branchMatch = intentFromCurrentBranch()
-			const intents = entries.map(({ slug, data }) => {
-				const base: Record<string, unknown> = {
-					slug,
-					studio: data.studio,
-					status: data.status,
-					active_stage: data.active_stage,
-				}
-				if (includeArchived) {
-					base.archived = data.archived === true
-				}
-				if (branchMatch && branchMatch.slug === slug) {
-					base.current_branch = true
-					if (branchMatch.stage) base.current_branch_stage = branchMatch.stage
-				}
-				return base
-			})
-			return text(JSON.stringify(intents, null, 2))
-		}
-
-		// ── Stage ──
-		case "haiku_stage_get": {
-			const path = stageStatePath(args.intent as string, args.stage as string)
-			const data = readJson(path)
-			const val = data[args.field as string]
-			return text(val == null ? "" : String(val))
-		}
-
 		// ── Unit ──
-		case "haiku_unit_get": {
-			const path = unitPath(
-				args.intent as string,
-				args.stage as string,
-				args.unit as string,
-			)
-			if (!existsSync(path)) return text("")
-			const { data } = parseFrontmatter(readFileSync(path, "utf8"))
-			const val = data[args.field as string]
-			return text(
-				val == null
-					? ""
-					: typeof val === "object"
-						? JSON.stringify(val)
-						: String(val),
-			)
-		}
 		case "haiku_unit_set": {
 			// Guard: only `status = "completed"` is FSM-protected. Agents may
 			// freely change status to pending/active/blocked and set any other
@@ -1588,89 +1534,6 @@ export function handleStateTool(
 					stage,
 					decision_count: log.length,
 				}),
-			)
-		}
-
-		// ── Knowledge ──
-		case "haiku_knowledge_list": {
-			const dir = join(intentDir(args.intent as string), "knowledge")
-			if (!existsSync(dir)) return text("[]")
-			const files = readdirSync(dir).filter((f) => f.endsWith(".md"))
-			return text(JSON.stringify(files))
-		}
-		case "haiku_knowledge_read": {
-			const path = join(
-				intentDir(args.intent as string),
-				"knowledge",
-				args.name as string,
-			)
-			if (!existsSync(path)) return text("")
-			return text(readFileSync(path, "utf8"))
-		}
-
-		// ── Studio ──
-		case "haiku_studio_list": {
-			// Unified discovery — listStudios covers both plugin and project studios,
-			// honors name/slug/aliases from frontmatter, and exposes help links.
-			const studios = listStudios().map((s) => ({
-				name: s.name,
-				slug: s.slug,
-				aliases: s.aliases,
-				dir: s.dir,
-				description: s.description,
-				category: s.category,
-				stages: s.stages,
-				source: s.source,
-				path: s.path,
-				studio_md: s.studioFile,
-				body: s.body.slice(0, 200),
-			}))
-			return text(JSON.stringify(studios, null, 2))
-		}
-		case "haiku_studio_get": {
-			const studio = resolveStudio(args.studio as string)
-			if (!studio) return text("")
-			return text(
-				JSON.stringify(
-					{
-						name: studio.name,
-						slug: studio.slug,
-						aliases: studio.aliases,
-						dir: studio.dir,
-						description: studio.description,
-						category: studio.category,
-						stages: studio.stages,
-						source: studio.source,
-						path: studio.path,
-						studio_md: studio.studioFile,
-						body: studio.body,
-						...studio.data,
-					},
-					null,
-					2,
-				),
-			)
-		}
-		case "haiku_studio_stage_get": {
-			const studio = resolveStudio(args.studio as string)
-			if (!studio) return text("")
-			const sgName = args.stage as string
-			const stageFile = join(studio.path, "stages", sgName, "STAGE.md")
-			if (!existsSync(stageFile)) return text("")
-			const raw = readFileSync(stageFile, "utf8")
-			const { data, body } = parseFrontmatter(raw)
-			return text(
-				JSON.stringify(
-					{
-						...data,
-						body,
-						studio: studio.name,
-						studio_dir: studio.dir,
-						stage_md: stageFile,
-					},
-					null,
-					2,
-				),
 			)
 		}
 

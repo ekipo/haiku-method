@@ -25,6 +25,7 @@
 
 import { createActor, type AnyActorRef } from "xstate"
 import type { OrchestratorAction } from "../../orchestrator.js"
+import { listStudios } from "../../studio-reader.js"
 import { buildStudioConfig } from "./build-studio-config.js"
 import { createMachineForStudio } from "./create-machine-for-studio.js"
 import {
@@ -46,12 +47,14 @@ import type { StateName } from "./types.js"
  *  error's message, blocked's unit list) require a deeper port
  *  before they qualify. */
 export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = new Set([
-	// First migrated state. `complete` is reached when intent.status
-	// === "completed" or intent.archived === true — both are derived
-	// from frontmatter alone, so the OrchestratorAction is a pure
-	// function of context.slug. Byte-identical to runNext's
-	// emission at orchestrator.ts:2200.
+	// `complete` — pure function of context.slug. Byte-identical to
+	// runNext's emission at orchestrator.ts:2200.
 	"complete",
+	// `select_studio` — emitted when intent.md has no studio set.
+	// Payload: { intent, available_studios, message }. available_studios
+	// is a pure read via listStudios() (cached, no mutation).
+	// Byte-identical to runNext's emission at orchestrator.ts:2171.
+	"select_studio",
 ] as const)
 
 /** Pure emitter: derive an OrchestratorAction from a state name +
@@ -73,6 +76,21 @@ export function emitNativeAction(
 				action: "complete",
 				message: `Intent '${context.slug}' is already completed`,
 			}
+		case "select_studio": {
+			const available = listStudios().map((s) => ({
+				name: s.name,
+				slug: s.slug,
+				aliases: s.aliases,
+				description: s.description,
+				category: s.category,
+			}))
+			return {
+				action: "select_studio",
+				intent: context.slug,
+				available_studios: available,
+				message: `Intent '${context.slug}' has no studio selected. Call haiku_select_studio { intent: "${context.slug}" } to choose a lifecycle studio.`,
+			}
+		}
 		default:
 			return null
 	}

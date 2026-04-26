@@ -135,11 +135,13 @@ test("complete-without-studio still emits action (snapshot omitted)", () => {
 
 console.log("\n=== xstate-native registry ===")
 
-test("registry contains the migrated complete state", () => {
-	assert.ok(
-		XSTATE_NATIVE_STATES.has("complete"),
-		"registry should include 'complete'",
-	)
+test("registry contains the migrated states (complete + select_studio)", () => {
+	for (const name of ["complete", "select_studio"]) {
+		assert.ok(
+			XSTATE_NATIVE_STATES.has(name),
+			`registry should include '${name}'`,
+		)
+	}
 })
 
 test("registry does NOT contain states whose emission needs runNext-internal info", () => {
@@ -233,6 +235,55 @@ test("emitNativeAction returns null for unmigrated states", () => {
 			`'${name}' should not have a native emission yet`,
 		)
 	}
+})
+
+test("emitNativeAction('select_studio') produces studio list + correct message", () => {
+	const slug = "test-no-studio"
+	const action = emitNativeAction("select_studio", {
+		slug,
+		studio: "",
+		intentDirPath: `/dummy/${slug}`,
+		intent: {},
+		currentStage: "",
+		currentPhase: "",
+		stageState: {},
+	})
+	assert.ok(action, "should emit an action")
+	assert.strictEqual(action.action, "select_studio")
+	assert.strictEqual(action.intent, slug)
+	assert.ok(
+		Array.isArray(action.available_studios),
+		"available_studios should be an array",
+	)
+	assert.ok(
+		action.available_studios.length > 0,
+		"plugin ships at least one studio",
+	)
+	assert.strictEqual(
+		action.message,
+		`Intent '${slug}' has no studio selected. Call haiku_select_studio { intent: "${slug}" } to choose a lifecycle studio.`,
+	)
+	// Verify studio entries have the expected shape — same fields
+	// runNext returns at orchestrator.ts:2164.
+	const first = action.available_studios[0]
+	assert.ok("name" in first)
+	assert.ok("slug" in first)
+	assert.ok("aliases" in first)
+	assert.ok("description" in first)
+	assert.ok("category" in first)
+})
+
+test("runFsmTick routes a no-studio intent through xstate to select_studio", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		title: "No studio yet",
+	})
+	const result = runFsmTick("test", haikuRoot)
+	cleanup()
+	assert.ok(result)
+	assert.strictEqual(result.state, "select_studio")
+	assert.strictEqual(result.driver, "xstate")
+	assert.ok(result.action, "should emit an action")
+	assert.strictEqual(result.action.action, "select_studio")
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

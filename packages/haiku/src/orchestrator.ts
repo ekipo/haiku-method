@@ -671,7 +671,7 @@ function resolveIntentStages(
 	})
 }
 
-function resolveStudioStages(studio: string): string[] {
+export function resolveStudioStages(studio: string): string[] {
 	// Accept any identifier (dir, name, slug, alias); falls back to direct lookup
 	// for robustness with legacy callers that pass a dir name already.
 	const info = resolveStudio(studio)
@@ -8418,6 +8418,13 @@ export function setElicitInputHandler(handler: typeof _elicitInput): void {
 	_elicitInput = handler
 }
 
+/** Per-tool orchestrator handlers reach the elicit handler through this
+ *  getter — keeps the variable module-private while still allowing
+ *  extracted per-tool files to call it. */
+export function getElicitInput(): typeof _elicitInput {
+	return _elicitInput
+}
+
 export async function handleOrchestratorTool(
 	name: string,
 	args: Record<string, unknown>,
@@ -9979,168 +9986,6 @@ export async function handleOrchestratorTool(
 					visits: iterResult.count, // legacy alias — prefer `iteration`
 					feedback_created: createdFeedback,
 					message: `Revisited ${revisitTargetStage} (elaborate, iteration ${iterResult.count}). Created ${createdFeedback.length} feedback item(s).`,
-				},
-				null,
-				2,
-			),
-		)
-	}
-
-	if (name === "haiku_intent_reset") {
-		const slug = args.intent as string
-
-		// Validate intent exists
-		const root = findHaikuRoot()
-		const iDir = join(root, "intents", slug)
-		const intentFile = join(iDir, "intent.md")
-		if (!existsSync(intentFile)) {
-			return {
-				content: [
-					{ type: "text" as const, text: `Intent '${slug}' not found.` },
-				],
-				isError: true,
-			}
-		}
-
-		// Read the title and description before deleting
-		const raw = readFileSync(intentFile, "utf8")
-		const { data, body } = parseFrontmatter(raw)
-		const title = (data.title as string) || ""
-		// Description = body minus the H1 heading, trimmed
-		const description = body.replace(/^#\s+.*\n+/, "").trim() || title
-
-		// Ask for confirmation via elicitation
-		if (_elicitInput) {
-			const result = await _elicitInput({
-				message: `Reset intent "${slug}"?\n\nThis will DELETE all state (stages, units, knowledge) and recreate the intent with the same description.\n\nDescription: "${description}"`,
-				requestedSchema: {
-					type: "object" as const,
-					properties: {
-						confirm: {
-							type: "string",
-							title: "Confirm Reset",
-							description: "This cannot be undone",
-							enum: ["Reset", "Cancel"],
-						},
-					},
-					required: ["confirm"],
-				},
-			})
-
-			if (
-				result.action !== "accept" ||
-				(result.content as Record<string, string>)?.confirm !== "Reset"
-			) {
-				return text(
-					JSON.stringify({ action: "cancelled", message: "Reset cancelled." }),
-				)
-			}
-		} else {
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: "Reset requires user confirmation via elicitation.",
-					},
-				],
-				isError: true,
-			}
-		}
-
-		// Read conversation context if it exists (preserve it). Read this
-		// BEFORE any branch switch so we read from whatever branch has the
-		// ctx file at call time. The intent's most-recent context wins.
-		let conversationContext = ""
-		const ctxFile = join(iDir, "knowledge", "CONVERSATION-CONTEXT.md")
-		if (existsSync(ctxFile)) {
-			conversationContext = readFileSync(ctxFile, "utf8").replace(
-				/^# Conversation Context\n\n/,
-				"",
-			)
-		}
-
-		// Read intent frontmatter now (while the file is still available on
-		// current branch) so we know which studio's stages to clean up.
-		const intentFm = parseFrontmatter(raw).data
-		const studio = (intentFm.studio as string) || ""
-
-		// Reset must land on repo mainline (not intent-main or a stage branch)
-		// because we are about to delete EVERY haiku/{slug}/* branch including
-		// intent-main itself. Git refuses to delete the branch you're on, so
-		// we must first move HEAD off all of them.
-		if (isGitRepo()) {
-			try {
-				const mainlineBranch = getMainlineBranch()
-				let currentBranch = ""
-				try {
-					currentBranch = execFileSync(
-						"git",
-						["rev-parse", "--abbrev-ref", "HEAD"],
-						{ encoding: "utf8", stdio: "pipe" },
-					).trim()
-				} catch {
-					/* non-fatal: detached HEAD */
-				}
-				if (mainlineBranch && currentBranch !== mainlineBranch) {
-					execFileSync("git", ["checkout", mainlineBranch], {
-						encoding: "utf8",
-						stdio: "pipe",
-					})
-				}
-			} catch (err) {
-				const raw = err instanceof Error ? err.message : String(err)
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Error: failed to checkout repo mainline before resetting intent '${slug}'. Stash or commit uncommitted changes, then retry. Raw git error: ${raw}`,
-						},
-					],
-					isError: true,
-				}
-			}
-
-			// Clean up unit worktrees BEFORE deleting their backing branches —
-			// otherwise `git branch -D` refuses because the branch is checked
-			// out in a worktree.
-			cleanupIntentWorktrees(slug)
-
-			// Delete every stage branch so the recreated intent starts clean.
-			if (studio) {
-				const allStudioStages = resolveStudioStages(studio)
-				for (const stg of allStudioStages) {
-					const stgBranch = `haiku/${slug}/${stg}`
-					if (branchExists(stgBranch)) {
-						deleteStageBranch(slug, stg)
-					}
-				}
-			}
-
-			// Finally, delete the intent-main branch itself. Without this the
-			// subsequent haiku_intent_create's createIntentBranch would
-			// checkout the stale haiku/{slug}/main and inherit its history.
-			const intentMainBranch = `haiku/${slug}/main`
-			if (branchExists(intentMainBranch)) {
-				deleteBranch(intentMainBranch)
-			}
-		}
-
-		// Delete the intent directory
-		rmSync(iDir, { recursive: true, force: true })
-
-		// Git commit the deletion
-		gitCommitState(`haiku: reset intent ${slug} (deleted)`)
-
-		// Return instruction to recreate
-		return text(
-			JSON.stringify(
-				{
-					action: "intent_reset",
-					slug,
-					title,
-					description,
-					context: conversationContext,
-					message: `Intent '${slug}' has been reset. Call haiku_intent_create { title: "${title.replace(/"/g, '\\"')}", description: "${description.replace(/"/g, '\\"').replace(/\n/g, "\\n")}", slug: "${slug}"${conversationContext ? ', context: "<preserved context>"' : ""} } to recreate it.`,
 				},
 				null,
 				2,

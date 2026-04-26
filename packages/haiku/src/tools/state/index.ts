@@ -15,12 +15,14 @@ import haiku_intent_get from "./haiku_intent_get.js"
 import haiku_intent_list from "./haiku_intent_list.js"
 import haiku_knowledge_list from "./haiku_knowledge_list.js"
 import haiku_knowledge_read from "./haiku_knowledge_read.js"
+import haiku_release_notes from "./haiku_release_notes.js"
 import haiku_settings_get from "./haiku_settings_get.js"
 import haiku_stage_get from "./haiku_stage_get.js"
 import haiku_studio_get from "./haiku_studio_get.js"
 import haiku_studio_list from "./haiku_studio_list.js"
 import haiku_studio_stage_get from "./haiku_studio_stage_get.js"
 import haiku_unit_get from "./haiku_unit_get.js"
+import haiku_unit_increment_bolt from "./haiku_unit_increment_bolt.js"
 import haiku_unit_list from "./haiku_unit_list.js"
 import haiku_version_info from "./haiku_version_info.js"
 
@@ -31,12 +33,14 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 			haiku_intent_list,
 			haiku_knowledge_list,
 			haiku_knowledge_read,
+			haiku_release_notes,
 			haiku_settings_get,
 			haiku_stage_get,
 			haiku_studio_get,
 			haiku_studio_list,
 			haiku_studio_stage_get,
 			haiku_unit_get,
+			haiku_unit_increment_bolt,
 			haiku_unit_list,
 			haiku_version_info,
 		] satisfies ToolDef[]

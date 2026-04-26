@@ -1337,43 +1337,6 @@ export function handleStateTool(
 				)
 			}
 		}
-		case "haiku_unit_increment_bolt": {
-			const boltBranchErr = enforceStageBranch(
-				args.intent as string,
-				args.stage as string,
-			)
-			if (boltBranchErr) return boltBranchErr
-			const path = unitPath(
-				args.intent as string,
-				args.stage as string,
-				args.unit as string,
-			)
-			const { data } = parseFrontmatter(readFileSync(path, "utf8"))
-			const current = (data.bolt as number) || 0
-
-			// Enforce max bolt limit (module-level MAX_UNIT_BOLTS)
-			if (current + 1 > MAX_UNIT_BOLTS) {
-				return text(
-					JSON.stringify({
-						error: "max_bolts_exceeded",
-						bolt: current,
-						max: MAX_UNIT_BOLTS,
-						message: `Unit has exceeded ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — this unit may need to be redesigned or split.`,
-					}),
-				)
-			}
-
-			setFrontmatterField(path, "bolt", current + 1)
-			// Reseal: bolt is in UNIT_FIELDS.
-			sealIntentState(args.intent as string)
-			emitTelemetry("haiku.bolt.iteration", {
-				intent: args.intent as string,
-				stage: args.stage as string,
-				unit: args.unit as string,
-				bolt: String(current + 1),
-			})
-			return text(String(current + 1))
-		}
 
 		case "haiku_decision_record": {
 			const intentArg = args.intent as string
@@ -2061,72 +2024,6 @@ export function handleStateTool(
 		}
 
 		// ── Release Notes ──
-		case "haiku_release_notes": {
-			const version = (args.version as string) || ""
-			// Search for CHANGELOG.md — try plugin root first, then walk up from cwd
-			let changelogPath = ""
-			const pluginRoot = resolvePluginRoot()
-			if (pluginRoot) {
-				const p = join(pluginRoot, "CHANGELOG.md")
-				if (existsSync(p)) changelogPath = p
-			}
-			if (!changelogPath) {
-				let dir = process.cwd()
-				for (let i = 0; i < 20; i++) {
-					const p = join(dir, "CHANGELOG.md")
-					if (existsSync(p)) {
-						changelogPath = p
-						break
-					}
-					const parent = join(dir, "..")
-					if (parent === dir) break
-					dir = parent
-				}
-			}
-			if (!changelogPath) return text("No CHANGELOG.md found.")
-
-			const changelog = readFileSync(changelogPath, "utf8")
-			// Split by ## [version] headers
-			const versionPattern = /^## \[([^\]]+)\]/gm
-			const matches: Array<{ version: string; start: number }> = []
-			let match = versionPattern.exec(changelog)
-			while (match !== null) {
-				matches.push({ version: match[1], start: match.index })
-				match = versionPattern.exec(changelog)
-			}
-
-			if (matches.length === 0)
-				return text("No versioned entries found in CHANGELOG.md.")
-
-			if (version) {
-				// Find the specific version
-				const idx = matches.findIndex((m) => m.version === version)
-				if (idx === -1)
-					return text(
-						`Version '${version}' not found in CHANGELOG.md. Available: ${matches
-							.slice(0, 10)
-							.map((m) => m.version)
-							.join(", ")}`,
-					)
-				const endIdx =
-					idx + 1 < matches.length ? matches[idx + 1].start : changelog.length
-				const section = changelog.slice(matches[idx].start, endIdx).trim()
-				return text(
-					`# Release Notes\n\n${section}\n\n---\nTotal releases in changelog: ${matches.length}`,
-				)
-			}
-
-			// Return 5 most recent
-			const recent = matches.slice(0, 5)
-			let out = "# Recent Release Notes\n"
-			for (let i = 0; i < recent.length; i++) {
-				const endIdx =
-					i + 1 < matches.length ? matches[i + 1].start : changelog.length
-				out += `\n${changelog.slice(recent[i].start, endIdx).trim()}\n`
-			}
-			out += `\n---\nTotal releases in changelog: ${matches.length}\n`
-			return text(out)
-		}
 
 		case "haiku_repair": {
 			// ── Repair: scan intents for metadata issues ──

@@ -144,17 +144,9 @@ export const routes: readonly RouteSpec[] = [
 		transport: "loopback",
 	},
 
-	// Review pane (always-available) ─────────────────────────────────────
-	{
-		method: "GET",
-		pathTemplate: "/review/current",
-		operationId: "getReviewCurrentPage",
-		request: null,
-		response: null,
-		summary: "Serve the always-available review pane (HTML SPA entry).",
-		tag: "review",
-		transport: "loopback",
-	},
+	// Review pane ───────────────────────────────────────────────────────
+	// Note: `/review/current` is served via the SPA catch-all in
+	// http.ts setNotFoundHandler — it has no dedicated handler.
 	{
 		method: "GET",
 		pathTemplate: "/review/{sessionId}",

@@ -220,54 +220,58 @@ exports[`FeedbackItem — state matrix > renders every (status × interaction) c
             class="text-xs text-stone-700 dark:text-stone-300 feedback-markdown prose prose-stone prose-sm dark:prose-invert max-w-none"
           >
             <div
-              class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
+              class="feedback-body-attachment-host [&_img]:cursor-zoom-in [&_img]:transition-opacity [&_img:hover]:opacity-90"
+            >
+              <div
+                class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
         prose-code:bg-stone-100 prose-code:dark:bg-stone-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:[overflow-wrap:anywhere]
         prose-pre:bg-stone-100 prose-pre:dark:bg-stone-800 prose-pre:rounded-lg prose-pre:overflow-x-auto prose-pre:max-w-full prose-pre:whitespace-pre-wrap
         prose-table:border-collapse prose-th:border prose-th:border-stone-300 prose-th:dark:border-stone-600 prose-th:px-3 prose-th:py-1.5
         prose-td:border prose-td:border-stone-300 prose-td:dark:border-stone-600 prose-td:px-3 prose-td:py-1.5 "
-              id="feedback-body"
-            >
-              <p>
-                The handler at 
-                <code>
-                  packages/haiku/src/http.ts:974
-                </code>
-                 silently rethrows when the client supplies 
-                <code>
-                  ..
-                </code>
-                 in 
-                <code>
-                  path
-                </code>
-                .
-              </p>
-              
+                id="feedback-body"
+              >
+                <p>
+                  The handler at 
+                  <code>
+                    packages/haiku/src/http.ts:974
+                  </code>
+                   silently rethrows when the client supplies 
+                  <code>
+                    ..
+                  </code>
+                   in 
+                  <code>
+                    path
+                  </code>
+                  .
+                </p>
+                
 
-              <p>
-                Repro:
-              </p>
-              
+                <p>
+                  Repro:
+                </p>
+                
 
-              <pre>
-                <code
-                  class="language-ts"
-                >
-                  await fetch('/api/stream?path=../../etc/passwd')
+                <pre>
+                  <code
+                    class="language-ts"
+                  >
+                    await fetch('/api/stream?path=../../etc/passwd')
 // expected: 403 Forbidden
 // actual: 500 Internal Server Error
 
-                </code>
-              </pre>
-              
+                  </code>
+                </pre>
+                
 
-              <p>
-                Reviewer note: add a regression scenario in 
-                <code>
-                  stream-handler.feature
-                </code>
-                 covering the 403 branch.
-              </p>
+                <p>
+                  Reviewer note: add a regression scenario in 
+                  <code>
+                    stream-handler.feature
+                  </code>
+                   covering the 403 branch.
+                </p>
+              </div>
             </div>
           </div>
           <div
@@ -639,98 +643,102 @@ exports[`FeedbackItem — state matrix > renders every (status × interaction) c
             class="text-xs text-stone-700 dark:text-stone-300 feedback-markdown prose prose-stone prose-sm dark:prose-invert max-w-none"
           >
             <div
-              class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
+              class="feedback-body-attachment-host [&_img]:cursor-zoom-in [&_img]:transition-opacity [&_img:hover]:opacity-90"
+            >
+              <div
+                class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
         prose-code:bg-stone-100 prose-code:dark:bg-stone-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:[overflow-wrap:anywhere]
         prose-pre:bg-stone-100 prose-pre:dark:bg-stone-800 prose-pre:rounded-lg prose-pre:overflow-x-auto prose-pre:max-w-full prose-pre:whitespace-pre-wrap
         prose-table:border-collapse prose-th:border prose-th:border-stone-300 prose-th:dark:border-stone-600 prose-th:px-3 prose-th:py-1.5
         prose-td:border prose-td:border-stone-300 prose-td:dark:border-stone-600 prose-td:px-3 prose-td:py-1.5 "
-              id="feedback-body"
-            >
-              <p>
-                The test bypasses the browser keyboard path:
-              </p>
-              
-
-              <ul>
+                id="feedback-body"
+              >
+                <p>
+                  The test bypasses the browser keyboard path:
+                </p>
                 
 
-                <li>
-                  Expected: simulate a real 
+                <ul>
+                  
+
+                  <li>
+                    Expected: simulate a real 
+                    <em>
+                      keydown
+                    </em>
+                     of 
+                    <code>
+                      Escape
+                    </code>
+                     on the sheet.
+                  </li>
+                  
+
+                  <li>
+                    Actual: calls 
+                    <code>
+                      dialog.close()
+                    </code>
+                     imperatively via the 
+                    <strong>
+                      test-only
+                    </strong>
+                     API.
+                    
+
+                    <ul>
+                      
+
+                      <li>
+                        This sidesteps the 
+                        <code>
+                          onOpenChange
+                        </code>
+                         callback we actually ship.
+                      </li>
+                      
+
+                      <li>
+                        It also hides a real bug where 
+                        <code>
+                          autoFocus
+                        </code>
+                         on the primary action     swallows the keystroke in Safari.
+                      </li>
+                      
+
+                    </ul>
+                    
+
+                  </li>
+                  
+
+                </ul>
+                
+
+                <p>
+                  See 
+                  <a
+                    href="packages/haiku-ui/src/components/feedback/FeedbackSheet.tsx:88"
+                  >
+                    FeedbackSheet.tsx:88
+                  </a>
+                   and compare with the 
+                  <a
+                    href="https://www.radix-ui.com/docs"
+                  >
+                    Radix dialog reference
+                  </a>
+                  .
+                </p>
+                
+
+                <p>
                   <em>
-                    keydown
+                    Blocker for external-review gate.
                   </em>
-                   of 
-                  <code>
-                    Escape
-                  </code>
-                   on the sheet.
-                </li>
-                
-
-                <li>
-                  Actual: calls 
-                  <code>
-                    dialog.close()
-                  </code>
-                   imperatively via the 
-                  <strong>
-                    test-only
-                  </strong>
-                   API.
-                  
-
-                  <ul>
-                    
-
-                    <li>
-                      This sidesteps the 
-                      <code>
-                        onOpenChange
-                      </code>
-                       callback we actually ship.
-                    </li>
-                    
-
-                    <li>
-                      It also hides a real bug where 
-                      <code>
-                        autoFocus
-                      </code>
-                       on the primary action     swallows the keystroke in Safari.
-                    </li>
-                    
-
-                  </ul>
-                  
-
-                </li>
-                
-
-              </ul>
-              
-
-              <p>
-                See 
-                <a
-                  href="packages/haiku-ui/src/components/feedback/FeedbackSheet.tsx:88"
-                >
-                  FeedbackSheet.tsx:88
-                </a>
-                 and compare with the 
-                <a
-                  href="https://www.radix-ui.com/docs"
-                >
-                  Radix dialog reference
-                </a>
-                .
-              </p>
-              
-
-              <p>
-                <em>
-                  Blocker for external-review gate.
-                </em>
-              </p>
+                </p>
+              </div>
             </div>
           </div>
           <div
@@ -1126,16 +1134,20 @@ exports[`FeedbackItem — state matrix > renders every (status × interaction) c
             class="text-xs text-stone-700 dark:text-stone-300 feedback-markdown prose prose-stone prose-sm dark:prose-invert max-w-none"
           >
             <div
-              class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
+              class="feedback-body-attachment-host [&_img]:cursor-zoom-in [&_img]:transition-opacity [&_img:hover]:opacity-90"
+            >
+              <div
+                class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
         prose-code:bg-stone-100 prose-code:dark:bg-stone-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:[overflow-wrap:anywhere]
         prose-pre:bg-stone-100 prose-pre:dark:bg-stone-800 prose-pre:rounded-lg prose-pre:overflow-x-auto prose-pre:max-w-full prose-pre:whitespace-pre-wrap
         prose-table:border-collapse prose-th:border prose-th:border-stone-300 prose-th:dark:border-stone-600 prose-th:px-3 prose-th:py-1.5
         prose-td:border prose-td:border-stone-300 prose-td:dark:border-stone-600 prose-td:px-3 prose-td:py-1.5 "
-              id="feedback-body"
-            >
-              <p>
-                Focus-trap unit tests only cover the single-dialog path. The nested case — AnnotationCanvas pin dropdown inside the FeedbackSheet — is untested and breaks on Safari 17.4.
-              </p>
+                id="feedback-body"
+              >
+                <p>
+                  Focus-trap unit tests only cover the single-dialog path. The nested case — AnnotationCanvas pin dropdown inside the FeedbackSheet — is untested and breaks on Safari 17.4.
+                </p>
+              </div>
             </div>
           </div>
           <p
@@ -1537,33 +1549,37 @@ exports[`FeedbackItem — state matrix > renders every (status × interaction) c
             class="text-xs text-stone-700 dark:text-stone-300 feedback-markdown prose prose-stone prose-sm dark:prose-invert max-w-none"
           >
             <div
-              class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
+              class="feedback-body-attachment-host [&_img]:cursor-zoom-in [&_img]:transition-opacity [&_img:hover]:opacity-90"
+            >
+              <div
+                class="prose prose-sm prose-stone dark:prose-invert max-w-none min-w-0 [overflow-wrap:anywhere]
         prose-code:bg-stone-100 prose-code:dark:bg-stone-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:[overflow-wrap:anywhere]
         prose-pre:bg-stone-100 prose-pre:dark:bg-stone-800 prose-pre:rounded-lg prose-pre:overflow-x-auto prose-pre:max-w-full prose-pre:whitespace-pre-wrap
         prose-table:border-collapse prose-th:border prose-th:border-stone-300 prose-th:dark:border-stone-600 prose-th:px-3 prose-th:py-1.5
         prose-td:border prose-td:border-stone-300 prose-td:dark:border-stone-600 prose-td:px-3 prose-td:py-1.5 "
-              id="feedback-body"
-            >
-              <p>
-                The fixture generator at 
-                <code>
-                  .haiku/intents/foo/stages/development/
-                </code>
-                 collides with 
-                <code>
-                  current_visit
-                </code>
-                 semantics — both systems reserve the 
-                <code>
-                  unit-NN-*
-                </code>
-                 prefix. See §4 of the migration plan.
-              </p>
-              
+                id="feedback-body"
+              >
+                <p>
+                  The fixture generator at 
+                  <code>
+                    .haiku/intents/foo/stages/development/
+                  </code>
+                   collides with 
+                  <code>
+                    current_visit
+                  </code>
+                   semantics — both systems reserve the 
+                  <code>
+                    unit-NN-*
+                  </code>
+                   prefix. See §4 of the migration plan.
+                </p>
+                
 
-              <p>
-                Unicode characters in play: H·AI·K·U (U+00B7), 🐞 (U+1F41E), smart quotes “foo”, en-dash –.
-              </p>
+                <p>
+                  Unicode characters in play: H·AI·K·U (U+00B7), 🐞 (U+1F41E), smart quotes “foo”, en-dash –.
+                </p>
+              </div>
             </div>
           </div>
           <div

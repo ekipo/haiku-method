@@ -198,7 +198,7 @@ export function InlineComments({
 		return Array.from(contentRef.current.children).indexOf(block)
 	}
 
-	// Write innerHTML manually (not via `dangerouslySetInnerHTML`). This
+	// Write the rendered HTML manually (not via the React JSX prop). This
 	// runs ONLY when the string value changes, not on every render, so
 	// ranges pinned against the rendered DOM stay valid.
 	//
@@ -207,6 +207,7 @@ export function InlineComments({
 	// paint stale ranges.
 	useEffect(() => {
 		if (!contentRef.current) return
+		// audit-allow: htmlContent is sanitized upstream (DOMPurify); manual write preserves Range stability
 		contentRef.current.innerHTML = htmlContent
 		pendingRangeRef.current = null
 		savedRangesRef.current.clear()

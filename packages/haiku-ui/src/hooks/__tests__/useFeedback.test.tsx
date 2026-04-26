@@ -155,11 +155,16 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 		const { fn, calls } = recordCalls(async (url, init) => {
 			const method = (init.method ?? "GET").toUpperCase()
 			if (method === "GET") {
+				// fetchFeedback fans out to /api/feedback/{i}/{s} (stage) +
+				// /api/feedback-intent/{i} (intent-scope). Return initial
+				// items only on the stage endpoint so merged length matches
+				// what the test asserts.
+				const isIntentScope = url.includes("/api/feedback-intent/")
 				return jsonResponse({
 					intent: INTENT,
 					stage: STAGE,
-					count: initial.length,
-					items: initial,
+					count: isIntentScope ? 0 : initial.length,
+					items: isIntentScope ? [] : initial,
 				})
 			}
 			if (method === "PUT") {
@@ -176,8 +181,11 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 		await waitFor(() => {
 			expect(result.current.items).toHaveLength(2)
 		})
+		// fetchFeedback fans out to 2 endpoints, so the initial mount
+		// produces 2 GETs. Optimistic splice = no follow-up fetch, so the
+		// count stays at 2.
 		const getsBefore = calls.filter((c) => c.method === "GET").length
-		expect(getsBefore).toBe(1)
+		expect(getsBefore).toBe(2)
 
 		await act(async () => {
 			await result.current.updateFeedback("FB-1", { status: "closed" })
@@ -185,7 +193,7 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 
 		const getsAfter = calls.filter((c) => c.method === "GET").length
 		const putsAfter = calls.filter((c) => c.method === "PUT").length
-		expect(getsAfter).toBe(1) // no follow-up GET
+		expect(getsAfter).toBe(2) // no follow-up GET
 		expect(putsAfter).toBe(1)
 		expect(
 			result.current.items.find((i) => i.feedback_id === "FB-1")?.status,
@@ -203,11 +211,16 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 		const { fn, calls } = recordCalls(async (url, init) => {
 			const method = (init.method ?? "GET").toUpperCase()
 			if (method === "GET") {
+				// fetchFeedback fans out to /api/feedback/{i}/{s} (stage) +
+				// /api/feedback-intent/{i} (intent-scope). Return initial
+				// items only on the stage endpoint so merged length matches
+				// what the test asserts.
+				const isIntentScope = url.includes("/api/feedback-intent/")
 				return jsonResponse({
 					intent: INTENT,
 					stage: STAGE,
-					count: initial.length,
-					items: initial,
+					count: isIntentScope ? 0 : initial.length,
+					items: isIntentScope ? [] : initial,
 				})
 			}
 			if (method === "DELETE") {
@@ -226,9 +239,11 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 			await result.current.deleteFeedback("FB-1")
 		})
 
+		// fetchFeedback fans out to 2 endpoints; mount = 2 GETs, no
+		// follow-up after the optimistic delete.
 		const getsAfter = calls.filter((c) => c.method === "GET").length
 		const deletesAfter = calls.filter((c) => c.method === "DELETE").length
-		expect(getsAfter).toBe(1) // no follow-up GET
+		expect(getsAfter).toBe(2) // no follow-up GET
 		expect(deletesAfter).toBe(1)
 		expect(result.current.items.map((i) => i.feedback_id)).toEqual(["FB-2"])
 	})
@@ -243,6 +258,15 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 		const { fn, calls } = recordCalls(async (url, init) => {
 			const method = (init.method ?? "GET").toUpperCase()
 			if (method === "GET") {
+				const isIntentScope = url.includes("/api/feedback-intent/")
+				if (isIntentScope) {
+					return jsonResponse({
+						intent: INTENT,
+						stage: STAGE,
+						count: 0,
+						items: [],
+					})
+				}
 				getCount += 1
 				const items = getCount === 1 ? initial : postCreate
 				return jsonResponse({
@@ -273,10 +297,11 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 			await result.current.createFeedback("Newly created", "body")
 		})
 
+		// fetchFeedback fans out to 2 endpoints, so each invocation counts
+		// 2 GETs. Initial mount + post-create refetch = 2 invocations = 4.
 		const getsAfter = calls.filter((c) => c.method === "GET").length
 		const postsAfter = calls.filter((c) => c.method === "POST").length
-		// Initial mount GET + post-create refetch GET + create POST.
-		expect(getsAfter).toBe(2)
+		expect(getsAfter).toBe(4)
 		expect(postsAfter).toBe(1)
 		expect(result.current.items.map((i) => i.feedback_id)).toEqual([
 			"FB-1",
@@ -289,11 +314,12 @@ describe("useFeedback — FB-47 optimistic mutation splicing", () => {
 		const { fn } = recordCalls(async (url, init) => {
 			const method = (init.method ?? "GET").toUpperCase()
 			if (method === "GET") {
+				const isIntentScope = url.includes("/api/feedback-intent/")
 				return jsonResponse({
 					intent: INTENT,
 					stage: STAGE,
-					count: initial.length,
-					items: initial,
+					count: isIntentScope ? 0 : initial.length,
+					items: isIntentScope ? [] : initial,
 				})
 			}
 			if (method === "PUT") {

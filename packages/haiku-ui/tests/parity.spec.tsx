@@ -126,10 +126,23 @@ describe("DOM parity — rendered app matches committed snapshot per fixture", (
 	beforeEach(() => {
 		// Reset any test-to-test DOM leakage before each render
 		document.body.innerHTML = ""
+		// useFeedback bypasses ApiClient for /api/feedback-intent reads. Stub
+		// global fetch so jsdom (no base URL) doesn't throw "Failed to parse
+		// URL" and render an error state into the snapshot.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () =>
+				new Response(
+					JSON.stringify({ items: [], count: 0 }),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			),
+		)
 	})
 
 	afterEach(() => {
 		cleanup()
+		vi.unstubAllGlobals()
 	})
 
 	for (const fx of FIXTURES) {

@@ -12,6 +12,7 @@
 
 import type { ToolDef } from "../types.js"
 import haiku_backlog from "./haiku_backlog.js"
+import haiku_capacity from "./haiku_capacity.js"
 import haiku_dashboard from "./haiku_dashboard.js"
 import haiku_feedback_delete from "./haiku_feedback_delete.js"
 import haiku_feedback_list from "./haiku_feedback_list.js"
@@ -20,6 +21,7 @@ import haiku_intent_get from "./haiku_intent_get.js"
 import haiku_intent_list from "./haiku_intent_list.js"
 import haiku_knowledge_list from "./haiku_knowledge_list.js"
 import haiku_knowledge_read from "./haiku_knowledge_read.js"
+import haiku_reflect from "./haiku_reflect.js"
 import haiku_release_notes from "./haiku_release_notes.js"
 import haiku_repair from "./haiku_repair.js"
 import haiku_review from "./haiku_review.js"
@@ -39,6 +41,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 	(
 		[
 			haiku_backlog,
+			haiku_capacity,
 			haiku_dashboard,
 			haiku_feedback_delete,
 			haiku_feedback_list,
@@ -47,6 +50,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 			haiku_intent_list,
 			haiku_knowledge_list,
 			haiku_knowledge_read,
+			haiku_reflect,
 			haiku_release_notes,
 			haiku_repair,
 			haiku_review,

@@ -9,7 +9,7 @@
 import { cleanup, render } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { FeedbackList, VIRTUALIZE_THRESHOLD } from "../FeedbackList"
-import { mockItems } from "../../components/feedback/__tests__/mockItems"
+import { mockItems } from "../../organisms/__tests__/mockItems"
 
 afterEach(() => {
 	cleanup()

@@ -24,8 +24,8 @@
 import { useLayoutEffect, useRef, useState } from "react"
 import type { FeedbackItemData } from "../../types"
 import { FeedbackItem } from "./FeedbackItem"
-import type { FeedbackStatus } from "../components/feedback/tokens"
-import { useFeedbackListKeyboardNav } from "../components/feedback/useFeedbackListKeyboardNav"
+import type { FeedbackStatus } from "../atoms/feedback-tokens"
+import { useFeedbackListKeyboardNav } from "../organisms/useFeedbackListKeyboardNav"
 
 // Virtualization is off: expanded-by-default cards have variable heights
 // that would need async measurement, and the measurement race against

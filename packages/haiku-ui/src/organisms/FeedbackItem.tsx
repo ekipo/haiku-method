@@ -39,13 +39,13 @@ import type { FeedbackItemData } from "../../types"
 import { AttachmentLightbox } from "./AttachmentLightbox"
 import { FeedbackOriginIcon } from "../atoms/FeedbackOriginIcon"
 import { FeedbackStatusBadge } from "../atoms/FeedbackStatusBadge"
-import type { FeedbackStatus } from "../components/feedback/tokens"
+import type { FeedbackStatus } from "../atoms/feedback-tokens"
 import {
 	originLabels,
 	statusBackground,
 	statusBorderLeft,
 	visitCounterClasses,
-} from "../components/feedback/tokens"
+} from "../atoms/feedback-tokens"
 
 const RESOLUTION_LABELS: Record<
 	"question" | "inline_fix" | "stage_revisit" | "upstream_rewind",

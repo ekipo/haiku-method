@@ -28,7 +28,7 @@ export type { FeedbackStatusBadgeProps } from "../../atoms/FeedbackStatusBadge"
 export { FeedbackStatusBadge } from "../../atoms/FeedbackStatusBadge"
 export type { FeedbackSummaryBarProps } from "../../molecules/FeedbackSummaryBar"
 export { FeedbackSummaryBar } from "../../molecules/FeedbackSummaryBar"
-export type { FeedbackOrigin, FeedbackStatus } from "./tokens"
+export type { FeedbackOrigin, FeedbackStatus } from "../../atoms/feedback-tokens"
 export {
 	feedbackStatusColors,
 	originColors,
@@ -37,9 +37,9 @@ export {
 	statusDotClasses,
 	TOKEN_HASH,
 	visitCounterClasses,
-} from "./tokens"
+} from "../../atoms/feedback-tokens"
 export type {
 	FeedbackListKeyboardNavHandle,
 	UseFeedbackListKeyboardNavOptions,
-} from "./useFeedbackListKeyboardNav"
-export { useFeedbackListKeyboardNav } from "./useFeedbackListKeyboardNav"
+} from "../../organisms/useFeedbackListKeyboardNav"
+export { useFeedbackListKeyboardNav } from "../../organisms/useFeedbackListKeyboardNav"

@@ -10,8 +10,8 @@
  * feedback card per `state-coverage-grid.md §7.1`.
  */
 
-import type { FeedbackStatus } from "../components/feedback/tokens"
-import { feedbackStatusColors } from "../components/feedback/tokens"
+import type { FeedbackStatus } from "../atoms/feedback-tokens"
+import { feedbackStatusColors } from "../atoms/feedback-tokens"
 
 export interface FeedbackStatusBadgeProps {
 	status: FeedbackStatus

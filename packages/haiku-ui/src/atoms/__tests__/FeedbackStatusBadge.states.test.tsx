@@ -9,7 +9,7 @@
 import { cleanup, render } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { FeedbackStatusBadge } from "../FeedbackStatusBadge"
-import { type FeedbackStatus, TOKEN_HASH } from "../../components/feedback/tokens"
+import { type FeedbackStatus, TOKEN_HASH } from "../../atoms/feedback-tokens"
 
 afterEach(() => {
 	cleanup()

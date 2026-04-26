@@ -12,8 +12,8 @@
  * meaningless emoji code point.
  */
 
-import type { FeedbackOrigin } from "../components/feedback/tokens"
-import { originColors, originIcons, originLabels } from "../components/feedback/tokens"
+import type { FeedbackOrigin } from "../atoms/feedback-tokens"
+import { originColors, originIcons, originLabels } from "../atoms/feedback-tokens"
 
 export interface FeedbackOriginIconProps {
 	origin: FeedbackOrigin

@@ -21,6 +21,7 @@ import haiku_knowledge_list from "./haiku_knowledge_list.js"
 import haiku_knowledge_read from "./haiku_knowledge_read.js"
 import haiku_release_notes from "./haiku_release_notes.js"
 import haiku_repair from "./haiku_repair.js"
+import haiku_review from "./haiku_review.js"
 import haiku_seed from "./haiku_seed.js"
 import haiku_settings_get from "./haiku_settings_get.js"
 import haiku_stage_get from "./haiku_stage_get.js"
@@ -46,6 +47,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 			haiku_knowledge_read,
 			haiku_release_notes,
 			haiku_repair,
+			haiku_review,
 			haiku_seed,
 			haiku_settings_get,
 			haiku_stage_get,

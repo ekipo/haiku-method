@@ -34,6 +34,7 @@ import haiku_stage_get from "./haiku_stage_get.js"
 import haiku_studio_get from "./haiku_studio_get.js"
 import haiku_studio_list from "./haiku_studio_list.js"
 import haiku_studio_stage_get from "./haiku_studio_stage_get.js"
+import haiku_unit_advance_hat from "./haiku_unit_advance_hat.js"
 import haiku_unit_get from "./haiku_unit_get.js"
 import haiku_unit_increment_bolt from "./haiku_unit_increment_bolt.js"
 import haiku_unit_list from "./haiku_unit_list.js"
@@ -68,6 +69,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 			haiku_studio_get,
 			haiku_studio_list,
 			haiku_studio_stage_get,
+			haiku_unit_advance_hat,
 			haiku_unit_get,
 			haiku_unit_increment_bolt,
 			haiku_unit_list,

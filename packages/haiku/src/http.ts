@@ -93,6 +93,13 @@ import {
 	serveFile,
 	serveUnderRoot,
 } from "./http/path-safety.js"
+import {
+	isValidSlug,
+	parseBodyWithSchema,
+	validateIntent,
+	validateStage,
+	validationErrorReply,
+} from "./http/validation.js"
 
 
 const SESSION_CANCEL_LOG_PATH = "/tmp/haiku-session-cancel.log"
@@ -285,36 +292,6 @@ export function closeSessionConnection(
 	wsConnections.delete(sessionId)
 }
 
-// ── Body validation helpers ──────────────────────────────────────────────
-
-function validationErrorReply(
-	reply: FastifyReply,
-	issues: ZodIssueWire[],
-	status = 400,
-): FastifyReply {
-	const payload: ValidationError = { error: "validation_failed", issues }
-	return reply.status(status).send(payload)
-}
-
-function parseBodyWithSchema<S extends ZodTypeAny>(
-	reply: FastifyReply,
-	body: unknown,
-	schema: S,
-): { ok: true; data: z.infer<S> } | { ok: false } {
-	const result = schema.safeParse(body)
-	if (!result.success) {
-		const issues: ZodIssueWire[] = result.error.issues.map((iss) => ({
-			code: iss.code,
-			message: iss.message,
-			path: iss.path as (string | number)[],
-		}))
-		validationErrorReply(reply, issues)
-		return { ok: false }
-	}
-	return { ok: true, data: result.data as z.infer<S> }
-}
-
-
 
 // ── E2E encryption wrapper (Fastify onSend hook) ────────────────────────
 
@@ -426,36 +403,6 @@ function respondSessionApi(reply: FastifyReply, sessionId: string): void {
 	reply.send(data)
 }
 
-// ── Slug sanitisation + feedback validators ─────────────────────────────
-
-function isValidSlug(value: string): boolean {
-	let decoded: string
-	try {
-		decoded = decodeURIComponent(value)
-	} catch {
-		return false
-	}
-	if (decoded.includes("\x00")) return false
-	return !/[/\\]|\.\./.test(decoded)
-}
-
-function validateIntent(slug: string): boolean {
-	try {
-		const intentRoot = intentDir(slug)
-		return existsSync(join(intentRoot, "intent.md"))
-	} catch {
-		return false
-	}
-}
-
-function validateStage(slug: string, stage: string): boolean {
-	try {
-		const root = intentDir(slug)
-		return existsSync(join(root, "stages", stage))
-	} catch {
-		return false
-	}
-}
 
 // ── WebSocket message dispatch ──────────────────────────────────────────
 

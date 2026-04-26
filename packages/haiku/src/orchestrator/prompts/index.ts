@@ -23,6 +23,7 @@ import continue_units from "./continue_units.js"
 import dag_cycle_detected from "./dag_cycle_detected.js"
 import design_direction_required from "./design_direction_required.js"
 import discovery_missing from "./discovery_missing.js"
+import elaborate from "./elaborate.js"
 import elaboration_insufficient from "./elaboration_insufficient.js"
 import error from "./error.js"
 import escalate from "./escalate.js"
@@ -70,6 +71,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["dag_cycle_detected", dag_cycle_detected],
 	["design_direction_required", design_direction_required],
 	["discovery_missing", discovery_missing],
+	["elaborate", elaborate],
 	["elaboration_insufficient", elaboration_insufficient],
 	["error", error],
 	["escalate", escalate],

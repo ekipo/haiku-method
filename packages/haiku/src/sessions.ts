@@ -170,7 +170,6 @@ export interface ReviewSession {
 	feedback: string
 	annotations?: ReviewAnnotations
 	gate_type?: string
-	html: string
 	/** If this review follows a prior changes_requested decision for the same
 	 *  intent, a snapshot of the prior review's content is attached here so
 	 *  the SPA can render a delta and show the previous feedback. */
@@ -223,7 +222,6 @@ export interface QuestionSession {
 	answers: QuestionAnswer[]
 	feedback: string
 	annotations?: QuestionAnnotations
-	html: string
 }
 
 export interface DesignArchetypeData {
@@ -260,7 +258,6 @@ export interface DesignDirectionSession {
 			pins?: Array<{ x: number; y: number; text: string }>
 		}
 	} | null
-	html: string
 }
 
 const sessions = new Map<

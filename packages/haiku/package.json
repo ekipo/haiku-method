@@ -4,7 +4,7 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
-		"prebuild": "node scripts/build-css.mjs && node scripts/bundle-haiku-ui.mjs",
+		"prebuild": "node scripts/bundle-haiku-ui.mjs",
 		"build": "node scripts/build-mcp.mjs",
 		"postbuild": "if [ -n \"$SENTRY_AUTH_TOKEN\" ]; then sentry-cli sourcemaps upload --url ${SENTRY_URL:-https://sentry.ops.gigsmart.com} --org ${SENTRY_ORG:-gigsmart} --project haiku-mcp --release haiku-mcp@$(node -e \"process.stdout.write(require('../../plugin/.claude-plugin/plugin.json').version)\") ../../plugin/bin/haiku.map && sentry-cli sourcemaps upload --url ${SENTRY_URL:-https://sentry.ops.gigsmart.com} --org ${SENTRY_ORG:-gigsmart} --project haiku-spa --release haiku-spa@$(node -e \"process.stdout.write(require('../../plugin/.claude-plugin/plugin.json').version)\") review-app/dist/assets/; fi; rm -f ../../plugin/bin/haiku.map",
 		"typecheck": "tsc --noEmit",
@@ -34,12 +34,9 @@
 		"zod": "^3.23.0"
 	},
 	"devDependencies": {
-		"@tailwindcss/cli": "^4.1.4",
-		"@tailwindcss/typography": "^0.5.19",
 		"@types/node": "^22.0.0",
 		"@types/ws": "^8.18.1",
 		"esbuild": "^0.27.7",
-		"tailwindcss": "^4.1.4",
 		"tsx": "^4.21.0",
 		"typescript": "^5.7.0"
 	}

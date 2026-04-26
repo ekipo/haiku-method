@@ -67,9 +67,6 @@ import {
 	stageStatePath,
 	writeJson,
 } from "./state-tools.js"
-import { renderDesignDirectionPage } from "./templates/design-direction.js"
-import { renderReviewPage } from "./templates/index.js"
-import { renderQuestionPage } from "./templates/question-form.js"
 import {
 	buildReviewUrl,
 	clearE2EKey,
@@ -751,7 +748,6 @@ async function handleToolCall(
 			intent_slug: slug,
 			review_type: "intent",
 			target: "",
-			html: "",
 		})
 		session.ad_hoc = true
 		session.stage = activeStage || undefined
@@ -779,17 +775,10 @@ async function handleToolCall(
 			outputArtifacts,
 		})
 
-		session.html = renderReviewPage({
-			intent,
-			units,
-			criteria,
-			reviewType: "intent",
-			target: "",
-			sessionId: session.session_id,
-			mermaid,
-			intentMockups: [],
-			unitMockups: new Map(),
-		})
+		// (Legacy server-rendered review HTML removed — the live route
+		// at /review/:sessionId serves HAIKU_UI_HTML, the React/Tanstack
+		// SPA. session.html was written here for years but never read
+		// by any handler; templates/ was dead code.)
 
 		const port = await startHttpServer()
 		const base = isRemoteReviewEnabled()
@@ -909,7 +898,6 @@ async function handleToolCall(
 			context,
 			imagePaths,
 			imageBaseDirs,
-			html: "",
 		})
 		bindSessionCancellation(session.session_id, signal)
 
@@ -918,14 +906,9 @@ async function handleToolCall(
 			(_, i) => `/question-image/${session.session_id}/${i}`,
 		)
 
-		// Render HTML
-		session.html = renderQuestionPage({
-			title,
-			questions,
-			context,
-			sessionId: session.session_id,
-			imageUrls,
-		})
+		// (Legacy server-rendered question HTML removed — see review
+		// session above. /question/:sessionId serves HAIKU_UI_HTML.)
+		void imageUrls
 
 		// Start HTTP server (idempotent)
 		const port = await startHttpServer()
@@ -1056,17 +1039,11 @@ async function handleToolCall(
 			intent_slug: input.intent_slug,
 			archetypes,
 			parameters,
-			html: "",
 		})
 		bindSessionCancellation(session.session_id, signal)
 
-		// Render HTML
-		session.html = renderDesignDirectionPage({
-			title,
-			archetypes,
-			parameters,
-			sessionId: session.session_id,
-		})
+		// (Legacy server-rendered design-direction HTML removed —
+		// /direction/:sessionId serves HAIKU_UI_HTML.)
 
 		// Start HTTP server (idempotent)
 		const port = await startHttpServer()
@@ -1223,7 +1200,6 @@ setOpenReviewHandler(
 			review_type: reviewType as "intent" | "unit",
 			gate_type: gateType,
 			target: "",
-			html: "",
 		})
 		bindSessionCancellation(session.session_id, signal)
 
@@ -1262,17 +1238,9 @@ setOpenReviewHandler(
 			outputArtifacts,
 		})
 
-		session.html = renderReviewPage({
-			intent,
-			units,
-			criteria,
-			reviewType: reviewType as "intent" | "unit",
-			target: "",
-			sessionId: session.session_id,
-			mermaid,
-			intentMockups: [],
-			unitMockups: new Map(),
-		})
+		// (Legacy server-rendered review HTML removed — see notes
+		// above. /review/:sessionId serves HAIKU_UI_HTML.)
+		void mermaid
 
 		const port = await startHttpServer()
 		const useRemote = isRemoteReviewEnabled()

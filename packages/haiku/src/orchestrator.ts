@@ -51,6 +51,7 @@ import {
 import { getCapabilities } from "./harness.js"
 import { adaptInstructions } from "./harness-instructions.js"
 import { type ModelTier, resolveModel } from "./model-selection.js"
+import { actionPromptBuilders } from "./orchestrator/prompts/index.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
 import { reportError } from "./sentry.js"
 import { logSessionEvent } from "./session-metadata.js"
@@ -5631,14 +5632,20 @@ function buildRunInstructions(
 
 	sections.push(`## Orchestrator Action\n\n\`\`\`json\n${actionJson}\n\`\`\``)
 
-	switch (action.action) {
-		case "select_studio": {
-			sections.push(
-				`## Studio Selection Required\n\nThis intent has no studio selected yet.\n\nCall \`haiku_select_studio { intent: "${slug}" }\` to choose a lifecycle studio.\nThe tool will present available studios via elicitation.`,
-			)
-			break
+	// Per-action prompt builders in orchestrator/prompts/* take priority
+	// over the legacy switch. Migrated actions live in their own file
+	// with definePromptBuilder(); the switch below handles the rest
+	// until they all migrate.
+	const perActionBuilder = actionPromptBuilders.get(action.action)
+	if (perActionBuilder) {
+		const built = perActionBuilder({ slug, studio, action, dir })
+		if (built !== null) {
+			sections.push(built)
+			return sections.join("\n\n")
 		}
+	}
 
+	switch (action.action) {
 		case "start_stage": {
 			const stage = action.stage as string
 			const hats = (action.hats as string[]) || []
@@ -7094,21 +7101,6 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			break
 		}
 
-		case "intent_approved": {
-			sections.push(
-				`## Intent Approved\n\nThe user has approved the intent.\n\n**Call \`haiku_run_next { intent: "${slug}" }\` immediately.** Do NOT ask the user — the transition was already approved.`,
-			)
-			break
-		}
-
-		case "advance_phase": {
-			const toPhase = action.to_phase as string
-			sections.push(
-				`## Advance Phase\n\nPhase advanced to "${toPhase}" by the orchestrator.\n\n**Call \`haiku_run_next { intent: "${slug}" }\` immediately.** Do NOT ask the user — the transition was already approved.`,
-			)
-			break
-		}
-
 		case "review": {
 			const stage = action.stage as string
 			sections.push(FSM_CONTRACTS_REVIEW_BLOCK)
@@ -7987,21 +7979,6 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			break
 		}
 
-		case "outputs_missing": {
-			sections.push(`## Missing Required Outputs\n\n${action.message}`)
-			break
-		}
-
-		case "elaboration_insufficient": {
-			sections.push(`## Elaboration Insufficient\n\n${action.message}`)
-			break
-		}
-
-		case "spec_validation_failed": {
-			sections.push(`## Spec Validation Failed\n\n${action.message}`)
-			break
-		}
-
 		case "pre_review": {
 			const stage = action.stage as string
 			const unitsDir = (action.units_dir as string) || ""
@@ -8255,114 +8232,6 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 						? `The stage is awaiting external review at: ${externalUrl}`
 						: "The stage is awaiting external review but no review URL has been recorded."
 				}\n\nThe orchestrator checks for approval automatically. Neither detected approval yet.\n\nInform the user that the stage is waiting on external review. After the review is approved, run \`/haiku:pickup\` to continue.`,
-			)
-			break
-		}
-
-		case "design_direction_required": {
-			sections.push(
-				`## Design Direction Required\n\nThis stage requires wireframe variants before proceeding.\n\n1. Generate 2-3 distinct design approaches as HTML wireframe snippets\n2. Call \`pick_design_direction\` with the variants\n3. After the user selects a direction, call \`haiku_run_next { intent: "${slug}", design_direction_selected: true }\`\n\nCheck for design provider MCPs (\`mcp__pencil__*\`, \`mcp__openpencil__*\`) and use them if available.`,
-			)
-			break
-		}
-
-		case "discovery_missing": {
-			sections.push(`## Missing Discovery Artifacts\n\n${action.message}`)
-			break
-		}
-
-		case "dag_cycle_detected": {
-			sections.push(`## Circular Dependency Detected\n\n${action.message}`)
-			break
-		}
-
-		case "error": {
-			sections.push(`## Error\n\n${action.message}`)
-			break
-		}
-
-		case "complete": {
-			sections.push(`## Already Complete\n\n${action.message}`)
-			break
-		}
-
-		case "unit_inputs_missing": {
-			sections.push(`## Missing Unit Inputs\n\n${action.message}`)
-			break
-		}
-
-		case "fix_quality_gates": {
-			sections.push(
-				`## Quality Gates Failed\n\n${action.message || "No details provided."}\n\n### Instructions\n\nFix each failing gate, then call \`haiku_run_next { intent: "${slug}" }\` to retry. The orchestrator will re-run the gates before proceeding to adversarial review.`,
-			)
-			break
-		}
-
-		case "changes_requested": {
-			const annotations = action.annotations as
-				| Array<{ path?: string; body?: string }>
-				| undefined
-			let body = `## Changes Requested\n\n${action.message || "No details provided."}`
-			if (annotations && annotations.length > 0) {
-				body += "\n\n### Annotations\n"
-				for (const a of annotations) {
-					body += `\n- ${a.path ? `**${a.path}:** ` : ""}${a.body || ""}`
-				}
-			}
-			body += `\n\n### Instructions\n\nAddress each piece of feedback, then call \`haiku_run_next { intent: "${slug}" }\` to re-submit for review.`
-			sections.push(body)
-			break
-		}
-
-		case "external_review_requested": {
-			sections.push(
-				`## External Review Requested\n\n${action.message || "No details provided."}`,
-			)
-			break
-		}
-
-		case "unresolved_dependencies": {
-			sections.push(
-				`## Unresolved Dependencies\n\n${action.message || "No details provided."}\n\n### Instructions\n\nFix the \`depends_on\` fields in the affected unit files to reference existing unit names, then call \`haiku_run_next { intent: "${slug}" }\` to retry.`,
-			)
-			break
-		}
-
-		case "unit_naming_invalid": {
-			sections.push(
-				`## Unit Naming Invalid\n\n${action.message || "No details provided."}\n\n### Instructions\n\nRename the affected files to match the \`unit-NN-slug.md\` pattern (e.g., \`unit-01-data-model.md\`), then call \`haiku_run_next { intent: "${slug}" }\` to retry.`,
-			)
-			break
-		}
-
-		case "inputs_missing": {
-			sections.push(
-				`## Missing Inputs\n\n${action.message || "Units are missing required input references."}\n\n### Instructions\n\nAdd \`inputs:\` to each unit's frontmatter referencing the artifacts it needs, then call \`haiku_run_next { intent: "${slug}" }\` to retry.`,
-			)
-			break
-		}
-
-		case "gate_blocked": {
-			sections.push(
-				`## Gate Review Blocked\n\n${action.message || "No details provided."}\n\n### Instructions\n\nCall \`haiku_run_next { intent: "${slug}" }\` to retry the gate review. If the issue persists, ask the user for guidance.`,
-			)
-			break
-		}
-
-		case "safe_intent_repair": {
-			const synthesizedStages = (action.synthesized_stages as string[]) || []
-			const phaseWasRegressed = action.phase_regressed as boolean
-			sections.push(`## Safe Intent Repair\n\n${action.message}`)
-			if (synthesizedStages.length > 0) {
-				sections.push(`**Synthesized stages:** ${synthesizedStages.join(", ")}`)
-			}
-			if (phaseWasRegressed) {
-				sections.push(
-					"**Phase regressed:** The active stage was regressed from `execute` to `elaborate` because some units are missing `inputs:` declarations. Address the missing inputs before proceeding.",
-				)
-			}
-			sections.push(
-				`### Instructions\n\nResolve any stages needing manual review, then call \`haiku_run_next { intent: "${slug}" }\` again.`,
 			)
 			break
 		}

@@ -19,6 +19,7 @@ import blocked from "./blocked.js"
 import changes_requested from "./changes_requested.js"
 import complete from "./complete.js"
 import composite_run_stage from "./composite_run_stage.js"
+import continue_units from "./continue_units.js"
 import dag_cycle_detected from "./dag_cycle_detected.js"
 import design_direction_required from "./design_direction_required.js"
 import discovery_missing from "./discovery_missing.js"
@@ -47,6 +48,7 @@ import select_studio from "./select_studio.js"
 import spec_validation_failed from "./spec_validation_failed.js"
 import start_stage from "./start_stage.js"
 import start_unit from "./start_unit.js"
+import start_units from "./start_units.js"
 import type { PromptBuilder } from "./types.js"
 import unit_inputs_missing from "./unit_inputs_missing.js"
 import unit_naming_invalid from "./unit_naming_invalid.js"
@@ -64,6 +66,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["changes_requested", changes_requested],
 	["complete", complete],
 	["composite_run_stage", composite_run_stage],
+	["continue_units", continue_units],
 	["dag_cycle_detected", dag_cycle_detected],
 	["design_direction_required", design_direction_required],
 	["discovery_missing", discovery_missing],
@@ -95,6 +98,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	// to add the haiku_unit_start step.
 	["continue_unit", start_unit],
 	["start_unit", start_unit],
+	["start_units", start_units],
 	["unit_inputs_missing", unit_inputs_missing],
 	["unit_naming_invalid", unit_naming_invalid],
 	["unresolved_dependencies", unresolved_dependencies],

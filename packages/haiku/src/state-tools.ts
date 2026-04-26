@@ -140,6 +140,10 @@ import {
 	syncSessionMetadata,
 } from "./state/active-stage.js"
 import {
+	type QualityGateResult,
+	runInlineQualityGates,
+} from "./state/quality-gates.js"
+import {
 	unitIntentDir,
 	unitOutputExists,
 	validateUnitScope,
@@ -262,105 +266,6 @@ export {
 	unitOutputExists,
 	validateUnitScope,
 }
-
-// ── Inline quality gates (for hookless harnesses) ─────────────────────────
-//
-// Mirrors the quality-gate Stop hook logic but runs inside haiku_unit_advance_hat.
-// Returns an error object if any gate fails, or null if all pass.
-
-function runInlineQualityGates(
-	intentSlug: string,
-	unitPath: string,
-): {
-	error: string
-	message: string
-	failures: Array<{
-		name: string
-		command: string
-		exit_code: number
-		output: string
-	}>
-} | null {
-	// Read quality_gates from intent and unit frontmatter
-	const root = findHaikuRoot()
-	const intentFile = join(root, "intents", intentSlug, "intent.md")
-
-	function readGates(filePath: string): Array<Record<string, string>> {
-		if (!existsSync(filePath)) return []
-		const raw = readFileSync(filePath, "utf8")
-		const { data } = parseFrontmatter(raw)
-		const gates = data.quality_gates
-		if (!Array.isArray(gates)) return []
-		return gates as Array<Record<string, string>>
-	}
-
-	const intentGates = readGates(intentFile)
-	const unitGates = readGates(unitPath)
-	const allGates = [...intentGates, ...unitGates]
-	if (allGates.length === 0) return null
-
-	// Resolve repo root for cwd
-	let repoRoot = process.cwd()
-	try {
-		repoRoot = execSync("git rev-parse --show-toplevel", {
-			encoding: "utf8",
-		}).trim()
-	} catch {
-		/* use cwd */
-	}
-
-	const failures: Array<{
-		name: string
-		command: string
-		exit_code: number
-		output: string
-	}> = []
-
-	for (let i = 0; i < allGates.length; i++) {
-		const gate = allGates[i]
-		const gateName = gate.name ?? `gate-${i}`
-		const gateCmd = gate.command ?? ""
-		if (!gateCmd) continue
-
-		const cwd = gate.dir ? resolve(repoRoot, gate.dir) : repoRoot
-
-		// Per-gate timeout defaults to 30s; override via HAIKU_GATE_TIMEOUT_MS.
-		const gateTimeoutMs =
-			Number.parseInt(process.env.HAIKU_GATE_TIMEOUT_MS ?? "", 10) || 30000
-		try {
-			execSync(gateCmd, {
-				cwd,
-				encoding: "utf8",
-				timeout: gateTimeoutMs,
-				stdio: ["pipe", "pipe", "pipe"],
-			})
-		} catch (err: unknown) {
-			const execErr = err as {
-				status?: number
-				stdout?: string
-				stderr?: string
-			}
-			failures.push({
-				name: gateName,
-				command: gateCmd,
-				exit_code: execErr.status ?? 1,
-				output: ((execErr.stdout ?? "") + (execErr.stderr ?? "")).slice(0, 500),
-			})
-		}
-	}
-
-	if (failures.length === 0) return null
-
-	return {
-		error: "quality_gate_failed",
-		message: `Cannot advance hat: ${failures.length} quality gate(s) failed. Fix the issues and try again.\n${failures.map((f) => `- ${f.name}: '${f.command}' exited ${f.exit_code}${f.output ? `: ${f.output}` : ""}`).join("\n")}`,
-		failures,
-	}
-}
-
-
-
-
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@
 
 import { useMemo } from "react"
 import { focusRingCompactClass, touchTargetClass } from "../a11y"
-import type { FeedbackItemData } from "../../types"
+import type { FeedbackItemData } from "../types"
 import type { FeedbackStatus } from "../atoms/feedback-tokens"
 import { statusDotClasses } from "../atoms/feedback-tokens"
 

@@ -21,10 +21,8 @@ import { MarkdownViewer } from "@haiku/shared"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Header as HeaderLandmark, Main } from "../../a11y"
 import type { AnnotationPin } from "../../organisms/AnnotationCanvas"
-import {
-	FeedbackFloatingButton,
-	FeedbackSheet,
-} from "../../components/feedback"
+import { FeedbackFloatingButton } from "../../organisms/FeedbackFloatingButton"
+import { FeedbackSheet } from "../../organisms/FeedbackSheet"
 import type { InlineCommentEntry } from "../../organisms/InlineComments"
 import { StageProgressStrip } from "../../molecules/StageProgressStrip"
 import { SubmitSuccess } from "../../molecules/SubmitSuccess"

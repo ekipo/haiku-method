@@ -35,7 +35,7 @@ import {
 	touchTargetClass,
 	useAnnounce,
 } from "../a11y"
-import type { FeedbackItemData } from "../../types"
+import type { FeedbackItemData } from "../types"
 import { AttachmentLightbox } from "./AttachmentLightbox"
 import { FeedbackOriginIcon } from "../atoms/FeedbackOriginIcon"
 import { FeedbackStatusBadge } from "../atoms/FeedbackStatusBadge"

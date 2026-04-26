@@ -1,14 +1,12 @@
 import { StatusBadge } from "@haiku/shared"
 import { useCallback, useMemo, useState } from "react"
-import { useFeedback } from "../hooks/useFeedback"
-import type { ReviewCurrentResponse } from "../types"
-import {
-	FeedbackList,
-	type FeedbackStatus,
-	FeedbackSummaryBar,
-} from "./feedback"
-import { ReviewContextHeader } from "./ReviewContextHeader"
-import { StageProgressStrip } from "./StageProgressStrip"
+import { useFeedback } from "../../hooks/useFeedback"
+import type { ReviewCurrentResponse } from "../../types"
+import { type FeedbackStatus } from "../../atoms/feedback-tokens"
+import { FeedbackSummaryBar } from "../../molecules/FeedbackSummaryBar"
+import { ReviewContextHeader } from "../../molecules/ReviewContextHeader"
+import { StageProgressStrip } from "../../molecules/StageProgressStrip"
+import { FeedbackList } from "../../organisms/FeedbackList"
 
 interface Props {
 	data: ReviewCurrentResponse

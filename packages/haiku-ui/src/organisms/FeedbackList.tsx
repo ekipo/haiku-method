@@ -22,7 +22,7 @@
  */
 
 import { useLayoutEffect, useRef, useState } from "react"
-import type { FeedbackItemData } from "../../types"
+import type { FeedbackItemData } from "../types"
 import { FeedbackItem } from "./FeedbackItem"
 import type { FeedbackStatus } from "../atoms/feedback-tokens"
 import { useFeedbackListKeyboardNav } from "../organisms/useFeedbackListKeyboardNav"

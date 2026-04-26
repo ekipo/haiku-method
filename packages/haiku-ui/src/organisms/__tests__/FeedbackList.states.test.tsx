@@ -17,7 +17,7 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { FeedbackItemData } from "../../../types"
+import type { FeedbackItemData } from "../../types"
 import { FeedbackList } from "../FeedbackList"
 import { TOKEN_HASH } from "../../atoms/feedback-tokens"
 import { mockItems } from "../../organisms/__tests__/mockItems"

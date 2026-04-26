@@ -3,7 +3,7 @@ import { useRef, useState } from "react"
 import { useApiClient } from "../api/context"
 import { tryCloseTab } from "../lib/tryCloseTab"
 import type { ReviewAnnotations } from "../types"
-import { SubmitSuccess } from "./SubmitSuccess"
+import { SubmitSuccess } from "../molecules/SubmitSuccess"
 
 export interface SidebarComment {
 	type: "inline" | "pin" | "general"

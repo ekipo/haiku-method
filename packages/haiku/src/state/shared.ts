@@ -65,6 +65,60 @@ export function intentDir(slug: string): string {
 	return join(findHaikuRoot(), "intents", slug)
 }
 
+export function stageDir(slug: string, stage: string): string {
+	return join(intentDir(slug), "stages", stage)
+}
+
+export function unitPath(slug: string, stage: string, unit: string): string {
+	const name = unit.endsWith(".md") ? unit : `${unit}.md`
+	return join(stageDir(slug, stage), "units", name)
+}
+
+export function stageStatePath(slug: string, stage: string): string {
+	return join(stageDir(slug, stage), "state.json")
+}
+
+/**
+ * Minimal glob matcher. Accepts:
+ *   - exact path: "stages/design/artifacts/foo.html"
+ *   - directory path (prefix match): "stages/design/artifacts/" or "stages/design/artifacts"
+ *   - single-star glob: "stages/design/artifacts/*.html"
+ *   - double-star glob: trailing or mid-string (e.g. packages\/&#42;&#42;\/src)
+ *
+ * Exported for direct testing (no stable API guarantee).
+ */
+export function matchesGlob(candidate: string, pattern: string): boolean {
+	const c = candidate.replace(/^\.\//, "")
+	const p = pattern.replace(/^\.\//, "")
+	if (c === p) return true
+	// Directory prefix: pattern ends with / or /** or is a plain dir
+	if (p.endsWith("/**")) {
+		const prefix = p.slice(0, -3)
+		return c === prefix || c.startsWith(`${prefix}/`)
+	}
+	if (p.endsWith("/")) {
+		return c.startsWith(p)
+	}
+	// Plain dir (no trailing slash, no star): treat as prefix if candidate is under it
+	if (!p.includes("*") && c.startsWith(`${p}/`)) return true
+	// Star wildcards: convert to regex. Use a NUL placeholder for `**` so
+	// the subsequent single-`*` expansion doesn't re-expand the `.*`.
+	if (p.includes("*")) {
+		const esc = p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+		const doubleStar = /\*\*/g
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: \x00 sentinel restored after escaping single *
+		const sentinel = /\x00/g
+		const regex = new RegExp(
+			`^${esc
+				.replace(doubleStar, "\x00")
+				.replace(/\*/g, "[^/]*")
+				.replace(sentinel, ".*")}$`,
+		)
+		return regex.test(c)
+	}
+	return false
+}
+
 // ── JSON helpers ───────────────────────────────────────────────────────────
 
 export function readJson(path: string): Record<string, unknown> {
@@ -75,6 +129,13 @@ export function readJson(path: string): Record<string, unknown> {
 export function writeJson(path: string, data: Record<string, unknown>): void {
 	mkdirSync(join(path, ".."), { recursive: true })
 	writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`)
+}
+
+/** ISO-8601 timestamp without millisecond precision. The trailing `.NNNZ`
+ *  is stripped so persisted timestamps stay readable in feedback files,
+ *  state.json, and intent frontmatter. */
+export function timestamp(): string {
+	return new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
 }
 
 // ── Frontmatter parsing ────────────────────────────────────────────────────

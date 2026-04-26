@@ -127,6 +127,19 @@ import {
 	validateBranch,
 } from "./state/git-commit.js"
 import {
+	enforceStageBranch,
+	FEEDBACK_ASSESSOR_HAT,
+	findUnitFile,
+	getRunNextHandler,
+	resolveActiveStage,
+	resolveStageHats,
+	resolveStageScope,
+	resolveUnitHats,
+	type RunNextHandler,
+	setRunNextHandler,
+	syncSessionMetadata,
+} from "./state/active-stage.js"
+import {
 	_resetIsGitRepoForTests,
 	findHaikuRoot,
 	intentDir,
@@ -226,6 +239,18 @@ export {
 	injectPushWarning,
 	pushWarning,
 	validateBranch,
+}
+export {
+	enforceStageBranch,
+	FEEDBACK_ASSESSOR_HAT,
+	findUnitFile,
+	resolveActiveStage,
+	resolveStageHats,
+	resolveStageScope,
+	resolveUnitHats,
+	type RunNextHandler,
+	setRunNextHandler,
+	syncSessionMetadata,
 }
 
 // ── Inline quality gates (for hookless harnesses) ─────────────────────────
@@ -697,295 +722,6 @@ export function validateUnitScope(
 	return null
 }
 
-
-
-/**
- * Enumerate intent slugs under `intentsDir`, optionally filtering out archived ones.
- *
- * Archival is a soft-hide flag orthogonal to `status`: an intent with
- * `archived: true` in its frontmatter is hidden from default list views but
- * its prior status is preserved for lossless unarchival.
- *
- * By default (`opts.includeArchived !== true`) archived intents are filtered
- * out. Passing `{ includeArchived: true }` returns every intent slug that has
- * an `intent.md` regardless of the archived flag.
- *
- * This is the single source of truth for archived-filtering across the three
- * user-facing enumeration sites (`haiku_intent_list`, `haiku_dashboard`,
- * `haiku_capacity`). Do NOT duplicate the `archived === true` predicate —
- * call this helper instead so miss-one-site regressions are impossible.
- */
-/**
- * Enumerate visible (non-archived) intents in a directory, returning both
- * slug and parsed frontmatter data. Reuses parseFrontmatter so callers don't
- * have to re-parse each intent.md for downstream work (response shaping,
- * dashboard rendering, capacity aggregation).
- *
- * Set `opts.includeArchived` to true to return all intents (both archived
- * and non-archived).
-
-/**
- * Callback for runNext — registered by orchestrator at startup to avoid circular imports.
- * Used by advance_hat to internally progress the FSM after unit completion.
- */
-let _runNext:
-	| ((slug: string) => { action: string; [key: string]: unknown })
-	| null = null
-export function setRunNextHandler(handler: typeof _runNext): void {
-	_runNext = handler
-}
-
-/** Resolve the active stage for an intent from its frontmatter */
-function resolveActiveStage(intent: string): string {
-	const root = findHaikuRoot()
-	const intentFile = join(root, "intents", intent, "intent.md")
-	if (!existsSync(intentFile)) return ""
-	const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
-	return (data.active_stage as string) || ""
-}
-
-/**
- * Pre-flight branch enforcement for stage-scoped state-mutating tools.
- *
- * Ensures the MCP's current git checkout is on `haiku/{intent}/{stage}`
- * before the caller writes any stage state. If main drifted ahead (feedback
- * files or state leaked there), merges main → stage first so nothing is lost.
- *
- * Returns null on success (caller continues) or an MCP error response
- * (caller returns it directly) when the branch couldn't be aligned.
- * No-op in filesystem / non-git mode.
- */
-function enforceStageBranch(
-	intent: string,
-	stage: string | undefined,
-): { content: Array<{ type: "text"; text: string }>; isError: true } | null {
-	const guard = ensureOnStageBranch(intent, stage)
-	if (!guard.ok) {
-		// When the block is a dirty tree, return a structured commit_wip
-		// action instead of a hard error. The agent commits the listed
-		// files (which belong on the current branch) and retries — no
-		// human intervention needed.
-		if (guard.block === "dirty_tree") {
-			const files = guard.dirty_files || []
-			const filesBlock =
-				files.length > 0
-					? `\n\nFiles to commit:\n${files.map((f) => `  - ${f}`).join("\n")}`
-					: ""
-			const action = {
-				action: "commit_wip",
-				intent,
-				stage: stage ?? null,
-				context: "state-tool branch enforcement",
-				current_branch: guard.branch,
-				target_branch: guard.target_branch || "the target branch",
-				dirty_files: files,
-				message: `Uncommitted changes on branch '${guard.branch}' block the switch to '${guard.target_branch}'. These changes belong on '${guard.branch}' — commit them there, then retry the tool call. No human intervention needed.${filesBlock}\n\nSteps:\n  1. \`git add ${files.length > 0 ? files.join(" ") : "<files listed above>"}\`\n  2. \`git commit -m "haiku: wip on ${guard.branch}"\`\n  3. Retry the call.`,
-			}
-			return {
-				content: [{ type: "text", text: JSON.stringify(action, null, 2) }],
-				isError: true as const,
-			}
-		}
-		return {
-			content: [
-				{
-					type: "text",
-					text: `Error: stage-branch enforcement failed for intent '${intent}', stage '${stage ?? "(none)"}' — ${guard.message}`,
-				},
-			],
-			isError: true as const,
-		}
-	}
-	return null
-}
-
-/** Find a unit file by searching through stages. Returns { path, stage } or null. */
-function findUnitFile(
-	intent: string,
-	unit: string,
-): { path: string; stage: string } | null {
-	const root = findHaikuRoot()
-	// First try the active stage (most common case)
-	const activeStage = resolveActiveStage(intent)
-	if (activeStage) {
-		const p = unitPath(intent, activeStage, unit)
-		if (existsSync(p)) return { path: p, stage: activeStage }
-	}
-	// Fallback: search all stages
-	const stagesDir = join(root, "intents", intent, "stages")
-	if (!existsSync(stagesDir)) return null
-	for (const stage of readdirSync(stagesDir)) {
-		const p = unitPath(intent, stage, unit)
-		if (existsSync(p)) return { path: p, stage }
-	}
-	return null
-}
-
-/** The built-in terminal hat auto-injected on any unit that declares `closes:`
- *  feedback items. Verifies the unit's output actually resolves each claim
- *  and marks them closed/addressed; rejects back to the designer if not. */
-export const FEEDBACK_ASSESSOR_HAT = "feedback-assessor"
-
-/** Resolve the hat sequence for a specific unit. Starts from the stage's
- *  declared hats and appends `feedback-assessor` as the terminal hat when
- *  the unit has `closes:` references — so any unit claiming closures gets
- *  independently verified before completion. */
-export function resolveUnitHats(
-	intent: string,
-	stage: string,
-	unit: string,
-): string[] {
-	const stageHats = resolveStageHats(intent, stage)
-	try {
-		const p = unitPath(intent, stage, unit)
-		if (!existsSync(p)) return stageHats
-		const { data } = parseFrontmatter(readFileSync(p, "utf8"))
-		const closes = (data.closes as string[]) || []
-		if (closes.length > 0 && !stageHats.includes(FEEDBACK_ASSESSOR_HAT)) {
-			return [...stageHats, FEEDBACK_ASSESSOR_HAT]
-		}
-	} catch {
-		/* non-fatal */
-	}
-	return stageHats
-}
-
-/** Resolve hat sequence for a stage — used by haiku_unit_advance_hat and haiku_unit_reject_hat */
-function resolveStageHats(intent: string, stage: string): string[] {
-	try {
-		const root = findHaikuRoot()
-		const intentFile = join(root, "intents", intent, "intent.md")
-		if (!existsSync(intentFile)) return []
-		const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
-		const studio = (data.studio as string) || ""
-		if (!studio) return []
-
-		const pluginRoot = resolvePluginRoot()
-		for (const base of [
-			join(process.cwd(), ".haiku", "studios"),
-			join(pluginRoot, "studios"),
-		]) {
-			const stageFile = join(base, studio, "stages", stage, "STAGE.md")
-			if (!existsSync(stageFile)) continue
-			const { data: stageFm } = parseFrontmatter(
-				readFileSync(stageFile, "utf8"),
-			)
-			return (stageFm.hats as string[]) || []
-		}
-	} catch {
-		/* */
-	}
-	return []
-}
-
-/** Resolve stage metadata for scope context in tool responses */
-function resolveStageScope(intent: string, stage: string): string {
-	try {
-		const root = findHaikuRoot()
-		const intentFile = join(root, "intents", intent, "intent.md")
-		if (!existsSync(intentFile)) return ""
-		const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
-		const studio = (data.studio as string) || ""
-		if (!studio) return ""
-
-		const pluginRoot = resolvePluginRoot()
-		for (const base of [
-			join(process.cwd(), ".haiku", "studios"),
-			join(pluginRoot, "studios"),
-		]) {
-			const stageFile = join(base, studio, "stages", stage, "STAGE.md")
-			if (!existsSync(stageFile)) continue
-			const raw = readFileSync(stageFile, "utf8")
-			const fm = parseFrontmatter(raw)
-			const { content } = matter(raw)
-			const desc = (fm.data.description as string) || stage
-			return `[stage_scope] ${stage}: ${desc} | ${content.trim().slice(0, 500)}`
-		}
-	} catch {
-		/* */
-	}
-	return ""
-}
-
-/**
- * Collect current H·AI·K·U state and write to the caller-provided state file.
- * The state_file path is injected by the pre_tool_use hook — the MCP server
- * never resolves session IDs or config dirs. If no state_file, this is a no-op.
- */
-export function syncSessionMetadata(
-	intent: string,
-	stateFile: string | undefined,
-): void {
-	if (!stateFile) return
-	try {
-		const root = findHaikuRoot()
-		const intentFile = join(root, "intents", intent, "intent.md")
-		if (!existsSync(intentFile)) return
-		const { data: intentData } = parseFrontmatter(
-			readFileSync(intentFile, "utf8"),
-		)
-		const studio = (intentData.studio as string) || ""
-		const activeStage = (intentData.active_stage as string) || ""
-
-		let phase = ""
-		if (activeStage) {
-			const sf = stageStatePath(intent, activeStage)
-			const stageState = readJson(sf)
-			phase = (stageState.phase as string) || ""
-		}
-
-		let activeUnit: string | null = null
-		let hat: string | null = null
-		let bolt: number | null = null
-		if (activeStage) {
-			const unitsDir = join(stageDir(intent, activeStage), "units")
-			if (existsSync(unitsDir)) {
-				for (const f of readdirSync(unitsDir).filter((f) =>
-					f.endsWith(".md"),
-				)) {
-					const { data: unitData } = parseFrontmatter(
-						readFileSync(join(unitsDir, f), "utf8"),
-					)
-					if (unitData.status === "active") {
-						activeUnit = f.replace(".md", "")
-						hat = (unitData.hat as string) || null
-						bolt = (unitData.bolt as number) || null
-						break
-					}
-				}
-			}
-		}
-
-		let stageDescription = activeStage
-		if (studio && activeStage) {
-			const pluginRoot = resolvePluginRoot()
-			for (const base of [
-				join(process.cwd(), ".haiku", "studios"),
-				join(pluginRoot, "studios"),
-			]) {
-				const sf = join(base, studio, "stages", activeStage, "STAGE.md")
-				if (!existsSync(sf)) continue
-				const { data: stageFm } = parseFrontmatter(readFileSync(sf, "utf8"))
-				stageDescription = (stageFm.description as string) || activeStage
-				break
-			}
-		}
-
-		writeHaikuMetadata(stateFile, {
-			intent,
-			studio,
-			active_stage: activeStage,
-			phase,
-			active_unit: activeUnit,
-			hat,
-			bolt,
-			stage_description: stageDescription,
-			updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-		})
-	} catch {
-		/* non-fatal */
-	}
-}
 
 
 // ── Tool definitions ───────────────────────────────────────────────────────
@@ -2285,6 +2021,7 @@ export function handleStateTool(
 				// Phase/stage transitions (advance_phase, advance_stage, review,
 				// intent_complete) are returned so the last caller can propagate
 				// the signal back to the parent via its final message.
+				const _runNext = getRunNextHandler()
 				if (_runNext) {
 					const next = _runNext(args.intent as string)
 					const subagentLocalActions = new Set([
@@ -2428,6 +2165,7 @@ export function handleStateTool(
 				args.state_file as string | undefined,
 			)
 			// Internally call runNext — returns continue_unit with next hat context for the parent
+			const _runNext = getRunNextHandler()
 			if (_runNext) {
 				const next = _runNext(args.intent as string)
 				const payload = injectPushWarning(

@@ -17,6 +17,7 @@ import advance_stage from "./advance_stage.js"
 import awaiting_external_review from "./awaiting_external_review.js"
 import blocked from "./blocked.js"
 import changes_requested from "./changes_requested.js"
+import commit_wip from "./commit_wip.js"
 import complete from "./complete.js"
 import composite_run_stage from "./composite_run_stage.js"
 import continue_units from "./continue_units.js"
@@ -27,7 +28,9 @@ import elaborate from "./elaborate.js"
 import elaboration_insufficient from "./elaboration_insufficient.js"
 import error from "./error.js"
 import escalate from "./escalate.js"
+import external_changes_requested from "./external_changes_requested.js"
 import external_review_requested from "./external_review_requested.js"
+import feedback_dispatch from "./feedback_dispatch.js"
 import feedback_revisit from "./feedback_revisit.js"
 import fix_quality_gates from "./fix_quality_gates.js"
 import gate_blocked from "./gate_blocked.js"
@@ -39,8 +42,11 @@ import intent_completion_fix from "./intent_completion_fix.js"
 import intent_completion_review from "./intent_completion_review.js"
 import outputs_missing from "./outputs_missing.js"
 import pre_review from "./pre_review.js"
+import pre_review_waiting from "./pre_review_waiting.js"
 import review from "./review.js"
 import review_fix from "./review_fix.js"
+import revise_unit_specs from "./revise_unit_specs.js"
+import revisited from "./revisited.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
 import start_stage from "./start_stage.js"
@@ -61,6 +67,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["awaiting_external_review", awaiting_external_review],
 	["blocked", blocked],
 	["changes_requested", changes_requested],
+	["commit_wip", commit_wip],
 	["complete", complete],
 	["composite_run_stage", composite_run_stage],
 	["continue_units", continue_units],
@@ -71,7 +78,9 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["elaboration_insufficient", elaboration_insufficient],
 	["error", error],
 	["escalate", escalate],
+	["external_changes_requested", external_changes_requested],
 	["external_review_requested", external_review_requested],
+	["feedback_dispatch", feedback_dispatch],
 	["feedback_revisit", feedback_revisit],
 	["fix_quality_gates", fix_quality_gates],
 	["gate_blocked", gate_blocked],
@@ -83,8 +92,11 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["intent_completion_review", intent_completion_review],
 	["outputs_missing", outputs_missing],
 	["pre_review", pre_review],
+	["pre_review_waiting", pre_review_waiting],
 	["review", review],
 	["review_fix", review_fix],
+	["revise_unit_specs", revise_unit_specs],
+	["revisited", revisited],
 	["safe_intent_repair", safe_intent_repair],
 	["select_studio", select_studio],
 	["start_stage", start_stage],

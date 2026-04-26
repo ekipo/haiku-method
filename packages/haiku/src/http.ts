@@ -93,6 +93,8 @@ import {
 	serveFile,
 	serveUnderRoot,
 } from "./http/path-safety.js"
+import { e2eOnSend, extractSessionIdFromPath } from "./http/e2e.js"
+import { respondSessionApi } from "./http/session-api.js"
 import {
 	isValidSlug,
 	parseBodyWithSchema,
@@ -293,115 +295,6 @@ export function closeSessionConnection(
 }
 
 
-// ── E2E encryption wrapper (Fastify onSend hook) ────────────────────────
-
-async function e2eOnSend(
-	req: FastifyRequest,
-	reply: FastifyReply,
-	payload: unknown,
-): Promise<unknown> {
-	if (reply.statusCode >= 400) return payload
-	if (
-		reply.statusCode === 204 ||
-		reply.statusCode === 205 ||
-		reply.statusCode === 304
-	) {
-		return payload
-	}
-	const sessionId = extractSessionIdFromPath(req.url.split("?")[0])
-	if (!sessionId || !isE2EActive(sessionId)) return payload
-	const contentType =
-		(reply.getHeader("content-type") as string | undefined) ??
-		"application/octet-stream"
-	let bodyBuffer: Buffer
-	if (typeof payload === "string") {
-		bodyBuffer = Buffer.from(payload, "utf8")
-	} else if (Buffer.isBuffer(payload)) {
-		bodyBuffer = payload
-	} else if (payload instanceof Uint8Array) {
-		bodyBuffer = Buffer.from(payload)
-	} else if (payload && typeof payload === "object") {
-		bodyBuffer = Buffer.from(JSON.stringify(payload), "utf8")
-	} else {
-		return payload
-	}
-	const encrypted = e2eEncrypt(sessionId, bodyBuffer)
-	if (!encrypted) return payload
-	reply.header("Content-Type", "application/octet-stream")
-	reply.header("X-Original-Content-Type", contentType)
-	reply.header("X-E2E-Encrypted", "1")
-	return encrypted
-}
-
-function extractSessionIdFromPath(path: string): string | null {
-	const match = path.match(
-		/\/(?:api\/session|review|question|direction|files|mockups|wireframe|stage-artifacts|question-image)\/([^/]+)/,
-	)
-	return match?.[1] ?? null
-}
-
-// ── Session API domain handlers (shape preserved from prior revision) ──
-
-function respondSessionApi(reply: FastifyReply, sessionId: string): void {
-	const session = getSession(sessionId)
-	if (!session) {
-		reply.status(404).send({ error: "Session not found" })
-		return
-	}
-	const data: Record<string, unknown> = {
-		session_id: session.session_id,
-		session_type: session.session_type,
-		status: session.status,
-	}
-	if (session.session_type === "review") {
-		data.intent_slug = session.intent_slug
-		data.review_type = session.review_type
-		data.gate_type = session.gate_type || "ask"
-		data.target = session.target
-		data.decision = session.decision
-		data.feedback = session.feedback
-		if (session.annotations) data.annotations = session.annotations
-		if (session.parsedIntent) data.intent = session.parsedIntent
-		if (session.parsedUnits) data.units = session.parsedUnits
-		if (session.parsedCriteria) data.criteria = session.parsedCriteria
-		if (session.parsedMermaid) data.mermaid = session.parsedMermaid
-		if (session.intentMockups) data.intent_mockups = session.intentMockups
-		if (session.unitMockups) {
-			const obj: Record<string, unknown> = {}
-			if (session.unitMockups instanceof Map) {
-				for (const [k, v] of session.unitMockups) obj[k] = v
-			} else {
-				Object.assign(obj, session.unitMockups)
-			}
-			data.unit_mockups = obj
-		}
-		if (session.stageStates) data.stage_states = session.stageStates
-		if (session.knowledgeFiles) data.knowledge_files = session.knowledgeFiles
-		if (session.stageArtifacts) data.stage_artifacts = session.stageArtifacts
-		if (session.outputArtifacts) data.output_artifacts = session.outputArtifacts
-		if (session.previousReview) data.previous_review = session.previousReview
-		if (session.ad_hoc) data.ad_hoc = true
-		if (session.stage) data.stage = session.stage
-	}
-	if (session.session_type === "question") {
-		data.title = session.title
-		data.context = session.context
-		data.questions = session.questions
-		data.answers = session.answers
-		const imagePaths = session.imagePaths ?? []
-		data.image_urls = imagePaths.map(
-			(_: string, i: number) => `/question-image/${session.session_id}/${i}`,
-		)
-	}
-	if (session.session_type === "design_direction") {
-		data.title = "Design Direction"
-		data.intent_slug = session.intent_slug
-		data.archetypes = session.archetypes
-		data.parameters = session.parameters
-		data.selection = session.selection
-	}
-	reply.send(data)
-}
 
 
 // ── WebSocket message dispatch ──────────────────────────────────────────

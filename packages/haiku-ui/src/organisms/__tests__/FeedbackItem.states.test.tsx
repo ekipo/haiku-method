@@ -25,12 +25,12 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { LiveRegionShell, POLITE_REGION_ID } from "../../../a11y"
-import { injectCanonicalTouchTargetCss } from "../../../a11y/__tests__/touch-target-css"
+import { LiveRegionShell, POLITE_REGION_ID } from "../../a11y"
+import { injectCanonicalTouchTargetCss } from "../../a11y/__tests__/touch-target-css"
 import type { FeedbackItemData } from "../../../types"
 import { FeedbackItem } from "../FeedbackItem"
-import { type FeedbackStatus, TOKEN_HASH } from "../tokens"
-import { mockItems } from "./mockItems"
+import { type FeedbackStatus, TOKEN_HASH } from "../../components/feedback/tokens"
+import { mockItems } from "../../components/feedback/__tests__/mockItems"
 
 // FB-65: inject the canonical `.touch-target` CSS (loaded from the real
 // shipped `src/index.css`) so `getComputedStyle` resolves min-height and

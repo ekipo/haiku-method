@@ -113,7 +113,7 @@ const FIXTURES: Fixture[] = [
 			"  - This sidesteps the `onOpenChange` callback we actually ship.\n" +
 			"  - It also hides a real bug where `autoFocus` on the primary action " +
 			"    swallows the keystroke in Safari.\n\n" +
-			"See [FeedbackSheet.tsx:88](packages/haiku-ui/src/components/feedback/FeedbackSheet.tsx:88) " +
+			"See [FeedbackSheet.tsx:88](packages/haiku-ui/src/organisms/FeedbackSheet.tsx:88) " +
 			"and compare with the [Radix dialog reference](https://www.radix-ui.com/docs).\n\n" +
 			"_Blocker for external-review gate._",
 	},

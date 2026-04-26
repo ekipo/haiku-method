@@ -23,12 +23,12 @@
 import { MarkdownViewer } from "@haiku/shared"
 import DOMPurify from "dompurify"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArtifactAnnotator } from "../../../components/ArtifactAnnotator"
+import { ArtifactAnnotator } from "../../../organisms/ArtifactAnnotator"
 import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
+} from "../../../organisms/InlineComments"
 import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import type { ParsedUnit } from "../../../parsed"
 import type { FeedbackItemData } from "../../../types"

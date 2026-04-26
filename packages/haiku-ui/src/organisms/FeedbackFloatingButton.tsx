@@ -32,7 +32,7 @@
  */
 
 import { forwardRef } from "react"
-import { focusRingClass, touchTargetClass } from "../../a11y"
+import { focusRingClass, touchTargetClass } from "../a11y"
 
 export interface FeedbackFloatingButtonProps {
 	/** Current open state of the paired FeedbackSheet. Drives `aria-expanded`. */

@@ -34,12 +34,12 @@ import type { ReviewSessionPayload } from "haiku-api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Header as HeaderLandmark, Main } from "../../../a11y"
 import { useApiClient } from "../../../api/context"
-import type { AnnotationPin } from "../../../components/AnnotationCanvas"
+import type { AnnotationPin } from "../../../organisms/AnnotationCanvas"
 import {
 	FeedbackFloatingButton,
 	FeedbackSheet,
 } from "../../../components/feedback"
-import type { InlineCommentEntry } from "../../../components/InlineComments"
+import type { InlineCommentEntry } from "../../../organisms/InlineComments"
 import { SessionEndedOverlay } from "../../../molecules/SessionEndedOverlay"
 import { StageProgressStrip } from "../../../molecules/StageProgressStrip"
 import { SubmitSuccess } from "../../../molecules/SubmitSuccess"

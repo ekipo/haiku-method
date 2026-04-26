@@ -719,7 +719,7 @@ exports[`FeedbackItem — state matrix > renders every (status × interaction) c
                 <p>
                   See 
                   <a
-                    href="packages/haiku-ui/src/components/feedback/FeedbackSheet.tsx:88"
+                    href="packages/haiku-ui/src/organisms/FeedbackSheet.tsx:88"
                   >
                     FeedbackSheet.tsx:88
                   </a>

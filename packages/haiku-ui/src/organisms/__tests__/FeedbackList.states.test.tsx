@@ -19,8 +19,8 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { FeedbackItemData } from "../../../types"
 import { FeedbackList } from "../FeedbackList"
-import { TOKEN_HASH } from "../tokens"
-import { mockItems } from "./mockItems"
+import { TOKEN_HASH } from "../../components/feedback/tokens"
+import { mockItems } from "../../components/feedback/__tests__/mockItems"
 
 afterEach(() => {
 	cleanup()

@@ -34,18 +34,18 @@ import {
 	focusRingCompactClass,
 	touchTargetClass,
 	useAnnounce,
-} from "../../a11y"
+} from "../a11y"
 import type { FeedbackItemData } from "../../types"
 import { AttachmentLightbox } from "./AttachmentLightbox"
-import { FeedbackOriginIcon } from "../../atoms/FeedbackOriginIcon"
-import { FeedbackStatusBadge } from "../../atoms/FeedbackStatusBadge"
-import type { FeedbackStatus } from "./tokens"
+import { FeedbackOriginIcon } from "../atoms/FeedbackOriginIcon"
+import { FeedbackStatusBadge } from "../atoms/FeedbackStatusBadge"
+import type { FeedbackStatus } from "../components/feedback/tokens"
 import {
 	originLabels,
 	statusBackground,
 	statusBorderLeft,
 	visitCounterClasses,
-} from "./tokens"
+} from "../components/feedback/tokens"
 
 const RESOLUTION_LABELS: Record<
 	"question" | "inline_fix" | "stage_revisit" | "upstream_rewind",

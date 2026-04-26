@@ -11,8 +11,8 @@ import {
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import "@xyflow/react/dist/style.css"
-import { layoutFlow } from "./mermaid-flow/layout"
-import { parseMermaidFlow } from "./mermaid-flow/parser"
+import { layoutFlow } from "../components/mermaid-flow/layout"
+import { parseMermaidFlow } from "../components/mermaid-flow/parser"
 
 interface Props {
 	chart: string

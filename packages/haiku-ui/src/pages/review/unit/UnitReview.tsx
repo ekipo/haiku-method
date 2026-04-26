@@ -2,12 +2,12 @@ import { CriteriaChecklist, MarkdownViewer, StatusBadge } from "@haiku/shared"
 import {
 	AnnotationCanvas,
 	type AnnotationPin,
-} from "../../../components/AnnotationCanvas"
+} from "../../../organisms/AnnotationCanvas"
 import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
+} from "../../../organisms/InlineComments"
 import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import type { ReviewAnnotations } from "../../../types"
 import { MockupEmbeds } from "../shared/MockupEmbeds"

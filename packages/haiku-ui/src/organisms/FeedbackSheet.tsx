@@ -61,7 +61,7 @@ import {
 	touchTargetClass,
 	useFocusTrap,
 	useReducedMotion,
-} from "../../a11y"
+} from "../a11y"
 
 export interface FeedbackSheetProps {
 	/** Current open state. Drives `dialog.showModal()` / `dialog.close()`. */

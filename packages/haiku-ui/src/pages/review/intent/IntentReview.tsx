@@ -3,13 +3,13 @@ import { useState } from "react"
 import {
 	AnnotationCanvas,
 	type AnnotationPin,
-} from "../../../components/AnnotationCanvas"
+} from "../../../organisms/AnnotationCanvas"
 import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
-import { MermaidDiagram } from "../../../components/MermaidDiagram"
+} from "../../../organisms/InlineComments"
+import { MermaidDiagram } from "../../../organisms/MermaidDiagram"
 import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import type { ParsedUnit } from "../../../parsed"
 import type { ReviewAnnotations } from "../../../types"

@@ -5,7 +5,7 @@
  * set (sorted by (y, x))" but dispatched zero ArrowRight/ArrowLeft events and
  * asserted zero focus-movement invariants. That test (and its host file) were
  * deleted by FB-12's dedup; this file reinstates real coverage against the
- * surviving `components/AnnotationCanvas.tsx` component.
+ * surviving `organisms/AnnotationCanvas.tsx` component.
  *
  * Completion criteria covered (unit-13):
  *   - Arrow-key traversal across a pin set lands focus on the correct pin at

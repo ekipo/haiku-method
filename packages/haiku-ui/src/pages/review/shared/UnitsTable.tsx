@@ -3,7 +3,7 @@ import { useState } from "react"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
+} from "../../../organisms/InlineComments"
 import type { ParsedUnit } from "../../../parsed"
 import type { MockupInfo } from "../../../types"
 import { markdownToSimpleHtml } from "./section-helpers"

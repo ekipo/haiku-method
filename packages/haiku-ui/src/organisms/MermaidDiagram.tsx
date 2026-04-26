@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { MermaidFlow } from "./MermaidFlow"
-import { canRenderAsFlow } from "./mermaid-flow/detect"
+import { canRenderAsFlow } from "../components/mermaid-flow/detect"
 
 interface Props {
 	definition: string

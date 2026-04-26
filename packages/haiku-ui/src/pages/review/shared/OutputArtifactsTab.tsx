@@ -4,7 +4,7 @@ import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
+} from "../../../organisms/InlineComments"
 import type { OutputArtifact } from "../../../types"
 import { markdownToSimpleHtml } from "./section-helpers"
 

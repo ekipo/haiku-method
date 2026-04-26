@@ -34,7 +34,7 @@ import {
 	useAnnounce,
 } from "../../a11y"
 import { useApiClient } from "../../api/context"
-import { RevisitModal } from "../../components/RevisitModal"
+import { RevisitModal } from "../../organisms/RevisitModal"
 import { FeedbackPanelBody } from "./FeedbackPanelBody"
 import { useFeedbackSidebarController } from "./useFeedbackSidebarController"
 

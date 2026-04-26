@@ -41,7 +41,7 @@ import {
 	it,
 	vi,
 } from "vitest"
-import { installMatchMediaStub } from "../../../a11y/__tests__/matchMedia.stub"
+import { installMatchMediaStub } from "../../a11y/__tests__/matchMedia.stub"
 import { FeedbackFloatingButton } from "../FeedbackFloatingButton"
 import { FeedbackSheet } from "../FeedbackSheet"
 

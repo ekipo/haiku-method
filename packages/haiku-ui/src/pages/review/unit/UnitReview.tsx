@@ -3,12 +3,12 @@ import {
 	AnnotationCanvas,
 	type AnnotationPin,
 } from "../../../components/AnnotationCanvas"
-import { Card, SectionHeading } from "../../../components/Card"
+import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
 } from "../../../components/InlineComments"
-import { type TabDef, Tabs } from "../../../components/Tabs"
+import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import type { ReviewAnnotations } from "../../../types"
 import { MockupEmbeds } from "../shared/MockupEmbeds"
 import {

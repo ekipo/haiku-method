@@ -214,7 +214,7 @@
 					"description": "Any file that renders role=\"tab\" MUST also apply focusRingClass (or an explicit focus-visible:ring-* class) so arrow-key-traversed tab buttons have a visible focus indicator (WCAG 2.4.7 Focus Visible). Regression guard for FB-67.",
 					"pattern": "(focusRingClass|focus-visible:ring-)",
 					"requirePresence": true,
-					"scope": ["packages/haiku-ui/src/components/Tabs.tsx"],
+					"scope": ["packages/haiku-ui/src/molecules/Tabs.tsx"],
 					"exclude": ["**/__tests__/**", "**/__snapshots__/**"]
 				},
 				{

@@ -29,7 +29,7 @@ import {
 	useFocusTrap,
 } from "../../a11y"
 import { useApiClient } from "../../api/context"
-import { Card, SectionHeading } from "../../components/Card"
+import { Card, SectionHeading } from "../../atoms/Card"
 import { Input } from "../../atoms/Input"
 import { SubmitSuccess } from "../../components/SubmitSuccess"
 import { tryCloseTab } from "../../lib/tryCloseTab"

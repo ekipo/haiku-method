@@ -16,16 +16,16 @@ export {
 	FeedbackList,
 	VIRTUALIZE_THRESHOLD,
 } from "./FeedbackList"
-export type { FeedbackOriginIconProps } from "./FeedbackOriginIcon"
+export type { FeedbackOriginIconProps } from "../../atoms/FeedbackOriginIcon"
 export {
 	FeedbackOriginIcon,
 	originIcons,
 	originLabels,
-} from "./FeedbackOriginIcon"
+} from "../../atoms/FeedbackOriginIcon"
 export type { FeedbackSheetProps } from "./FeedbackSheet"
 export { FeedbackSheet } from "./FeedbackSheet"
-export type { FeedbackStatusBadgeProps } from "./FeedbackStatusBadge"
-export { FeedbackStatusBadge } from "./FeedbackStatusBadge"
+export type { FeedbackStatusBadgeProps } from "../../atoms/FeedbackStatusBadge"
+export { FeedbackStatusBadge } from "../../atoms/FeedbackStatusBadge"
 export type { FeedbackSummaryBarProps } from "./FeedbackSummaryBar"
 export { FeedbackSummaryBar } from "./FeedbackSummaryBar"
 export type { FeedbackOrigin, FeedbackStatus } from "./tokens"

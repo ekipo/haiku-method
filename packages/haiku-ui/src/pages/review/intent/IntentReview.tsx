@@ -4,13 +4,13 @@ import {
 	AnnotationCanvas,
 	type AnnotationPin,
 } from "../../../components/AnnotationCanvas"
-import { Card, SectionHeading } from "../../../components/Card"
+import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,
 } from "../../../components/InlineComments"
 import { MermaidDiagram } from "../../../components/MermaidDiagram"
-import { type TabDef, Tabs } from "../../../components/Tabs"
+import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import type { ParsedUnit } from "../../../parsed"
 import type { ReviewAnnotations } from "../../../types"
 import { KnowledgeTab } from "../shared/KnowledgeTab"

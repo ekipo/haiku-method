@@ -1,4 +1,4 @@
-import { Card, SectionHeading } from "../../../components/Card"
+import { Card, SectionHeading } from "../../../atoms/Card"
 import {
 	type InlineCommentEntry,
 	InlineComments,

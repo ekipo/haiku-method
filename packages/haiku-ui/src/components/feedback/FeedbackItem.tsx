@@ -37,8 +37,8 @@ import {
 } from "../../a11y"
 import type { FeedbackItemData } from "../../types"
 import { AttachmentLightbox } from "./AttachmentLightbox"
-import { FeedbackOriginIcon } from "./FeedbackOriginIcon"
-import { FeedbackStatusBadge } from "./FeedbackStatusBadge"
+import { FeedbackOriginIcon } from "../../atoms/FeedbackOriginIcon"
+import { FeedbackStatusBadge } from "../../atoms/FeedbackStatusBadge"
 import type { FeedbackStatus } from "./tokens"
 import {
 	originLabels,

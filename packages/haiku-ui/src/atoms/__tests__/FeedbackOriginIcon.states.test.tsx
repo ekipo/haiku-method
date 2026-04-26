@@ -13,7 +13,7 @@
 import { cleanup, render } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { FeedbackOriginIcon } from "../FeedbackOriginIcon"
-import { type FeedbackOrigin, originLabels, TOKEN_HASH } from "../tokens"
+import { type FeedbackOrigin, originLabels, TOKEN_HASH } from "../../components/feedback/tokens"
 
 afterEach(() => {
 	cleanup()

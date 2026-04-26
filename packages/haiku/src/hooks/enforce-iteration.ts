@@ -26,6 +26,7 @@
 
 import { existsSync, readdirSync } from "node:fs"
 import { basename, join } from "node:path"
+import { defineHook } from "./define.js"
 import {
 	checkIntentCriteria,
 	findActiveIntent,
@@ -179,3 +180,11 @@ export async function enforceIteration(
 		/* best-effort telemetry */
 	}
 }
+
+export default defineHook({
+	name: "enforce-iteration",
+	description: "Stop hook: block parent-agent stop while the active stage still has work; re-inject haiku_run_next.",
+	async handle(input, ctx) {
+		await enforceIteration(input, ctx.pluginRoot)
+	},
+})

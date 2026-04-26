@@ -3,6 +3,7 @@
 // Only relevant for harnesses that have an EnterPlanMode tool (Claude Code).
 
 import { isClaudeCode, skillReference } from "../harness.js"
+import { defineHook } from "./define.js"
 
 export async function redirectPlanMode(
 	input: Record<string, unknown>,
@@ -24,3 +25,11 @@ export async function redirectPlanMode(
 
 	process.stdout.write(JSON.stringify(response))
 }
+
+export default defineHook({
+	name: "redirect-plan-mode",
+	description: "PreToolUse: intercept EnterPlanMode (Claude Code) and redirect to /haiku:start.",
+	async handle(input, ctx) {
+		await redirectPlanMode(input, ctx.pluginRoot)
+	},
+})

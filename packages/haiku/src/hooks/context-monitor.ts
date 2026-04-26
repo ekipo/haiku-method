@@ -6,6 +6,7 @@
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { defineHook } from "./define.js"
 
 export async function contextMonitor(
 	input: Record<string, unknown>,
@@ -58,3 +59,11 @@ export async function contextMonitor(
 		}
 	}
 }
+
+export default defineHook({
+	name: "context-monitor",
+	description: "PostToolUse: warn at 35% / 25% remaining context budget.",
+	async handle(input, ctx) {
+		await contextMonitor(input, ctx.pluginRoot)
+	},
+})

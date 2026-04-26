@@ -22,6 +22,7 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { defineHook } from "./define.js"
 
 function out(s: string): void {
 	process.stderr.write(s)
@@ -153,3 +154,11 @@ export async function guardFsmFields(
 		}
 	}
 }
+
+export default defineHook({
+	name: "guard-fsm-fields",
+	description: "PreToolUse Write/Edit/MultiEdit: block hand-edits that spoof FSM-controlled fields.",
+	async handle(input, _ctx) {
+		await guardFsmFields(input)
+	},
+})

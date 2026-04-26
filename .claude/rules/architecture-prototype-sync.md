@@ -4,6 +4,18 @@ The interactive runtime-architecture map at `website/public/prototype-stage-flow
 
 **Whenever the architecture changes, update this prototype.** It is part of the sync surface, not a one-off.
 
+## Auto-generated FSM diagrams (per studio)
+
+The per-studio Mermaid `stateDiagram-v2` files at `website/public/fsm-diagrams/<studio>.mmd` are derived from the xstate machine in `packages/haiku/src/orchestrator/fsm/` and the StudioConfig built from `plugin/studios/<studio>/`. They show every stage's full phase progression, every hat sequence enumerated inside `execute`, and every (bolt × fix-hat) combination inside `review_fix`.
+
+**Regenerate after any studio change:**
+```
+bun run --cwd packages/haiku export:fsm-diagrams
+```
+(Also runs automatically as part of `bun run --cwd packages/haiku build` via the prebuild hook.)
+
+These diagrams complement the hand-maintained `prototype-stage-flow.html` — the prototype shows runtime actors / hooks / payloads in detail, the .mmd files show the structural state graph per studio. Update both together when an architecture change touches both surfaces.
+
 ## When to update the prototype
 
 Any change to one of the following requires verifying or updating `prototype-stage-flow.html`:

@@ -37,7 +37,10 @@ import intent_complete from "./intent_complete.js"
 import intent_completion_fix from "./intent_completion_fix.js"
 import intent_completion_review from "./intent_completion_review.js"
 import outputs_missing from "./outputs_missing.js"
+import pre_review from "./pre_review.js"
+import pre_review_revisit from "./pre_review_revisit.js"
 import review from "./review.js"
+import review_elaboration from "./review_elaboration.js"
 import review_fix from "./review_fix.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
@@ -77,7 +80,10 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["intent_completion_fix", intent_completion_fix],
 	["intent_completion_review", intent_completion_review],
 	["outputs_missing", outputs_missing],
+	["pre_review", pre_review],
+	["pre_review_revisit", pre_review_revisit],
 	["review", review],
+	["review_elaboration", review_elaboration],
 	["review_fix", review_fix],
 	["safe_intent_repair", safe_intent_repair],
 	["select_studio", select_studio],

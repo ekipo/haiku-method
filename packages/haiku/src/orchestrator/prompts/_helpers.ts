@@ -33,6 +33,53 @@ import {
 } from "../../studio-reader.js"
 import { writeSubagentPrompt } from "../../subagent-prompt-file.js"
 
+export const FSM_CONTRACTS_EXECUTE_BLOCK = [
+	"### FSM Contracts (REQUIRED — reminder during execute)",
+	"",
+	"> ## ⟁ NO ADVANCE WITHOUT VERIFICATION.",
+	"> Run the gate command, read the exit code, *then* call `haiku_unit_advance_hat`. Hedged advances burn bolts on broken work.",
+	"",
+	"- The agent operates inside ONE hat at a time. Each hat runs in a fresh subagent with the hat's mandate loaded from `hats/{hat}.md`. Hat context does not leak across hats — that isolation is the framework's defense against self-reinforcing errors.",
+	"- After the hat's work is done, the subagent calls `haiku_unit_advance_hat` (success) or `haiku_unit_reject_hat { reason }` (failure). The FSM writes the result; the subagent does not.",
+	"- Quality gates run automatically at the end of the hat sequence (last hat's `haiku_unit_advance_hat`). A failing gate at unit completion blocks the advance with a concrete error — fix the failure, don't retry the tool call.",
+	"- **Per-hat opt-in gates.** A hat may declare `run_quality_gates: true` in its frontmatter. When it does, gates run on THAT hat's `advance_hat` (not just the last hat's), AND failure auto-rejects: bolt counter increments, the same hat retries, no agent decision required. Bolt cap (5) still applies. This is the framework's way of saying \"this hat produces verifiable artifacts; gates are part of its definition of done.\"",
+	"- Cross-unit writes within a stage are forbidden without explicit `inputs:` / `outputs:` declarations on the unit.",
+	"",
+	"#### Verification before advance",
+	"",
+	"- Before calling `haiku_unit_advance_hat`, RUN the gate command(s) and READ the exit code. Do not advance on the assumption that the build/tests/lints pass — if your hat declares `run_quality_gates: true`, the FSM auto-rejects on gate failure and burns one of your 5 bolts.",
+	"- Your one-line return summary MUST contain a verb of completed action (`edited X`, `added Y test`, `updated Z`) and ZERO hedging words: `should`, `seems`, `probably`, `might`, `looks like`. Hedging means you are not sure — call `haiku_unit_reject_hat` with that uncertainty as the reason instead of advancing with hedged language.",
+	"",
+	"#### Red flags (STOP and re-read this contract if you catch yourself thinking)",
+	"",
+	'- "I\'ll skip the gate just this once" — the gate is the contract; bypass is a scope violation.',
+	"- \"I'll touch the related file too while I'm here\" — out-of-scope edits create regressions other hats cannot see; if it's broken, log it via the next review.",
+	"- **Did you re-run the gate command and read the exit code 0?** If not, you don't know whether the build/tests/lints actually pass — \"probably\" isn't evidence. Re-run before calling `haiku_unit_advance_hat`.",
+	"- \"Another hat's responsibility overlaps with mine, I'll cover it\" — stay in your lane; another hat will catch what you skip.",
+	'- "The user said go fast, so I\'ll abbreviate the work" — speed comes from fewer rejections, not skipped steps.',
+].join("\n")
+
+export const SUBAGENT_ERROR_RECOVERY = [
+	"## Error Recovery (if advance_hat / reject_hat returns an error)",
+	"",
+	'Tool responses containing `"error": "..."` mean the FSM refused the action. Read the `message` field — it describes the exact fix. Common errors and recovery:',
+	"",
+	"- `unit_scope_violation` (from advance_hat) / `unit_scope_violation_on_reject` (from reject_hat) — your unit worktree contains commits that wrote files outside the stage's declared scope. **`git checkout HEAD -- <file>` is a NO-OP on committed files.** Use ONE of:",
+	"  - `git reset --hard $(git merge-base HEAD <stage-branch>)` — drops ALL unit commits (recommended early in a unit)",
+	"  - `git rm <file> && git commit --amend --no-edit` — removes a single file from the latest commit",
+	"  - `git revert --no-edit <commit-sha>` — creates a new commit that undoes a bad commit",
+	"  Then re-run `git add -A && git commit` if needed, and retry `advance_hat` / `reject_hat`.",
+	"- `unit_outputs_empty` — your unit made no tracked writes. Either produce an artifact in a scope-allowed path and commit, or explicitly add paths to the unit's `outputs:` frontmatter field if they exist outside auto-detection.",
+	"- `unit_outputs_missing` — a declared output path doesn't exist on disk. Create it, or remove the path from `outputs:` if declared in error.",
+	"- `unit_outputs_escaped` — a declared output path resolves outside the intent dir. Fix the path to be intent-relative or repo-relative; absolute paths and `..` escapes are rejected.",
+	"- `hat_too_fast` — less than 30 seconds since hat start. Do real work before advancing.",
+	"- `max_bolts_exceeded` — unit hit the iteration ceiling. Stop and report to the user; this needs human intervention.",
+	"",
+	"After fixing the underlying issue, call the SAME tool again (advance_hat or reject_hat as appropriate). Do NOT call haiku_run_next as a bypass — the FSM will return the same error.",
+	"",
+	"**Persistent advance failure?** If `advance_hat` keeps returning `unit_scope_violation` and you cannot clear it in-place, call `reject_hat` instead. reject_hat tracks consecutive scope-violation attempts and escalates via `max_bolts_exceeded` after 5, surfacing the stuck state to the user. advance_hat has no such ceiling on its own — reject_hat is the correct escape.",
+].join("\n")
+
 export const FSM_CONTRACTS_REVIEW_BLOCK = [
 	"### FSM Contracts (REQUIRED — reminder during review)",
 	"",

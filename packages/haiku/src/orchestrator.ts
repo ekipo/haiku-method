@@ -55,9 +55,10 @@ import {
 	buildInlineSubagentContext,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
+	FSM_CONTRACTS_EXECUTE_BLOCK,
 	inlineFile,
 	readInterpretation,
-	resolveReviewAgentModel,
+	SUBAGENT_ERROR_RECOVERY,
 } from "./orchestrator/prompts/_helpers.js"
 import { actionPromptBuilders } from "./orchestrator/prompts/index.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
@@ -235,32 +236,6 @@ const FSM_CONTRACTS_ELABORATE_BLOCK = [
 	'- "The criteria are obvious; I\'ll keep them prose" — every criterion needs a command or condition that proves it.',
 	'- "This unit can be huge; the executor will figure it out" — units that take more than one bolt to scope are decomposition failures, not execution failures.',
 	'- "I\'ll batch the missing info as assumptions in the spec" — assumptions become silent regressions; ask the user instead.',
-].join("\n")
-
-const FSM_CONTRACTS_EXECUTE_BLOCK = [
-	"### FSM Contracts (REQUIRED — reminder during execute)",
-	"",
-	"> ## ⟁ NO ADVANCE WITHOUT VERIFICATION.",
-	"> Run the gate command, read the exit code, *then* call `haiku_unit_advance_hat`. Hedged advances burn bolts on broken work.",
-	"",
-	"- The agent operates inside ONE hat at a time. Each hat runs in a fresh subagent with the hat's mandate loaded from `hats/{hat}.md`. Hat context does not leak across hats — that isolation is the framework's defense against self-reinforcing errors.",
-	"- After the hat's work is done, the subagent calls `haiku_unit_advance_hat` (success) or `haiku_unit_reject_hat { reason }` (failure). The FSM writes the result; the subagent does not.",
-	"- Quality gates run automatically at the end of the hat sequence (last hat's `haiku_unit_advance_hat`). A failing gate at unit completion blocks the advance with a concrete error — fix the failure, don't retry the tool call.",
-	"- **Per-hat opt-in gates.** A hat may declare `run_quality_gates: true` in its frontmatter. When it does, gates run on THAT hat's `advance_hat` (not just the last hat's), AND failure auto-rejects: bolt counter increments, the same hat retries, no agent decision required. Bolt cap (5) still applies. This is the framework's way of saying \"this hat produces verifiable artifacts; gates are part of its definition of done.\"",
-	"- Cross-unit writes within a stage are forbidden without explicit `inputs:` / `outputs:` declarations on the unit.",
-	"",
-	"#### Verification before advance",
-	"",
-	"- Before calling `haiku_unit_advance_hat`, RUN the gate command(s) and READ the exit code. Do not advance on the assumption that the build/tests/lints pass — if your hat declares `run_quality_gates: true`, the FSM auto-rejects on gate failure and burns one of your 5 bolts.",
-	"- Your one-line return summary MUST contain a verb of completed action (`edited X`, `added Y test`, `updated Z`) and ZERO hedging words: `should`, `seems`, `probably`, `might`, `looks like`. Hedging means you are not sure — call `haiku_unit_reject_hat` with that uncertainty as the reason instead of advancing with hedged language.",
-	"",
-	"#### Red flags (STOP and re-read this contract if you catch yourself thinking)",
-	"",
-	'- "I\'ll skip the gate just this once" — the gate is the contract; bypass is a scope violation.',
-	"- \"I'll touch the related file too while I'm here\" — out-of-scope edits create regressions other hats cannot see; if it's broken, log it via the next review.",
-	"- **Did you re-run the gate command and read the exit code 0?** If not, you don't know whether the build/tests/lints actually pass — \"probably\" isn't evidence. Re-run before calling `haiku_unit_advance_hat`.",
-	"- \"Another hat's responsibility overlaps with mine, I'll cover it\" — stay in your lane; another hat will catch what you skip.",
-	'- "The user said go fast, so I\'ll abbreviate the work" — speed comes from fewer rejections, not skipped steps.',
 ].join("\n")
 
 /**
@@ -567,7 +542,7 @@ function resolveStageFixHats(studio: string, stage: string): string[] {
  *  approve: FSM promotes each FB item's status to `closed`/`addressed` and
  *  the unit completes. On reject: the unit bolts back to the first hat with
  *  a reason naming the specific unresolved items. */
-function buildFeedbackAssessorPrompt(opts: {
+export function buildFeedbackAssessorPrompt(opts: {
 	slug: string
 	studio: string
 	stage: string
@@ -1106,7 +1081,7 @@ function writeReviewFeedbackFiles(
  * file directly if it needs the detail — keeps main-agent AND subagent
  * contexts small. Returns "" if no output artifacts are defined.
  */
-function buildOutputRequirements(
+export function buildOutputRequirements(
 	studio: string,
 	stage: string,
 	heading = "## Output Requirements",
@@ -5268,26 +5243,6 @@ function enrichActionWithPreview(action: OrchestratorAction): void {
  * recovery for each. Without this, subagents stuck on scope violations
  * get only an opaque error JSON and try wrong things (e.g. git checkout).
  */
-const SUBAGENT_ERROR_RECOVERY = [
-	"## Error Recovery (if advance_hat / reject_hat returns an error)",
-	"",
-	'Tool responses containing `"error": "..."` mean the FSM refused the action. Read the `message` field — it describes the exact fix. Common errors and recovery:',
-	"",
-	"- `unit_scope_violation` (from advance_hat) / `unit_scope_violation_on_reject` (from reject_hat) — your unit worktree contains commits that wrote files outside the stage's declared scope. **`git checkout HEAD -- <file>` is a NO-OP on committed files.** Use ONE of:",
-	"  - `git reset --hard $(git merge-base HEAD <stage-branch>)` — drops ALL unit commits (recommended early in a unit)",
-	"  - `git rm <file> && git commit --amend --no-edit` — removes a single file from the latest commit",
-	"  - `git revert --no-edit <commit-sha>` — creates a new commit that undoes a bad commit",
-	"  Then re-run `git add -A && git commit` if needed, and retry `advance_hat` / `reject_hat`.",
-	"- `unit_outputs_empty` — your unit made no tracked writes. Either produce an artifact in a scope-allowed path and commit, or explicitly add paths to the unit's `outputs:` frontmatter field if they exist outside auto-detection.",
-	"- `unit_outputs_missing` — a declared output path doesn't exist on disk. Create it, or remove the path from `outputs:` if declared in error.",
-	"- `unit_outputs_escaped` — a declared output path resolves outside the intent dir. Fix the path to be intent-relative or repo-relative; absolute paths and `..` escapes are rejected.",
-	"- `hat_too_fast` — less than 30 seconds since hat start. Do real work before advancing.",
-	"- `max_bolts_exceeded` — unit hit the iteration ceiling. Stop and report to the user; this needs human intervention.",
-	"",
-	"After fixing the underlying issue, call the SAME tool again (advance_hat or reject_hat as appropriate). Do NOT call haiku_run_next as a bypass — the FSM will return the same error.",
-	"",
-	"**Persistent advance failure?** If `advance_hat` keeps returning `unit_scope_violation` and you cannot clear it in-place, call `reject_hat` instead. reject_hat tracks consecutive scope-violation attempts and escalates via `max_bolts_exceeded` after 5, surfacing the stuck state to the user. advance_hat has no such ceiling on its own — reject_hat is the correct escape.",
-].join("\n")
 // ── Run instruction builder ───────────────────────────────────────────────
 
 function buildRunInstructions(
@@ -6785,251 +6740,6 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 
 			// Suppress unused-var warning for hats (kept in payload for forward-compat)
 			void hats
-			break
-		}
-
-		case "pre_review": {
-			const stage = action.stage as string
-			const unitsDir = (action.units_dir as string) || ""
-			// Conditional review agents — same filter used for post-execute review.
-			let agentPaths: Record<string, string> = readReviewAgentPaths(
-				studio,
-				stage,
-			)
-			agentPaths = filterReviewAgentsByScope(
-				agentPaths,
-				join(findHaikuRoot(), "intents", slug, "stages", stage, "artifacts"),
-				{ studio, stage },
-			)
-
-			sections.push(`## Pre-Execute Adversarial Review: ${stage}`)
-			sections.push(
-				`**Review target:** unit SPECS (the .md files in \`${unitsDir}\`), NOT artifacts — artifacts haven't been produced yet. You are auditing the PLAN.`,
-			)
-			sections.push(
-				"**Why before execute?** Catching spec bugs now (missing inputs, unfalsifiable criteria, sibling conflicts, prose-only gates) avoids an execute → post-review → reject cycle. The cost of this review is tiny compared to what it prevents.",
-			)
-
-			if (Object.keys(agentPaths).length === 0) {
-				sections.push(
-					"_No review agents apply to this stage's output types — skipping pre-execute review. Call `haiku_run_next` to advance._",
-				)
-				break
-			}
-
-			sections.push(
-				"### Review Agent Fan-Out (REQUIRED)\n\n**Spawn exactly one subagent per review agent in parallel — no duplicates.** Each subagent's prompt is below.",
-			)
-
-			for (const [name, mandatePath] of Object.entries(agentPaths)) {
-				const reviewLines: string[] = [
-					`You are the **${name}** review agent running in PRE-EXECUTE mode for stage "${stage}" of intent "${slug}".`,
-					"",
-					"## Required context (inlined below)",
-					"Your general review mandate is embedded in this prompt, but your scope for THIS pass is unit SPECS, not artifacts.",
-					"",
-					inlineFile(mandatePath, `Mandate: ${name}`),
-					"",
-					"## Pre-Execute Scope (SPEC REVIEW)",
-					"Review the unit .md files under the units directory. You will find both pending and completed units there. Your job is to find **spec-level bugs in PENDING units or COVERAGE GAPS** that would cause a rejection cycle after execute.",
-					"",
-					"**Scope rules (STRICT):**",
-					"- **Pending units (status != `completed`)** are your review targets. Flag spec-level issues.",
-					"- **Completed units (status = `completed`)** are **context/knowledge, not targets**. Their work has already been executed, validated, and merged. You may READ them to understand what the stage already addresses, but you MUST NOT raise findings against them — no suggestions to rename, rewrite criteria, change `quality_gates`, expand `inputs:`, etc. That work is done.",
-					"- **Coverage gaps** — if completed + pending units together leave a gap in what your mandate requires (e.g. an entry point not threat-modeled, a metric the mandate demands not defined), suggest a **NEW UNIT** to fill the gap. Never suggest editing a completed unit.",
-					"",
-					"**Look for in pending / new units:**",
-					"",
-					"- **Missing inputs**: unit declares a sweep/audit but its `inputs:` list only covers a subset of files the rule must apply to. Flag when enforcement scope < rule scope.",
-					"- **Prose-only gates**: `quality_gates:` entries that are strings instead of executable `{name, command}` objects. These won't actually enforce anything — the FSM skips them.",
-					"- **Unfalsifiable criteria**: 'responsive design done' vs 'breakpoints at 375/768/1280 with screenshots'. Gates must be measurable. Also flag criteria that LOOK concrete but have no apparent verification path — neither a `quality_gates:` entry, nor a review-agent mandate, nor a stage-appropriate approval condition (visual approval for design, behavioral test for product) plausibly covers them. Name each such criterion and propose a pairing in the suggested fix.",
-					"- **Sibling conflicts** between pending units — watch for any of these shapes, not just same-output drift:",
-					"  - **Same-output drift**: two units produce or modify the same output (file path, schema, route, artifact) under different rules.",
-					"  - **Contradictory criteria**: two units describe the same component or behavior but their acceptance criteria diverge (one says `p95 < 100ms`, another says `async, no latency target`).",
-					"  - **Inverted assumptions**: unit A asserts X is true; unit B requires X to be false (one says feature uses pattern P, another says feature MUST NOT use pattern P).",
-					"  - **Overlapping inputs, opposite intent**: two units take the same input file/artifact but encode opposite intent for it (e.g. one strengthens a constraint the other relaxes).",
-					"  - **Within-stage drift**: naming, types, or contracts that vary across sibling units when the mandate calls for consistency (cross-stage drift is the studio-level reviewer's beat; within-stage drift is yours).",
-					"- **Missing `closes:`** on revisit cycles: every new pending unit MUST reference at least one pending FB via `closes: [FB-NN]`.",
-					"- **Coverage gaps**: completed + pending together miss something in-scope for your mandate. Suggest a new unit.",
-					"",
-					"## Write scope (STRICT)",
-					"**You MUST NOT edit any file, and you MUST NOT call `haiku_feedback`.** Pre-execute review has no artifacts to critique — nothing has been built for pending units yet. Persisted feedback is for post-execute work only. Return your findings INLINE as your subagent response; the parent agent will aggregate findings from all reviewers and edit the pending unit specs directly (or draft new units for coverage gaps).",
-					"",
-					"## Output format (MANDATORY)",
-					"",
-					"Return your findings as markdown with one `## Finding` block per concrete issue:",
-					"",
-					"```",
-					"## Finding: <short-title>",
-					'**Affected unit:** <unit-filename> (or "NEW UNIT NEEDED" for coverage gaps)',
-					"**Location:** <file:line> (if applicable)",
-					"**Issue:** <what's wrong in specific terms>",
-					"**Suggested fix:** <diff-level concrete proposal — not vague>",
-					"```",
-					"",
-					"If no issues in pending units and no coverage gaps, return exactly: `No findings.`",
-					"",
-					"## Instructions",
-					"",
-					`1. Read every unit file under \`${unitsDir}\`. Partition by status: completed (context) vs pending (targets).`,
-					"2. Skim completed units to understand what the stage already addresses — this is knowledge.",
-					"3. Identify concrete spec issues in PENDING units per the mandate above.",
-					"4. Identify COVERAGE GAPS — things the mandate requires that neither completed nor pending units address. Propose new units by filename + intent.",
-					"5. Concrete fixes accelerate resolution: don't write 'scope too narrow' — write the exact replacement.",
-					"6. Do NOT critique completed units. Do NOT call `haiku_feedback` — persistence is not wanted here.",
-				]
-
-				const preReviewModel = resolveReviewAgentModel({
-					mandatePath,
-					studio,
-					stage,
-				})
-				const preModelAttr = preReviewModel ? ` model="${preReviewModel}"` : ""
-				sections.push(
-					`#### Subagent: \`${name}\`\n\n<subagent type="general-purpose"${preModelAttr}>\n${reviewLines.join("\n")}\n</subagent>`,
-				)
-			}
-
-			sections.push(
-				[
-					"### Parent Instructions",
-					"",
-					"Each reviewer returns inline findings as markdown — collect them all.",
-					"",
-					batchDispatchDirective(
-						Object.keys(agentPaths).length,
-						"review agents",
-					),
-					"",
-					`If any reviewer returned findings (anything other than \`No findings.\`), aggregate them by unit file, EDIT the relevant unit.md files directly to address each finding, commit, then call \`haiku_run_next { intent: "${slug}" }\` to re-enter review. If every reviewer returned \`No findings.\`, call \`haiku_run_next { intent: "${slug}" }\` to open the user-facing gate. NO feedback files are created at pre-execute — there is nothing built to critique against.`,
-				].join("\n"),
-			)
-			break
-		}
-
-		case "pre_review_revisit": {
-			const stage = action.stage as string
-			const unitsDir = (action.units_dir as string) || ""
-			const pendingCount = (action.pending_count as number) || 0
-			const pendingItems =
-				(action.pending_items as Array<{
-					feedback_id: string
-					title: string
-					file: string
-					origin: string
-					author: string
-				}>) || []
-
-			sections.push(`## Pre-Execute Spec Revisit: ${stage}`)
-			sections.push(
-				`**${pendingCount} pending spec-level feedback item(s) block the advance to execute.**`,
-			)
-			sections.push(
-				`**Resolution mode: SPEC EDIT (not new units).** This is NOT additive-elaboration. The findings are about bugs in existing unit specs — fix them by editing the unit.md files in \`${unitsDir}\`. Do not draft new units.`,
-			)
-			sections.push(
-				`### Pending Spec Findings\n\n${pendingItems
-					.map(
-						(f) =>
-							`- **${f.feedback_id}** — ${f.title}\n  - file: \`${f.file}\`\n  - origin: ${f.origin} · author: ${f.author}`,
-					)
-					.join("\n")}`,
-			)
-			sections.push(
-				`### Mechanics\n\n1. Read each pending feedback file IN FULL — the body carries the concrete spec edit the reviewer proposed.\n2. Apply the edit to the referenced unit.md file (frontmatter or body as appropriate).\n3. Close the feedback via \`haiku_feedback_update { intent: "${slug}", stage: "${stage}", feedback_id: "FB-NN", status: "closed", closed_by: "<unit-name>" }\`. If you disagree with a finding, reject it with \`haiku_feedback_reject\` and a concrete reason.\n4. When zero pending feedback remains, call \`haiku_run_next\` to advance to execute.`,
-			)
-			break
-		}
-
-		case "review_elaboration": {
-			const stage = action.stage as string
-			// Path-only review agent prompts
-			let agentPaths: Record<string, string> = readReviewAgentPaths(
-				studio,
-				stage,
-			)
-			{
-				const stageDef = readStageDef(studio, stage)
-				if (
-					stageDef?.data?.["review-agents-include"] &&
-					Array.isArray(stageDef.data["review-agents-include"])
-				) {
-					const includes = stageDef.data["review-agents-include"] as Array<{
-						stage: string
-						agents: string[]
-					}>
-					for (const inc of includes) {
-						if (!(inc.stage && Array.isArray(inc.agents))) continue
-						const crossPaths = readReviewAgentPaths(studio, inc.stage)
-						for (const agentName of inc.agents) {
-							if (crossPaths[agentName] && !agentPaths[agentName]) {
-								agentPaths[`${agentName} (from ${inc.stage})`] =
-									crossPaths[agentName]
-							}
-						}
-					}
-				}
-			}
-
-			// Conditional review: skip agents whose `applies_to:` doesn't match
-			// any artifact this stage produces. Same filter as the post-execute
-			// review path.
-			agentPaths = filterReviewAgentsByScope(
-				agentPaths,
-				join(findHaikuRoot(), "intents", slug, "stages", stage, "artifacts"),
-				{ studio, stage },
-			)
-
-			sections.push("## Review Elaboration Artifacts")
-			sections.push(
-				"Run adversarial review agents on the elaboration specs before the pre-execution gate opens.",
-			)
-			if (Object.keys(agentPaths).length > 0) {
-				sections.push(
-					"### Review Agent Fan-Out (REQUIRED)\n\n**Spawn exactly one subagent per review agent in parallel — no duplicates.** Each `<subagent>` block below is a complete prompt — relay verbatim. Prompts are path-based so the parent context stays small.\n",
-				)
-				for (const [name, mandatePath] of Object.entries(agentPaths)) {
-					const prompt = [
-						`You are the **${name}** review agent reviewing elaboration artifacts for stage "${stage}" of intent "${slug}".`,
-						"",
-						"## Required context (inlined below)",
-						"Your review mandate is embedded in this prompt.",
-						"",
-						inlineFile(mandatePath, `Mandate: ${name}`),
-						"",
-						"## Write scope (STRICT)",
-						"**You MUST NOT write, edit, or create any file.** Your ONLY output channel is the `haiku_feedback` MCP tool. If you're tempted to fix an issue yourself, log it as feedback instead. Any file write is a scope violation.",
-						"",
-						"## Instructions",
-						"",
-						"1. Use your mandate (above) as the lens for this review.",
-						`2. Read the elaboration specs: unit files in \`.haiku/intents/${slug}/stages/${stage}/units/\`.`,
-						`3. Read discovery artifacts in \`.haiku/intents/${slug}/knowledge/\`.`,
-						"4. Review through your mandate's lens.",
-						`5. For each issue you find, call \`haiku_feedback({ intent: "${slug}", stage: "${stage}", title: "<short title>", body: "<full description>", origin: "adversarial-review", author: "${name}" })\`.`,
-						"6. Return only a summary count of how many findings you logged.",
-					].join("\n")
-					const elabReviewModel = resolveReviewAgentModel({
-						mandatePath,
-						studio,
-						stage,
-					})
-					sections.push(
-						`${emitSubagentDispatchBlock({
-							unit: `review-elab-${stage}`,
-							hat: name,
-							bolt: 1,
-							agentType: "general-purpose",
-							model: elabReviewModel,
-							promptBody: prompt,
-							heading: `#### Subagent: \`${name}\``,
-						})}\n`,
-					)
-				}
-			}
-			sections.push(
-				`### Parent Instructions (do NOT include in subagent prompts)\n\nSpawn review subagents in parallel using the \`prompt_file\` attribute — pass \`"Read <prompt_file> and execute its instructions exactly."\` as the spawn prompt. They persist findings directly via haiku_feedback. After all complete, call \`haiku_run_next { intent: "${slug}" }\` to advance.`,
-			)
 			break
 		}
 

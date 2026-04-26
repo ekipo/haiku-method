@@ -32,7 +32,6 @@ import feedback_revisit from "./feedback_revisit.js"
 import fix_quality_gates from "./fix_quality_gates.js"
 import gate_blocked from "./gate_blocked.js"
 import gate_review from "./gate_review.js"
-import inputs_missing from "./inputs_missing.js"
 import integrate_fix_chains from "./integrate_fix_chains.js"
 import intent_approved from "./intent_approved.js"
 import intent_complete from "./intent_complete.js"
@@ -40,13 +39,10 @@ import intent_completion_fix from "./intent_completion_fix.js"
 import intent_completion_review from "./intent_completion_review.js"
 import outputs_missing from "./outputs_missing.js"
 import pre_review from "./pre_review.js"
-import pre_review_revisit from "./pre_review_revisit.js"
 import review from "./review.js"
-import review_elaboration from "./review_elaboration.js"
 import review_fix from "./review_fix.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
-import spec_validation_failed from "./spec_validation_failed.js"
 import start_stage from "./start_stage.js"
 import start_unit from "./start_unit.js"
 import start_units from "./start_units.js"
@@ -80,7 +76,6 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["fix_quality_gates", fix_quality_gates],
 	["gate_blocked", gate_blocked],
 	["gate_review", gate_review],
-	["inputs_missing", inputs_missing],
 	["integrate_fix_chains", integrate_fix_chains],
 	["intent_approved", intent_approved],
 	["intent_complete", intent_complete],
@@ -88,13 +83,10 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["intent_completion_review", intent_completion_review],
 	["outputs_missing", outputs_missing],
 	["pre_review", pre_review],
-	["pre_review_revisit", pre_review_revisit],
 	["review", review],
-	["review_elaboration", review_elaboration],
 	["review_fix", review_fix],
 	["safe_intent_repair", safe_intent_repair],
 	["select_studio", select_studio],
-	["spec_validation_failed", spec_validation_failed],
 	["start_stage", start_stage],
 	// Same builder serves both — start_unit branches on action.action
 	// to add the haiku_unit_start step.

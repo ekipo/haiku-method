@@ -5157,18 +5157,6 @@ export function enrichActionWithPreview(action: OrchestratorAction): void {
 			next_step = "After fixing, I'll retry advancement."
 			break
 
-		case "spec_validation_failed":
-			tell_user =
-				"Unit specs failed validation against the stage's allowed types — I need to fix them."
-			next_step = "After fixing, I'll retry advancement."
-			break
-
-		case "inputs_missing":
-			tell_user =
-				"Some units are missing required input references — I need to add them."
-			next_step = "After fixing, I'll retry advancement."
-			break
-
 		case "gate_blocked":
 			tell_user =
 				"Gate review couldn't be completed — the review UI and elicitation both failed."

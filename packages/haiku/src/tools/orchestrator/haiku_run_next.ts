@@ -202,15 +202,6 @@ export default defineTool({
 				wave: result.wave,
 			})
 
-		if (stFile && result.action === "spec_validation_failed") {
-			logSessionEvent(stFile, {
-				event: "spec_validation_failed",
-				intent: slug,
-				stage: result.stage,
-				violations: result.violations,
-				allowed_types: result.allowed_types,
-			})
-		}
 		if (stFile && result.action === "outputs_missing") {
 			logSessionEvent(stFile, {
 				event: "outputs_missing",
@@ -227,14 +218,6 @@ export default defineTool({
 				missing: result.missing,
 			})
 		}
-		if (stFile && result.action === "review_elaboration") {
-			logSessionEvent(stFile, {
-				event: "review_elaboration",
-				intent: slug,
-				stage: result.stage,
-			})
-		}
-
 		// Read intent metadata for instruction building (used in all
 		// return paths).
 		let intentMeta: Record<string, unknown> = {}

@@ -17,7 +17,7 @@
  */
 
 import { Header as HeaderLandmark } from "../a11y"
-import { ThemeToggle } from "./ThemeToggle"
+import { ThemeToggle } from "../atoms/ThemeToggle"
 
 export interface HeaderProps {
 	title: React.ReactNode

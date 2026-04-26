@@ -30,7 +30,7 @@ import {
 } from "../../a11y"
 import { useApiClient } from "../../api/context"
 import { Card, SectionHeading } from "../../components/Card"
-import { Input } from "../../components/Input"
+import { Input } from "../../atoms/Input"
 import { SubmitSuccess } from "../../components/SubmitSuccess"
 import { tryCloseTab } from "../../lib/tryCloseTab"
 

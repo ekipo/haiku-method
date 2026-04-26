@@ -16,7 +16,7 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { LiveRegionShell } from "../a11y"
-import { SkipLink } from "../components/SkipLink"
+import { SkipLink } from "../atoms/SkipLink"
 import { NotFoundShell } from "../shell/ShellLayout"
 import { applyThemePreference, THEME_KEY } from "../theme"
 

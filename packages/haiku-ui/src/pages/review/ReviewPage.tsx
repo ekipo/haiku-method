@@ -28,7 +28,7 @@ import {
 import type { InlineCommentEntry } from "../../components/InlineComments"
 import { StageProgressStrip } from "../../components/StageProgressStrip"
 import { SubmitSuccess } from "../../components/SubmitSuccess"
-import { ThemeToggle } from "../../components/ThemeToggle"
+import { ThemeToggle } from "../../atoms/ThemeToggle"
 import { FeedbackProvider } from "../../hooks/FeedbackContext"
 import { useFeedback } from "../../hooks/useFeedback"
 import type { ReviewAnnotations } from "../../types"

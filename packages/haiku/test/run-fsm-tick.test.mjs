@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { runFsmTick, XSTATE_NATIVE_STATES } = await import(
+const { runFsmTick, XSTATE_NATIVE_STATES, emitNativeAction } = await import(
 	"../src/orchestrator/fsm/run-fsm-tick.ts"
 )
 
@@ -86,7 +86,7 @@ test("non-xstate-native state routes to runNext driver", () => {
 	assert.strictEqual(result.snapshot, null)
 })
 
-test("complete state routes to xstate driver", () => {
+test("complete state routes to xstate driver + emits action", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
@@ -97,9 +97,15 @@ test("complete state routes to xstate driver", () => {
 	assert.strictEqual(result.state, "complete")
 	assert.strictEqual(result.driver, "xstate")
 	assert.ok(result.snapshot, "xstate path should produce a snapshot")
+	assert.ok(result.action, "xstate path should emit an action")
+	assert.strictEqual(result.action.action, "complete")
+	assert.strictEqual(
+		result.action.message,
+		`Intent 'test' is already completed`,
+	)
 })
 
-test("archived state (terminal=complete) routes to xstate driver", () => {
+test("archived state (terminal=complete) routes to xstate driver + emits action", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		archived: true,
@@ -109,9 +115,10 @@ test("archived state (terminal=complete) routes to xstate driver", () => {
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
 	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.action.action, "complete")
 })
 
-test("complete-without-studio falls back to runNext (xstate is studio-keyed)", () => {
+test("complete-without-studio still emits action (snapshot omitted)", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		status: "completed",
 	})
@@ -119,23 +126,36 @@ test("complete-without-studio falls back to runNext (xstate is studio-keyed)", (
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
-	// No studio means no machine to instantiate — driver is runNext.
-	assert.strictEqual(result.driver, "runNext")
+	// No studio = no snapshot side-effect, but emitNativeAction is
+	// studio-independent for `complete`. The action is still emitted.
+	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.action.action, "complete")
+	assert.strictEqual(result.snapshot, null)
 })
 
 console.log("\n=== xstate-native registry ===")
 
-test("registry contains the migrated terminal states", () => {
-	for (const name of ["complete", "error", "escalate", "blocked"]) {
-		assert.ok(
-			XSTATE_NATIVE_STATES.has(name),
-			`registry should include '${name}'`,
-		)
-	}
+test("registry contains the migrated complete state", () => {
+	assert.ok(
+		XSTATE_NATIVE_STATES.has("complete"),
+		"registry should include 'complete'",
+	)
 })
 
-test("registry does NOT contain unmigrated states", () => {
-	for (const name of ["elaborate", "execute", "review", "gate_review"]) {
+test("registry does NOT contain states whose emission needs runNext-internal info", () => {
+	// error/escalate/blocked all need info computed only inside
+	// runNext (error message, iteration count, blocked unit list).
+	// They stay on runNext until per-state migrations port the
+	// emission paths.
+	for (const name of [
+		"error",
+		"escalate",
+		"blocked",
+		"elaborate",
+		"execute",
+		"review",
+		"gate_review",
+	]) {
 		assert.ok(
 			!XSTATE_NATIVE_STATES.has(name),
 			`registry should NOT include unmigrated '${name}' yet`,
@@ -172,6 +192,47 @@ test("runNext-driven results carry context but no snapshot", () => {
 	assert.strictEqual(result.snapshot, null)
 	assert.strictEqual(result.context.currentStage, "development")
 	assert.strictEqual(result.context.currentPhase, "execute")
+})
+
+console.log("\n=== Parity vs runNext (complete state) ===")
+
+test("emitNativeAction('complete') matches runNext's shape byte-for-byte", () => {
+	// runNext emits this exact shape at orchestrator.ts:2200 when
+	// it sees status=completed. The xstate-native emitter must
+	// match byte-for-byte or the migration is a regression.
+	const slug = "test-completion"
+	const action = emitNativeAction("complete", {
+		slug,
+		studio: "software",
+		intentDirPath: `/dummy/${slug}`,
+		intent: { studio: "software", status: "completed" },
+		currentStage: "",
+		currentPhase: "",
+		stageState: {},
+	})
+	assert.deepStrictEqual(action, {
+		action: "complete",
+		message: `Intent '${slug}' is already completed`,
+	})
+})
+
+test("emitNativeAction returns null for unmigrated states", () => {
+	for (const name of ["error", "blocked", "escalate", "elaborate"]) {
+		const action = emitNativeAction(name, {
+			slug: "x",
+			studio: "software",
+			intentDirPath: "/dummy",
+			intent: {},
+			currentStage: "",
+			currentPhase: "",
+			stageState: {},
+		})
+		assert.strictEqual(
+			action,
+			null,
+			`'${name}' should not have a native emission yet`,
+		)
+	}
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

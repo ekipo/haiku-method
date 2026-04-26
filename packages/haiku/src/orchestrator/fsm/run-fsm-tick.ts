@@ -24,37 +24,69 @@
 // flag (xstateNativeStates) controlling which is which.
 
 import { createActor, type AnyActorRef } from "xstate"
+import type { OrchestratorAction } from "../../orchestrator.js"
 import { buildStudioConfig } from "./build-studio-config.js"
 import { createMachineForStudio } from "./create-machine-for-studio.js"
-import { deriveCurrentState, type DerivedState } from "./derive-state.js"
+import {
+	type DerivedContext,
+	type DerivedState,
+	deriveCurrentState,
+} from "./derive-state.js"
 import type { StateName } from "./types.js"
 
 /** States that have been fully migrated from runNext to
- *  xstate-native behavior. The wrapper consults this registry to
- *  decide whether to use xstate's tick or fall back to runNext.
+ *  xstate-native behavior — meaning the OrchestratorAction is
+ *  emitted from this layer instead of from runNext. The wrapper
+ *  consults this registry to decide whether to use xstate's tick
+ *  or fall back to runNext.
  *
- *  As per-state migrations land, names are added here. The first
- *  migrations target terminal states (no transitions out, no
- *  side effects beyond telemetry) — pure proof-of-concept. */
+ *  Migration criterion: the OrchestratorAction can be emitted from
+ *  the derived context alone. Terminal states whose emission depends
+ *  on runNext-internal computation (escalate's iteration count,
+ *  error's message, blocked's unit list) require a deeper port
+ *  before they qualify. */
 export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = new Set([
-	// Terminal states migrated as proof-of-concept. The xstate
-	// machine handles entry telemetry; runNext continues to compute
-	// the OrchestratorAction shape until per-state action emission
-	// migrates.
+	// First migrated state. `complete` is reached when intent.status
+	// === "completed" or intent.archived === true — both are derived
+	// from frontmatter alone, so the OrchestratorAction is a pure
+	// function of context.slug. Byte-identical to runNext's
+	// emission at orchestrator.ts:2200.
 	"complete",
-	"error",
-	"escalate",
-	"blocked",
 ] as const)
 
-/** Result of a single tick — what state we ended up in + whether
- *  xstate or runNext drove it. The OrchestratorAction emission
- *  itself stays in haiku_run_next.ts; this function answers the
- *  structural question "where is the FSM right now?". */
+/** Pure emitter: derive an OrchestratorAction from a state name +
+ *  context, for states whose emission is a pure function of context.
+ *  Returns null when the state isn't xstate-native or its emission
+ *  requires runNext-internal computation.
+ *
+ *  Each entry here is a per-state migration. The function is the
+ *  "state's entry action emits the OrchestratorAction" boundary —
+ *  callers (haiku_run_next.ts) check this first and fall back to
+ *  runNext when null. */
+export function emitNativeAction(
+	state: StateName,
+	context: DerivedContext,
+): OrchestratorAction | null {
+	switch (state) {
+		case "complete":
+			return {
+				action: "complete",
+				message: `Intent '${context.slug}' is already completed`,
+			}
+		default:
+			return null
+	}
+}
+
+/** Result of a single tick. The `action` field is the
+ *  OrchestratorAction the agent should follow when driver ===
+ *  "xstate"; runNext-driven results carry null and the caller falls
+ *  back to runNext(slug). */
 export interface FsmTickResult {
 	readonly state: StateName
 	readonly context: DerivedState["context"]
 	readonly driver: "xstate" | "runNext"
+	readonly action: OrchestratorAction | null
 	/** xstate snapshot when driver === "xstate", null otherwise. */
 	readonly snapshot: ReturnType<AnyActorRef["getSnapshot"]> | null
 }
@@ -74,47 +106,49 @@ export function runFsmTick(
 			state: derived.state,
 			context: derived.context,
 			driver: "runNext",
+			action: null,
 			snapshot: null,
 		}
 	}
 
-	// xstate-native path. Build the machine for the derived studio,
-	// snapshot at the derived state, capture the result.
+	// xstate-native path. Emit the action via the pure native-action
+	// emitter; spin up the machine for the snapshot/telemetry side
+	// effect.
+	const action = emitNativeAction(derived.state, derived.context)
+
 	const studio = derived.context.studio
-	if (!studio) {
-		// Edge: terminal state without a studio (e.g. archived intent
-		// that never had one). Fall through to runNext driver — xstate
-		// machines are studio-keyed.
+	let snapshot: ReturnType<AnyActorRef["getSnapshot"]> | null = null
+	if (studio) {
+		const studioConfig = buildStudioConfig(studio)
+		if (studioConfig) {
+			const studioMachine = createMachineForStudio(studioConfig)
+			const actor = createActor(studioMachine.machine, {
+				input: derived.context as never,
+			})
+			actor.start()
+			snapshot = actor.getSnapshot()
+			actor.stop()
+		}
+	}
+
+	// If the emitter returned null (state is in the registry but no
+	// pure emission path exists yet), fall back to runNext so the
+	// caller still gets an OrchestratorAction.
+	if (!action) {
 		return {
 			state: derived.state,
 			context: derived.context,
 			driver: "runNext",
-			snapshot: null,
+			action: null,
+			snapshot,
 		}
 	}
-
-	const studioConfig = buildStudioConfig(studio)
-	if (!studioConfig) {
-		return {
-			state: derived.state,
-			context: derived.context,
-			driver: "runNext",
-			snapshot: null,
-		}
-	}
-
-	const studioMachine = createMachineForStudio(studioConfig)
-	const actor = createActor(studioMachine.machine, {
-		input: derived.context as never,
-	})
-	actor.start()
-	const snapshot = actor.getSnapshot()
-	actor.stop()
 
 	return {
 		state: derived.state,
 		context: derived.context,
 		driver: "xstate",
+		action,
 		snapshot,
 	}
 }

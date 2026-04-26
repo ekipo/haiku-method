@@ -49,6 +49,7 @@ import {
 	runNext,
 	writeReviewFeedbackFiles,
 } from "../../orchestrator.js"
+import { runFsmTick } from "../../orchestrator/fsm/run-fsm-tick.js"
 import { reportError } from "../../sentry.js"
 import { logSessionEvent } from "../../session-metadata.js"
 import { sealIntentState } from "../../state-integrity.js"
@@ -186,7 +187,16 @@ export default defineTool({
 			}
 		}
 
-		const result = runNext(slug)
+		// xstate-native check: if the FSM's current state has been
+		// fully migrated, runFsmTick emits the OrchestratorAction
+		// directly. Otherwise we fall back to runNext below. The
+		// migration registry lives in orchestrator/fsm/run-fsm-tick.ts;
+		// states added to XSTATE_NATIVE_STATES skip runNext.
+		const tick = runFsmTick(slug)
+		const result =
+			tick && tick.driver === "xstate" && tick.action
+				? tick.action
+				: runNext(slug)
 		emitTelemetry("haiku.orchestrator.action", {
 			intent: slug,
 			action: result.action,

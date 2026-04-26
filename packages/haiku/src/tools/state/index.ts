@@ -11,7 +11,9 @@
 // tools migrate, the switch shrinks toward zero.
 
 import type { ToolDef } from "../types.js"
+import haiku_feedback_delete from "./haiku_feedback_delete.js"
 import haiku_feedback_list from "./haiku_feedback_list.js"
+import haiku_feedback_reject from "./haiku_feedback_reject.js"
 import haiku_intent_get from "./haiku_intent_get.js"
 import haiku_intent_list from "./haiku_intent_list.js"
 import haiku_knowledge_list from "./haiku_knowledge_list.js"
@@ -30,7 +32,9 @@ import haiku_version_info from "./haiku_version_info.js"
 export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 	(
 		[
+			haiku_feedback_delete,
 			haiku_feedback_list,
+			haiku_feedback_reject,
 			haiku_intent_get,
 			haiku_intent_list,
 			haiku_knowledge_list,

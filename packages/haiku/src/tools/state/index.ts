@@ -12,6 +12,7 @@
 
 import type { ToolDef } from "../types.js"
 import haiku_backlog from "./haiku_backlog.js"
+import haiku_dashboard from "./haiku_dashboard.js"
 import haiku_feedback_delete from "./haiku_feedback_delete.js"
 import haiku_feedback_list from "./haiku_feedback_list.js"
 import haiku_feedback_reject from "./haiku_feedback_reject.js"
@@ -38,6 +39,7 @@ export const stateToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 	(
 		[
 			haiku_backlog,
+			haiku_dashboard,
 			haiku_feedback_delete,
 			haiku_feedback_list,
 			haiku_feedback_reject,

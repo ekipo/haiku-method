@@ -20,7 +20,7 @@
 
 import { type AnyStateMachine, createMachine } from "xstate"
 import type { OrchestratorAction } from "../../orchestrator.js"
-import { buildFsmActions } from "./actions.js"
+import { buildFsmActions } from "./actions/index.js"
 import {
 	buildStageSubMachine,
 	type StateConfigObject,

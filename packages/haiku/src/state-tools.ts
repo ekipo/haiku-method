@@ -110,6 +110,23 @@ import {
 	type UnitIteration,
 } from "./state/iterations.js"
 import {
+	getNestedField,
+	intentFromCurrentBranch,
+	listVisibleIntents,
+	listVisibleIntentSlugs,
+	parseYaml,
+	setFrontmatterField,
+	setUnitFrontmatterField,
+} from "./state/frontmatter.js"
+import {
+	type GitCommitResult,
+	gitCommitState,
+	gitCommitStateBackgroundPush,
+	injectPushWarning,
+	pushWarning,
+	validateBranch,
+} from "./state/git-commit.js"
+import {
 	_resetIsGitRepoForTests,
 	findHaikuRoot,
 	intentDir,
@@ -178,6 +195,15 @@ export {
 	writeFeedbackFile,
 }
 export {
+	getNestedField,
+	intentFromCurrentBranch,
+	listVisibleIntents,
+	listVisibleIntentSlugs,
+	parseYaml,
+	setFrontmatterField,
+	setUnitFrontmatterField,
+}
+export {
 	type AppendIterationResult,
 	appendStageIteration,
 	closeCurrentStageIteration,
@@ -192,6 +218,14 @@ export {
 	startUnitIteration,
 	type UnitHatResult,
 	type UnitIteration,
+}
+export {
+	type GitCommitResult,
+	gitCommitState,
+	gitCommitStateBackgroundPush,
+	injectPushWarning,
+	pushWarning,
+	validateBranch,
 }
 
 // ── Inline quality gates (for hookless harnesses) ─────────────────────────
@@ -689,248 +723,6 @@ export function validateUnitScope(
  *
  * Set `opts.includeArchived` to true to return all intents (both archived
  * and non-archived).
- */
-export function listVisibleIntents(
-	intentsDir: string,
-	opts?: { includeArchived?: boolean },
-): Array<{ slug: string; data: Record<string, unknown> }> {
-	if (!existsSync(intentsDir)) return []
-	const includeArchived = opts?.includeArchived === true
-	const results: Array<{ slug: string; data: Record<string, unknown> }> = []
-	for (const d of readdirSync(intentsDir)) {
-		const intentFile = join(intentsDir, d, "intent.md")
-		if (!existsSync(intentFile)) continue
-		const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
-		if (!includeArchived && data.archived === true) continue
-		results.push({ slug: d, data })
-	}
-	return results
-}
-
-export function listVisibleIntentSlugs(
-	intentsDir: string,
-	opts?: { includeArchived?: boolean },
-): string[] {
-	return listVisibleIntents(intentsDir, opts).map((i) => i.slug)
-}
-
-/**
- * Parse an intent slug (and optionally a stage) out of the current git
- * branch. Supports the two H·AI·K·U branch shapes:
- *
- *   haiku/<slug>/main
- *   haiku/<slug>/<stage>
- *
- * Returns null if the current checkout isn't on a haiku branch or the
- * environment isn't git-backed. Used by pickup/revisit/run_next to
- * auto-resolve the intent when the user's checkout already tells us
- * which intent they want to work on — keeps skills thin and the
- * logic centrally owned.
- */
-export function intentFromCurrentBranch(): {
-	slug: string
-	stage: string | null
-} | null {
-	if (!isGitRepo()) return null
-	const branch = getCurrentBranch()
-	if (!branch) return null
-	const match = branch.match(/^haiku\/([^/]+)\/([^/]+)$/)
-	if (!match) return null
-	const slug = match[1]
-	const stagePart = match[2]
-	return { slug, stage: stagePart === "main" ? null : stagePart }
-}
-
-export function setFrontmatterField(
-	filePath: string,
-	field: string,
-	value: unknown,
-): void {
-	const raw = readFileSync(filePath, "utf8")
-	const parsed = matter(raw)
-	// Spread to avoid mutating gray-matter's returned data object in place —
-	// in-place mutation can corrupt gray-matter's internal cache and cause
-	// subsequent parseFrontmatter calls to return stale values.
-	const updated = { ...parsed.data, [field]: value }
-	// gray-matter stringify: matter.stringify(content, data)
-	writeFileSync(
-		filePath,
-		matter.stringify(
-			parsed.content,
-			normalizeDates(updated as Record<string, unknown>),
-		),
-	)
-}
-
-/** Write a unit frontmatter field to BOTH the parent worktree's copy AND
- *  the unit's dedicated worktree (if one exists). The dual write is what
- *  keeps the FSM's reads (parent) in sync with the merge commits produced
- *  by `mergeUnitWorktree` (unit worktree). Missing either side causes the
- *  status-drift bug where a unit completes in one view but appears active
- *  in the other. */
-export function setUnitFrontmatterField(
-	slug: string,
-	stage: string,
-	unit: string,
-	field: string,
-	value: unknown,
-): void {
-	const parentPath = unitPath(slug, stage, unit)
-	if (existsSync(parentPath)) setFrontmatterField(parentPath, field, value)
-	// findHaikuRoot() returns the `.haiku` directory itself; worktrees live
-	// under `<haikuRoot>/worktrees/{slug}/{unit}`.
-	const worktreeBase = join(findHaikuRoot(), "worktrees", slug, unit)
-	if (!existsSync(worktreeBase)) return
-	const worktreeUnitPath = join(
-		worktreeBase,
-		".haiku",
-		"intents",
-		slug,
-		"stages",
-		stage,
-		"units",
-		unit.endsWith(".md") ? unit : `${unit}.md`,
-	)
-	if (existsSync(worktreeUnitPath)) {
-		setFrontmatterField(worktreeUnitPath, field, value)
-	}
-}
-
-function parseYaml(raw: string): Record<string, unknown> {
-	// Wrap raw YAML in frontmatter delimiters so gray-matter can parse it
-	const { data } = matter(`---\n${raw}\n---\n`)
-	return normalizeDates(data as Record<string, unknown>)
-}
-
-function getNestedField(obj: Record<string, unknown>, path: string): unknown {
-	const parts = path.split(".")
-	let current: unknown = obj
-	for (const part of parts) {
-		if (current == null || typeof current !== "object") return undefined
-		current = (current as Record<string, unknown>)[part]
-	}
-	return current
-}
-
-
-
-/**
- * Git add + commit + push for lifecycle state changes.
- * No-op in non-git environments (filesystem mode).
- * Non-fatal: git failures are logged but never crash the MCP.
- */
-export function gitCommitState(message: string): {
-	committed: boolean
-	pushed: boolean
-	pushError?: string
-} {
-	if (!isGitRepo()) return { committed: false, pushed: false } // Filesystem mode — no git operations
-	try {
-		const haikuRoot = findHaikuRoot()
-		execFileSync("git", ["add", haikuRoot], { encoding: "utf8", stdio: "pipe" })
-		execFileSync("git", ["commit", "-m", message, "--allow-empty"], {
-			encoding: "utf8",
-			stdio: "pipe",
-		})
-		try {
-			execFileSync("git", ["push"], { encoding: "utf8", stdio: "pipe" })
-			return { committed: true, pushed: true }
-		} catch (pushErr) {
-			const pushError =
-				pushErr instanceof Error ? pushErr.message : String(pushErr)
-			return { committed: true, pushed: false, pushError }
-		}
-	} catch {
-		return { committed: false, pushed: false }
-	}
-}
-
-/**
- * Like `gitCommitState`, but commits synchronously and pushes in the
- * background via an unref'd child process. Use for HTTP mutation
- * handlers where the caller is waiting on an HTTP response — pushing
- * inline adds a network round trip per mutation, which is perceptible
- * as UI lag on every approve/reject/delete. The commit is the real
- * durability boundary; push is for sharing state with remote tooling
- * and can safely slip a few hundred ms.
- */
-export function gitCommitStateBackgroundPush(message: string): {
-	committed: boolean
-} {
-	if (!isGitRepo()) return { committed: false }
-	try {
-		const haikuRoot = findHaikuRoot()
-		execFileSync("git", ["add", haikuRoot], { encoding: "utf8", stdio: "pipe" })
-		execFileSync("git", ["commit", "-m", message, "--allow-empty"], {
-			encoding: "utf8",
-			stdio: "pipe",
-		})
-	} catch {
-		return { committed: false }
-	}
-	try {
-		const child = spawn("git", ["push"], {
-			stdio: "ignore",
-			detached: true,
-		})
-		child.unref()
-		child.on("error", () => {
-			/* Background push failures are non-fatal. */
-		})
-	} catch {
-		/* swallow — commit already landed */
-	}
-	return { committed: true }
-}
-
-/**
- * Validate the agent is on the correct git branch for the current operation.
- * Returns an error message if on the wrong branch, empty string if OK.
- */
-export function validateBranch(
-	intent: string,
-	expectedType: "intent" | "unit",
-	unit?: string,
-): string {
-	if (!isGitRepo()) return "" // No branch enforcement in filesystem mode
-	const current = getCurrentBranch()
-	if (!current) return ""
-
-	// Any haiku/{intent}/* branch is valid for this intent (covers both continuous main and discrete stage branches)
-	const intentPrefix = `haiku/${intent}/`
-	if (expectedType === "intent") {
-		if (!current.startsWith(intentPrefix)) {
-			return `⚠️ WRONG BRANCH: Expected a branch under '${intentPrefix}' but on '${current}'. Run \`git checkout haiku/${intent}/main\` or the appropriate stage branch. Custom branch names break the H·AI·K·U lifecycle.`
-		}
-	} else if (expectedType === "unit" && unit) {
-		const expectedUnit = `haiku/${intent}/${unit}`
-		// Unit work can happen on the unit branch (worktree) or any intent/stage branch
-		if (current !== expectedUnit && !current.startsWith(intentPrefix)) {
-			return `⚠️ WRONG BRANCH: Expected '${expectedUnit}' or a branch under '${intentPrefix}' but on '${current}'. Ensure you're working in the correct worktree.`
-		}
-	}
-	return ""
-}
-
-/** Returns a warning string if git push failed, empty string otherwise. Safe to append to plain text responses. */
-function pushWarning(result: ReturnType<typeof gitCommitState>): string {
-	if (result.pushed || !result.committed) return ""
-	return `\n\n⚠️ GIT PUSH FAILED: ${result.pushError || "unknown error"}. Run \`git pull --rebase && git push\` to sync with remote. If there are conflicts, resolve them then push again.`
-}
-
-/** Injects push warning into a JSON object's message field if push failed. */
-function injectPushWarning(
-	obj: Record<string, unknown>,
-	result: ReturnType<typeof gitCommitState>,
-): Record<string, unknown> {
-	if (result.pushed || !result.committed) return obj
-	return {
-		...obj,
-		push_failed: true,
-		push_error: result.pushError || "unknown error",
-		message: `${obj.message || ""}. ⚠️ GIT PUSH FAILED: ${result.pushError || "unknown error"}. Run \`git pull --rebase && git push\` to resolve.`,
-	}
-}
 
 /**
  * Callback for runNext — registered by orchestrator at startup to avoid circular imports.

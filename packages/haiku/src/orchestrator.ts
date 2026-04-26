@@ -109,6 +109,7 @@ import {
 	studioSearchPaths,
 } from "./studio-reader.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
+import { orchestratorToolHandlers } from "./tools/orchestrator/index.js"
 import { writeSubagentPrompt } from "./subagent-prompt-file.js"
 import { emitTelemetry } from "./telemetry.js"
 import type { DAGGraph } from "./types.js"
@@ -8432,6 +8433,16 @@ export async function handleOrchestratorTool(
 	const validationError = validateSlugArgs(args)
 	if (validationError) return validationError
 
+	// Per-tool handlers in tools/orchestrator/* take priority over the
+	// legacy if-chain. Migrated tools live in their own file with
+	// defineTool(); the chain below handles the rest until they all
+	// migrate.
+	const perToolHandler = orchestratorToolHandlers.get(name)
+	if (perToolHandler) {
+		const result = perToolHandler.handle(args)
+		return result instanceof Promise ? await result : result
+	}
+
 	if (name === "haiku_run_next") {
 		// Auto-resolve `intent` when omitted. Resolution order:
 		//   1. Current git branch (`haiku/<slug>/main` or `haiku/<slug>/<stage>`)
@@ -10130,152 +10141,6 @@ export async function handleOrchestratorTool(
 					description,
 					context: conversationContext,
 					message: `Intent '${slug}' has been reset. Call haiku_intent_create { title: "${title.replace(/"/g, '\\"')}", description: "${description.replace(/"/g, '\\"').replace(/\n/g, "\\n")}", slug: "${slug}"${conversationContext ? ', context: "<preserved context>"' : ""} } to recreate it.`,
-				},
-				null,
-				2,
-			),
-		)
-	}
-
-	if (name === "haiku_intent_archive") {
-		const slug = args.intent as string
-		const root = findHaikuRoot()
-		const intentFile = join(root, "intents", slug, "intent.md")
-
-		if (!existsSync(intentFile)) {
-			return {
-				content: [
-					{ type: "text" as const, text: `Intent '${slug}' not found.` },
-				],
-				isError: true,
-			}
-		}
-
-		// Single-read idempotency check: parse once with parseFrontmatter (which
-		// normalizes dates). If already archived, noop. Otherwise delegate the
-		// write to setFrontmatterField — it re-reads but preserves the
-		// normalizeDates() pass we depend on for stable YAML output.
-		const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
-
-		if (data.archived === true) {
-			return text(
-				JSON.stringify(
-					{
-						action: "noop",
-						slug,
-						path: intentFile,
-						message: `Intent '${slug}' is already archived.`,
-					},
-					null,
-					2,
-				),
-			)
-		}
-
-		// Archive is intent-scoped metadata — land on intent-main so the mutation
-		// is visible everywhere, not split-brain on whatever stage branch the
-		// agent happens to be on when they archive.
-		{
-			const archiveGuard = ensureOnStageBranch(slug, undefined)
-			if (!archiveGuard.ok) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Error: branch enforcement failed for intent archive '${slug}' — ${archiveGuard.message}. Resolve manually and retry.`,
-						},
-					],
-					isError: true,
-				}
-			}
-		}
-
-		setFrontmatterField(intentFile, "archived", true)
-		gitCommitState(`haiku: archive intent ${slug}`)
-
-		return text(
-			JSON.stringify(
-				{
-					action: "intent_archived",
-					slug,
-					path: intentFile,
-					message: `Intent '${slug}' has been archived. Call haiku_intent_unarchive to restore it.`,
-				},
-				null,
-				2,
-			),
-		)
-	}
-
-	if (name === "haiku_intent_unarchive") {
-		const slug = args.intent as string
-		const root = findHaikuRoot()
-		const intentFile = join(root, "intents", slug, "intent.md")
-
-		if (!existsSync(intentFile)) {
-			return {
-				content: [
-					{ type: "text" as const, text: `Intent '${slug}' not found.` },
-				],
-				isError: true,
-			}
-		}
-
-		// Single-pass read: parse once with gray-matter, use it for both the
-		// idempotency check and the write. Previously we parseFrontmatter'd
-		// the file, checked archived, then re-read and re-parsed inside matter()
-		// for the write — two full reads per call.
-		const raw = readFileSync(intentFile, "utf8")
-		const parsed = matter(raw)
-
-		if (parsed.data.archived !== true) {
-			return text(
-				JSON.stringify(
-					{
-						action: "noop",
-						slug,
-						path: intentFile,
-						message: `Intent '${slug}' is not archived.`,
-					},
-					null,
-					2,
-				),
-			)
-		}
-
-		// Unarchive is intent-scoped metadata — land on intent-main so the
-		// mutation is visible everywhere, not split-brain on a stage branch.
-		{
-			const unarchiveGuard = ensureOnStageBranch(slug, undefined)
-			if (!unarchiveGuard.ok) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Error: branch enforcement failed for intent unarchive '${slug}' — ${unarchiveGuard.message}. Resolve manually and retry.`,
-						},
-					],
-					isError: true,
-				}
-			}
-		}
-
-		// Remove the `archived` key entirely rather than leaving `archived: false`.
-		// Cleaner: an unarchived intent looks pristine, no trace of prior archival.
-		const { archived: _archived, ...dataWithoutArchived } = parsed.data
-		writeFileSync(
-			intentFile,
-			matter.stringify(parsed.content, dataWithoutArchived),
-		)
-		gitCommitState(`haiku: unarchive intent ${slug}`)
-
-		return text(
-			JSON.stringify(
-				{
-					action: "intent_unarchived",
-					slug,
-					path: intentFile,
-					message: `Intent '${slug}' has been unarchived.`,
 				},
 				null,
 				2,

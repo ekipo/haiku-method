@@ -78,14 +78,24 @@ test("missing intent returns null", () => {
 	assert.strictEqual(result, null)
 })
 
-test("archived intent → complete", () => {
+test("archived intent → error (matches runNext orchestrator.ts:2214)", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		archived: true,
 	})
 	const result = deriveCurrentState("test", haikuRoot)
 	cleanup()
-	assert.strictEqual(result.state, "complete")
+	assert.strictEqual(result.state, "error")
+})
+
+test("status=archived → error (legacy, matches runNext orchestrator.ts:2207)", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		status: "archived",
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "error")
 })
 
 test("status=completed → complete", () => {

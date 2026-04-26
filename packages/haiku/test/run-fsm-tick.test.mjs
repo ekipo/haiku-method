@@ -105,7 +105,7 @@ test("complete state routes to xstate driver + emits action", () => {
 	)
 })
 
-test("archived state (terminal=complete) routes to xstate driver + emits action", () => {
+test("archived (flag) routes to xstate error with unarchive instructions", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		archived: true,
@@ -113,9 +113,30 @@ test("archived state (terminal=complete) routes to xstate driver + emits action"
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "complete")
+	assert.strictEqual(result.state, "error")
 	assert.strictEqual(result.driver, "xstate")
-	assert.strictEqual(result.action.action, "complete")
+	assert.strictEqual(result.action.action, "error")
+	assert.ok(
+		result.action.message.includes("haiku_intent_unarchive"),
+		"error message should reference haiku_intent_unarchive",
+	)
+})
+
+test("status=archived (legacy) routes to xstate error with repair instructions", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		status: "archived",
+	})
+	const result = runFsmTick("test", haikuRoot)
+	cleanup()
+	assert.ok(result)
+	assert.strictEqual(result.state, "error")
+	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.action.action, "error")
+	assert.ok(
+		result.action.message.includes("/haiku:repair"),
+		"error message should reference /haiku:repair",
+	)
 })
 
 test("complete-without-studio still emits action (snapshot omitted)", () => {
@@ -135,8 +156,8 @@ test("complete-without-studio still emits action (snapshot omitted)", () => {
 
 console.log("\n=== xstate-native registry ===")
 
-test("registry contains the migrated states (complete + select_studio)", () => {
-	for (const name of ["complete", "select_studio"]) {
+test("registry contains the migrated states", () => {
+	for (const name of ["complete", "select_studio", "error"]) {
 		assert.ok(
 			XSTATE_NATIVE_STATES.has(name),
 			`registry should include '${name}'`,
@@ -144,13 +165,8 @@ test("registry contains the migrated states (complete + select_studio)", () => {
 	}
 })
 
-test("registry does NOT contain states whose emission needs runNext-internal info", () => {
-	// error/escalate/blocked all need info computed only inside
-	// runNext (error message, iteration count, blocked unit list).
-	// They stay on runNext until per-state migrations port the
-	// emission paths.
+test("registry does NOT contain stage-active states (still on runNext)", () => {
 	for (const name of [
-		"error",
 		"escalate",
 		"blocked",
 		"elaborate",
@@ -219,7 +235,7 @@ test("emitNativeAction('complete') matches runNext's shape byte-for-byte", () =>
 })
 
 test("emitNativeAction returns null for unmigrated states", () => {
-	for (const name of ["error", "blocked", "escalate", "elaborate"]) {
+	for (const name of ["blocked", "escalate", "elaborate"]) {
 		const action = emitNativeAction(name, {
 			slug: "x",
 			studio: "software",
@@ -235,6 +251,38 @@ test("emitNativeAction returns null for unmigrated states", () => {
 			`'${name}' should not have a native emission yet`,
 		)
 	}
+})
+
+test("emitNativeAction('error') without recognized variant falls back to runNext (returns null)", () => {
+	// 'error' is in the registry, but without intent.archived or
+	// status=archived the emitter doesn't know which variant to
+	// emit — so it returns null and the wrapper falls back to
+	// runNext. This guards against silently emitting wrong errors.
+	const action = emitNativeAction("error", {
+		slug: "x",
+		studio: "software",
+		intentDirPath: "/dummy",
+		intent: {},
+		currentStage: "",
+		currentPhase: "",
+		stageState: {},
+	})
+	assert.strictEqual(action, null)
+})
+
+test("emitNativeAction('error') for archived flag emits unarchive message", () => {
+	const action = emitNativeAction("error", {
+		slug: "test-archived",
+		studio: "software",
+		intentDirPath: "/dummy",
+		intent: { archived: true },
+		currentStage: "",
+		currentPhase: "",
+		stageState: {},
+	})
+	assert.ok(action)
+	assert.strictEqual(action.action, "error")
+	assert.ok(action.message.includes("haiku_intent_unarchive"))
 })
 
 test("emitNativeAction('select_studio') produces studio list + correct message", () => {

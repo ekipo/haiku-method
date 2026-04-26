@@ -460,7 +460,7 @@ export function resolveStudioStages(studio: string): string[] {
 	return []
 }
 
-function resolveStageHats(studio: string, stage: string): string[] {
+export function resolveStageHats(studio: string, stage: string): string[] {
 	// Accept any identifier (dir, name, slug, alias); falls back to raw arg
 	// for robustness when the studio cache isn't warm yet.
 	const info = resolveStudio(studio)
@@ -661,7 +661,7 @@ function resolveStageReview(studio: string, stage: string): string {
 	return "auto"
 }
 
-function resolveStageMetadata(
+export function resolveStageMetadata(
 	studio: string,
 	stage: string,
 ): { description: string; body: string } | null {
@@ -1422,7 +1422,7 @@ function findPreviousStage(slug: string, stage: string): string | undefined {
 	return idx > 0 ? studioStages[idx - 1] : undefined
 }
 
-function fsmStartStage(slug: string, stage: string): void {
+export function fsmStartStage(slug: string, stage: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 
 	// Branch isolation first — if this fails (merge conflict), no state is mutated.

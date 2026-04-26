@@ -55,6 +55,13 @@ export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = new Set([
 	// is a pure read via listStudios() (cached, no mutation).
 	// Byte-identical to runNext's emission at orchestrator.ts:2171.
 	"select_studio",
+	// `error` — emitted for the two archive-related terminal cases.
+	// Variant chosen by emitNativeAction based on intent metadata.
+	// Byte-identical to runNext's emissions at orchestrator.ts:2207
+	// (legacy status=archived) and 2214 (archived flag set).
+	// Other error sites (frontmatter parse failures, integrity
+	// tamper, FSM internal errors) still emit through runNext.
+	"error",
 ] as const)
 
 /** Pure emitter: derive an OrchestratorAction from a state name +
@@ -90,6 +97,29 @@ export function emitNativeAction(
 				available_studios: available,
 				message: `Intent '${context.slug}' has no studio selected. Call haiku_select_studio { intent: "${context.slug}" } to choose a lifecycle studio.`,
 			}
+		}
+		case "error": {
+			// Two variants — legacy status=archived (recoverable via
+			// /haiku:repair) and the newer archived flag (recoverable
+			// via haiku_intent_unarchive). Other error sites stay on
+			// runNext until their per-state migrations land.
+			const status = (context.intent.status as string) || ""
+			if (status === "archived") {
+				return {
+					action: "error",
+					message: `Intent '${context.slug}' has status: archived (legacy/terminal). haiku_intent_unarchive only clears the new \`archived\` field — it does not touch \`status\`. To recover, run \`/haiku:repair\` or manually edit \`.haiku/intents/${context.slug}/intent.md\` and set \`status: active\`.`,
+				}
+			}
+			if (context.intent.archived === true) {
+				return {
+					action: "error",
+					message: `Intent '${context.slug}' is archived. Call haiku_intent_unarchive to restore it.`,
+				}
+			}
+			// Derived `error` from an unknown phase — runNext doesn't
+			// have a direct match here, fall back so it can surface
+			// the corruption.
+			return null
 		}
 		default:
 			return null

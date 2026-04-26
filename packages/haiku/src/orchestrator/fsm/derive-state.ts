@@ -85,10 +85,30 @@ export function deriveCurrentState(
 		stageState,
 	})
 
-	// Terminal: archived or completed.
-	if (archived || status === "completed") {
+	// Terminal: completed status. (archived === true is handled
+	// further down — runNext returns `error` not `complete` for that
+	// path, mirrored here so emission parity holds.)
+	if (status === "completed") {
 		return {
 			state: "complete",
+			context: baseContext("", "", {}),
+		}
+	}
+
+	// Legacy "archived" status was a pre-flag terminal marker.
+	// Surfaced as error so the agent runs /haiku:repair.
+	if (status === "archived") {
+		return {
+			state: "error",
+			context: baseContext("", "", {}),
+		}
+	}
+
+	// New `archived: true` flag (separate from status) — agent must
+	// call haiku_intent_unarchive. Emitted as error.
+	if (archived) {
+		return {
+			state: "error",
 			context: baseContext("", "", {}),
 		}
 	}

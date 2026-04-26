@@ -1,0 +1,262 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: hr
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> requisition : studio.selected
+  requisition --> sourcing
+  sourcing --> screening
+  screening --> interview
+  interview --> offer
+  offer --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> offer : gate.changes_requested
+
+  state requisition {
+    [*] --> requisition_start_stage
+    requisition_start_stage --> requisition_elaborate : tick
+    requisition_elaborate --> requisition_execute : elaborate.advance
+    requisition_elaborate --> requisition_review_fix : feedback.pending
+    state requisition_execute {
+      [*] --> requisition_execute_hiring_manager
+      requisition_execute_hiring_manager --> requisition_execute_recruiter : hat.advance
+      requisition_execute_recruiter --> requisition_execute_done : hat.advance
+      requisition_execute_recruiter --> requisition_execute_hiring_manager : hat.reject
+      requisition_execute_done --> [*]
+    }
+    requisition_execute --> requisition_review
+    requisition_review --> requisition_gate : review.clean
+    requisition_review --> requisition_review_fix : review.findings
+    state requisition_review_fix {
+      [*] --> requisition_review_fix_bolt_1
+      state requisition_review_fix_bolt_1 {
+        [*] --> requisition_review_fix_bolt_1_hiring_manager
+        requisition_review_fix_bolt_1_hiring_manager --> requisition_review_fix_bolt_1_feedback_assessor : fix.advance
+        requisition_review_fix_bolt_1_feedback_assessor --> requisition_review_fix_bolt_1_validated : fix.advance
+        requisition_review_fix_bolt_1_validated --> [*]
+      }
+      requisition_review_fix_bolt_1 --> requisition_review_fix_done : feedback.closed
+      requisition_review_fix_bolt_1 --> requisition_review_fix_bolt_2 : feedback.open
+      state requisition_review_fix_bolt_2 {
+        [*] --> requisition_review_fix_bolt_2_hiring_manager
+        requisition_review_fix_bolt_2_hiring_manager --> requisition_review_fix_bolt_2_feedback_assessor : fix.advance
+        requisition_review_fix_bolt_2_feedback_assessor --> requisition_review_fix_bolt_2_validated : fix.advance
+        requisition_review_fix_bolt_2_validated --> [*]
+      }
+      requisition_review_fix_bolt_2 --> requisition_review_fix_done : feedback.closed
+      requisition_review_fix_bolt_2 --> requisition_review_fix_bolt_3 : feedback.open
+      state requisition_review_fix_bolt_3 {
+        [*] --> requisition_review_fix_bolt_3_hiring_manager
+        requisition_review_fix_bolt_3_hiring_manager --> requisition_review_fix_bolt_3_feedback_assessor : fix.advance
+        requisition_review_fix_bolt_3_feedback_assessor --> requisition_review_fix_bolt_3_validated : fix.advance
+        requisition_review_fix_bolt_3_validated --> [*]
+      }
+      requisition_review_fix_bolt_3 --> requisition_review_fix_done : feedback.closed
+      requisition_review_fix_bolt_3 --> requisition_review_fix_escalated : feedback.open
+      requisition_review_fix_done --> [*]
+      requisition_review_fix_escalated --> [*]
+    }
+    requisition_review_fix --> requisition_gate
+    requisition_gate --> [*]
+  }
+
+  state sourcing {
+    [*] --> sourcing_start_stage
+    sourcing_start_stage --> sourcing_elaborate : tick
+    sourcing_elaborate --> sourcing_execute : elaborate.advance
+    sourcing_elaborate --> sourcing_review_fix : feedback.pending
+    state sourcing_execute {
+      [*] --> sourcing_execute_sourcer
+      sourcing_execute_sourcer --> sourcing_execute_recruiter : hat.advance
+      sourcing_execute_recruiter --> sourcing_execute_done : hat.advance
+      sourcing_execute_recruiter --> sourcing_execute_sourcer : hat.reject
+      sourcing_execute_done --> [*]
+    }
+    sourcing_execute --> sourcing_review
+    sourcing_review --> sourcing_gate : review.clean
+    sourcing_review --> sourcing_review_fix : review.findings
+    state sourcing_review_fix {
+      [*] --> sourcing_review_fix_bolt_1
+      state sourcing_review_fix_bolt_1 {
+        [*] --> sourcing_review_fix_bolt_1_sourcer
+        sourcing_review_fix_bolt_1_sourcer --> sourcing_review_fix_bolt_1_feedback_assessor : fix.advance
+        sourcing_review_fix_bolt_1_feedback_assessor --> sourcing_review_fix_bolt_1_validated : fix.advance
+        sourcing_review_fix_bolt_1_validated --> [*]
+      }
+      sourcing_review_fix_bolt_1 --> sourcing_review_fix_done : feedback.closed
+      sourcing_review_fix_bolt_1 --> sourcing_review_fix_bolt_2 : feedback.open
+      state sourcing_review_fix_bolt_2 {
+        [*] --> sourcing_review_fix_bolt_2_sourcer
+        sourcing_review_fix_bolt_2_sourcer --> sourcing_review_fix_bolt_2_feedback_assessor : fix.advance
+        sourcing_review_fix_bolt_2_feedback_assessor --> sourcing_review_fix_bolt_2_validated : fix.advance
+        sourcing_review_fix_bolt_2_validated --> [*]
+      }
+      sourcing_review_fix_bolt_2 --> sourcing_review_fix_done : feedback.closed
+      sourcing_review_fix_bolt_2 --> sourcing_review_fix_bolt_3 : feedback.open
+      state sourcing_review_fix_bolt_3 {
+        [*] --> sourcing_review_fix_bolt_3_sourcer
+        sourcing_review_fix_bolt_3_sourcer --> sourcing_review_fix_bolt_3_feedback_assessor : fix.advance
+        sourcing_review_fix_bolt_3_feedback_assessor --> sourcing_review_fix_bolt_3_validated : fix.advance
+        sourcing_review_fix_bolt_3_validated --> [*]
+      }
+      sourcing_review_fix_bolt_3 --> sourcing_review_fix_done : feedback.closed
+      sourcing_review_fix_bolt_3 --> sourcing_review_fix_escalated : feedback.open
+      sourcing_review_fix_done --> [*]
+      sourcing_review_fix_escalated --> [*]
+    }
+    sourcing_review_fix --> sourcing_gate
+    sourcing_gate --> [*]
+  }
+
+  state screening {
+    [*] --> screening_start_stage
+    screening_start_stage --> screening_elaborate : tick
+    screening_elaborate --> screening_execute : elaborate.advance
+    screening_elaborate --> screening_review_fix : feedback.pending
+    state screening_execute {
+      [*] --> screening_execute_screener
+      screening_execute_screener --> screening_execute_assessor : hat.advance
+      screening_execute_assessor --> screening_execute_done : hat.advance
+      screening_execute_assessor --> screening_execute_screener : hat.reject
+      screening_execute_done --> [*]
+    }
+    screening_execute --> screening_review
+    screening_review --> screening_gate : review.clean
+    screening_review --> screening_review_fix : review.findings
+    state screening_review_fix {
+      [*] --> screening_review_fix_bolt_1
+      state screening_review_fix_bolt_1 {
+        [*] --> screening_review_fix_bolt_1_screener
+        screening_review_fix_bolt_1_screener --> screening_review_fix_bolt_1_feedback_assessor : fix.advance
+        screening_review_fix_bolt_1_feedback_assessor --> screening_review_fix_bolt_1_validated : fix.advance
+        screening_review_fix_bolt_1_validated --> [*]
+      }
+      screening_review_fix_bolt_1 --> screening_review_fix_done : feedback.closed
+      screening_review_fix_bolt_1 --> screening_review_fix_bolt_2 : feedback.open
+      state screening_review_fix_bolt_2 {
+        [*] --> screening_review_fix_bolt_2_screener
+        screening_review_fix_bolt_2_screener --> screening_review_fix_bolt_2_feedback_assessor : fix.advance
+        screening_review_fix_bolt_2_feedback_assessor --> screening_review_fix_bolt_2_validated : fix.advance
+        screening_review_fix_bolt_2_validated --> [*]
+      }
+      screening_review_fix_bolt_2 --> screening_review_fix_done : feedback.closed
+      screening_review_fix_bolt_2 --> screening_review_fix_bolt_3 : feedback.open
+      state screening_review_fix_bolt_3 {
+        [*] --> screening_review_fix_bolt_3_screener
+        screening_review_fix_bolt_3_screener --> screening_review_fix_bolt_3_feedback_assessor : fix.advance
+        screening_review_fix_bolt_3_feedback_assessor --> screening_review_fix_bolt_3_validated : fix.advance
+        screening_review_fix_bolt_3_validated --> [*]
+      }
+      screening_review_fix_bolt_3 --> screening_review_fix_done : feedback.closed
+      screening_review_fix_bolt_3 --> screening_review_fix_escalated : feedback.open
+      screening_review_fix_done --> [*]
+      screening_review_fix_escalated --> [*]
+    }
+    screening_review_fix --> screening_gate
+    screening_gate --> [*]
+  }
+
+  state interview {
+    [*] --> interview_start_stage
+    interview_start_stage --> interview_elaborate : tick
+    interview_elaborate --> interview_execute : elaborate.advance
+    interview_elaborate --> interview_review_fix : feedback.pending
+    state interview_execute {
+      [*] --> interview_execute_interviewer
+      interview_execute_interviewer --> interview_execute_evaluator : hat.advance
+      interview_execute_evaluator --> interview_execute_done : hat.advance
+      interview_execute_evaluator --> interview_execute_interviewer : hat.reject
+      interview_execute_done --> [*]
+    }
+    interview_execute --> interview_review
+    interview_review --> interview_gate : review.clean
+    interview_review --> interview_review_fix : review.findings
+    state interview_review_fix {
+      [*] --> interview_review_fix_bolt_1
+      state interview_review_fix_bolt_1 {
+        [*] --> interview_review_fix_bolt_1_interviewer
+        interview_review_fix_bolt_1_interviewer --> interview_review_fix_bolt_1_feedback_assessor : fix.advance
+        interview_review_fix_bolt_1_feedback_assessor --> interview_review_fix_bolt_1_validated : fix.advance
+        interview_review_fix_bolt_1_validated --> [*]
+      }
+      interview_review_fix_bolt_1 --> interview_review_fix_done : feedback.closed
+      interview_review_fix_bolt_1 --> interview_review_fix_bolt_2 : feedback.open
+      state interview_review_fix_bolt_2 {
+        [*] --> interview_review_fix_bolt_2_interviewer
+        interview_review_fix_bolt_2_interviewer --> interview_review_fix_bolt_2_feedback_assessor : fix.advance
+        interview_review_fix_bolt_2_feedback_assessor --> interview_review_fix_bolt_2_validated : fix.advance
+        interview_review_fix_bolt_2_validated --> [*]
+      }
+      interview_review_fix_bolt_2 --> interview_review_fix_done : feedback.closed
+      interview_review_fix_bolt_2 --> interview_review_fix_bolt_3 : feedback.open
+      state interview_review_fix_bolt_3 {
+        [*] --> interview_review_fix_bolt_3_interviewer
+        interview_review_fix_bolt_3_interviewer --> interview_review_fix_bolt_3_feedback_assessor : fix.advance
+        interview_review_fix_bolt_3_feedback_assessor --> interview_review_fix_bolt_3_validated : fix.advance
+        interview_review_fix_bolt_3_validated --> [*]
+      }
+      interview_review_fix_bolt_3 --> interview_review_fix_done : feedback.closed
+      interview_review_fix_bolt_3 --> interview_review_fix_escalated : feedback.open
+      interview_review_fix_done --> [*]
+      interview_review_fix_escalated --> [*]
+    }
+    interview_review_fix --> interview_gate
+    interview_gate --> [*]
+  }
+
+  state offer {
+    [*] --> offer_start_stage
+    offer_start_stage --> offer_elaborate : tick
+    offer_elaborate --> offer_execute : elaborate.advance
+    offer_elaborate --> offer_review_fix : feedback.pending
+    state offer_execute {
+      [*] --> offer_execute_compensator
+      offer_execute_compensator --> offer_execute_closer : hat.advance
+      offer_execute_closer --> offer_execute_done : hat.advance
+      offer_execute_closer --> offer_execute_compensator : hat.reject
+      offer_execute_done --> [*]
+    }
+    offer_execute --> offer_review
+    offer_review --> offer_gate : review.clean
+    offer_review --> offer_review_fix : review.findings
+    state offer_review_fix {
+      [*] --> offer_review_fix_bolt_1
+      state offer_review_fix_bolt_1 {
+        [*] --> offer_review_fix_bolt_1_compensator
+        offer_review_fix_bolt_1_compensator --> offer_review_fix_bolt_1_feedback_assessor : fix.advance
+        offer_review_fix_bolt_1_feedback_assessor --> offer_review_fix_bolt_1_validated : fix.advance
+        offer_review_fix_bolt_1_validated --> [*]
+      }
+      offer_review_fix_bolt_1 --> offer_review_fix_done : feedback.closed
+      offer_review_fix_bolt_1 --> offer_review_fix_bolt_2 : feedback.open
+      state offer_review_fix_bolt_2 {
+        [*] --> offer_review_fix_bolt_2_compensator
+        offer_review_fix_bolt_2_compensator --> offer_review_fix_bolt_2_feedback_assessor : fix.advance
+        offer_review_fix_bolt_2_feedback_assessor --> offer_review_fix_bolt_2_validated : fix.advance
+        offer_review_fix_bolt_2_validated --> [*]
+      }
+      offer_review_fix_bolt_2 --> offer_review_fix_done : feedback.closed
+      offer_review_fix_bolt_2 --> offer_review_fix_bolt_3 : feedback.open
+      state offer_review_fix_bolt_3 {
+        [*] --> offer_review_fix_bolt_3_compensator
+        offer_review_fix_bolt_3_compensator --> offer_review_fix_bolt_3_feedback_assessor : fix.advance
+        offer_review_fix_bolt_3_feedback_assessor --> offer_review_fix_bolt_3_validated : fix.advance
+        offer_review_fix_bolt_3_validated --> [*]
+      }
+      offer_review_fix_bolt_3 --> offer_review_fix_done : feedback.closed
+      offer_review_fix_bolt_3 --> offer_review_fix_escalated : feedback.open
+      offer_review_fix_done --> [*]
+      offer_review_fix_escalated --> [*]
+    }
+    offer_review_fix --> offer_gate
+    offer_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

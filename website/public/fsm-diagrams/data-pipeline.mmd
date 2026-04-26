@@ -1,0 +1,262 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: data-pipeline
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> discovery : studio.selected
+  discovery --> extraction
+  extraction --> transformation
+  transformation --> validation
+  validation --> deployment
+  deployment --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> deployment : gate.changes_requested
+
+  state discovery {
+    [*] --> discovery_start_stage
+    discovery_start_stage --> discovery_elaborate : tick
+    discovery_elaborate --> discovery_execute : elaborate.advance
+    discovery_elaborate --> discovery_review_fix : feedback.pending
+    state discovery_execute {
+      [*] --> discovery_execute_data_architect
+      discovery_execute_data_architect --> discovery_execute_schema_analyst : hat.advance
+      discovery_execute_schema_analyst --> discovery_execute_done : hat.advance
+      discovery_execute_schema_analyst --> discovery_execute_data_architect : hat.reject
+      discovery_execute_done --> [*]
+    }
+    discovery_execute --> discovery_review
+    discovery_review --> discovery_gate : review.clean
+    discovery_review --> discovery_review_fix : review.findings
+    state discovery_review_fix {
+      [*] --> discovery_review_fix_bolt_1
+      state discovery_review_fix_bolt_1 {
+        [*] --> discovery_review_fix_bolt_1_data_architect
+        discovery_review_fix_bolt_1_data_architect --> discovery_review_fix_bolt_1_feedback_assessor : fix.advance
+        discovery_review_fix_bolt_1_feedback_assessor --> discovery_review_fix_bolt_1_validated : fix.advance
+        discovery_review_fix_bolt_1_validated --> [*]
+      }
+      discovery_review_fix_bolt_1 --> discovery_review_fix_done : feedback.closed
+      discovery_review_fix_bolt_1 --> discovery_review_fix_bolt_2 : feedback.open
+      state discovery_review_fix_bolt_2 {
+        [*] --> discovery_review_fix_bolt_2_data_architect
+        discovery_review_fix_bolt_2_data_architect --> discovery_review_fix_bolt_2_feedback_assessor : fix.advance
+        discovery_review_fix_bolt_2_feedback_assessor --> discovery_review_fix_bolt_2_validated : fix.advance
+        discovery_review_fix_bolt_2_validated --> [*]
+      }
+      discovery_review_fix_bolt_2 --> discovery_review_fix_done : feedback.closed
+      discovery_review_fix_bolt_2 --> discovery_review_fix_bolt_3 : feedback.open
+      state discovery_review_fix_bolt_3 {
+        [*] --> discovery_review_fix_bolt_3_data_architect
+        discovery_review_fix_bolt_3_data_architect --> discovery_review_fix_bolt_3_feedback_assessor : fix.advance
+        discovery_review_fix_bolt_3_feedback_assessor --> discovery_review_fix_bolt_3_validated : fix.advance
+        discovery_review_fix_bolt_3_validated --> [*]
+      }
+      discovery_review_fix_bolt_3 --> discovery_review_fix_done : feedback.closed
+      discovery_review_fix_bolt_3 --> discovery_review_fix_escalated : feedback.open
+      discovery_review_fix_done --> [*]
+      discovery_review_fix_escalated --> [*]
+    }
+    discovery_review_fix --> discovery_gate
+    discovery_gate --> [*]
+  }
+
+  state extraction {
+    [*] --> extraction_start_stage
+    extraction_start_stage --> extraction_elaborate : tick
+    extraction_elaborate --> extraction_execute : elaborate.advance
+    extraction_elaborate --> extraction_review_fix : feedback.pending
+    state extraction_execute {
+      [*] --> extraction_execute_extractor
+      extraction_execute_extractor --> extraction_execute_connector_reviewer : hat.advance
+      extraction_execute_connector_reviewer --> extraction_execute_done : hat.advance
+      extraction_execute_connector_reviewer --> extraction_execute_extractor : hat.reject
+      extraction_execute_done --> [*]
+    }
+    extraction_execute --> extraction_review
+    extraction_review --> extraction_gate : review.clean
+    extraction_review --> extraction_review_fix : review.findings
+    state extraction_review_fix {
+      [*] --> extraction_review_fix_bolt_1
+      state extraction_review_fix_bolt_1 {
+        [*] --> extraction_review_fix_bolt_1_extractor
+        extraction_review_fix_bolt_1_extractor --> extraction_review_fix_bolt_1_feedback_assessor : fix.advance
+        extraction_review_fix_bolt_1_feedback_assessor --> extraction_review_fix_bolt_1_validated : fix.advance
+        extraction_review_fix_bolt_1_validated --> [*]
+      }
+      extraction_review_fix_bolt_1 --> extraction_review_fix_done : feedback.closed
+      extraction_review_fix_bolt_1 --> extraction_review_fix_bolt_2 : feedback.open
+      state extraction_review_fix_bolt_2 {
+        [*] --> extraction_review_fix_bolt_2_extractor
+        extraction_review_fix_bolt_2_extractor --> extraction_review_fix_bolt_2_feedback_assessor : fix.advance
+        extraction_review_fix_bolt_2_feedback_assessor --> extraction_review_fix_bolt_2_validated : fix.advance
+        extraction_review_fix_bolt_2_validated --> [*]
+      }
+      extraction_review_fix_bolt_2 --> extraction_review_fix_done : feedback.closed
+      extraction_review_fix_bolt_2 --> extraction_review_fix_bolt_3 : feedback.open
+      state extraction_review_fix_bolt_3 {
+        [*] --> extraction_review_fix_bolt_3_extractor
+        extraction_review_fix_bolt_3_extractor --> extraction_review_fix_bolt_3_feedback_assessor : fix.advance
+        extraction_review_fix_bolt_3_feedback_assessor --> extraction_review_fix_bolt_3_validated : fix.advance
+        extraction_review_fix_bolt_3_validated --> [*]
+      }
+      extraction_review_fix_bolt_3 --> extraction_review_fix_done : feedback.closed
+      extraction_review_fix_bolt_3 --> extraction_review_fix_escalated : feedback.open
+      extraction_review_fix_done --> [*]
+      extraction_review_fix_escalated --> [*]
+    }
+    extraction_review_fix --> extraction_gate
+    extraction_gate --> [*]
+  }
+
+  state transformation {
+    [*] --> transformation_start_stage
+    transformation_start_stage --> transformation_elaborate : tick
+    transformation_elaborate --> transformation_execute : elaborate.advance
+    transformation_elaborate --> transformation_review_fix : feedback.pending
+    state transformation_execute {
+      [*] --> transformation_execute_transformer
+      transformation_execute_transformer --> transformation_execute_data_modeler : hat.advance
+      transformation_execute_data_modeler --> transformation_execute_done : hat.advance
+      transformation_execute_data_modeler --> transformation_execute_transformer : hat.reject
+      transformation_execute_done --> [*]
+    }
+    transformation_execute --> transformation_review
+    transformation_review --> transformation_gate : review.clean
+    transformation_review --> transformation_review_fix : review.findings
+    state transformation_review_fix {
+      [*] --> transformation_review_fix_bolt_1
+      state transformation_review_fix_bolt_1 {
+        [*] --> transformation_review_fix_bolt_1_transformer
+        transformation_review_fix_bolt_1_transformer --> transformation_review_fix_bolt_1_feedback_assessor : fix.advance
+        transformation_review_fix_bolt_1_feedback_assessor --> transformation_review_fix_bolt_1_validated : fix.advance
+        transformation_review_fix_bolt_1_validated --> [*]
+      }
+      transformation_review_fix_bolt_1 --> transformation_review_fix_done : feedback.closed
+      transformation_review_fix_bolt_1 --> transformation_review_fix_bolt_2 : feedback.open
+      state transformation_review_fix_bolt_2 {
+        [*] --> transformation_review_fix_bolt_2_transformer
+        transformation_review_fix_bolt_2_transformer --> transformation_review_fix_bolt_2_feedback_assessor : fix.advance
+        transformation_review_fix_bolt_2_feedback_assessor --> transformation_review_fix_bolt_2_validated : fix.advance
+        transformation_review_fix_bolt_2_validated --> [*]
+      }
+      transformation_review_fix_bolt_2 --> transformation_review_fix_done : feedback.closed
+      transformation_review_fix_bolt_2 --> transformation_review_fix_bolt_3 : feedback.open
+      state transformation_review_fix_bolt_3 {
+        [*] --> transformation_review_fix_bolt_3_transformer
+        transformation_review_fix_bolt_3_transformer --> transformation_review_fix_bolt_3_feedback_assessor : fix.advance
+        transformation_review_fix_bolt_3_feedback_assessor --> transformation_review_fix_bolt_3_validated : fix.advance
+        transformation_review_fix_bolt_3_validated --> [*]
+      }
+      transformation_review_fix_bolt_3 --> transformation_review_fix_done : feedback.closed
+      transformation_review_fix_bolt_3 --> transformation_review_fix_escalated : feedback.open
+      transformation_review_fix_done --> [*]
+      transformation_review_fix_escalated --> [*]
+    }
+    transformation_review_fix --> transformation_gate
+    transformation_gate --> [*]
+  }
+
+  state validation {
+    [*] --> validation_start_stage
+    validation_start_stage --> validation_elaborate : tick
+    validation_elaborate --> validation_execute : elaborate.advance
+    validation_elaborate --> validation_review_fix : feedback.pending
+    state validation_execute {
+      [*] --> validation_execute_validator
+      validation_execute_validator --> validation_execute_data_quality_reviewer : hat.advance
+      validation_execute_data_quality_reviewer --> validation_execute_done : hat.advance
+      validation_execute_data_quality_reviewer --> validation_execute_validator : hat.reject
+      validation_execute_done --> [*]
+    }
+    validation_execute --> validation_review
+    validation_review --> validation_gate : review.clean
+    validation_review --> validation_review_fix : review.findings
+    state validation_review_fix {
+      [*] --> validation_review_fix_bolt_1
+      state validation_review_fix_bolt_1 {
+        [*] --> validation_review_fix_bolt_1_validator
+        validation_review_fix_bolt_1_validator --> validation_review_fix_bolt_1_feedback_assessor : fix.advance
+        validation_review_fix_bolt_1_feedback_assessor --> validation_review_fix_bolt_1_validated : fix.advance
+        validation_review_fix_bolt_1_validated --> [*]
+      }
+      validation_review_fix_bolt_1 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_1 --> validation_review_fix_bolt_2 : feedback.open
+      state validation_review_fix_bolt_2 {
+        [*] --> validation_review_fix_bolt_2_validator
+        validation_review_fix_bolt_2_validator --> validation_review_fix_bolt_2_feedback_assessor : fix.advance
+        validation_review_fix_bolt_2_feedback_assessor --> validation_review_fix_bolt_2_validated : fix.advance
+        validation_review_fix_bolt_2_validated --> [*]
+      }
+      validation_review_fix_bolt_2 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_2 --> validation_review_fix_bolt_3 : feedback.open
+      state validation_review_fix_bolt_3 {
+        [*] --> validation_review_fix_bolt_3_validator
+        validation_review_fix_bolt_3_validator --> validation_review_fix_bolt_3_feedback_assessor : fix.advance
+        validation_review_fix_bolt_3_feedback_assessor --> validation_review_fix_bolt_3_validated : fix.advance
+        validation_review_fix_bolt_3_validated --> [*]
+      }
+      validation_review_fix_bolt_3 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_3 --> validation_review_fix_escalated : feedback.open
+      validation_review_fix_done --> [*]
+      validation_review_fix_escalated --> [*]
+    }
+    validation_review_fix --> validation_gate
+    validation_gate --> [*]
+  }
+
+  state deployment {
+    [*] --> deployment_start_stage
+    deployment_start_stage --> deployment_elaborate : tick
+    deployment_elaborate --> deployment_execute : elaborate.advance
+    deployment_elaborate --> deployment_review_fix : feedback.pending
+    state deployment_execute {
+      [*] --> deployment_execute_pipeline_engineer
+      deployment_execute_pipeline_engineer --> deployment_execute_sre : hat.advance
+      deployment_execute_sre --> deployment_execute_done : hat.advance
+      deployment_execute_sre --> deployment_execute_pipeline_engineer : hat.reject
+      deployment_execute_done --> [*]
+    }
+    deployment_execute --> deployment_review
+    deployment_review --> deployment_gate : review.clean
+    deployment_review --> deployment_review_fix : review.findings
+    state deployment_review_fix {
+      [*] --> deployment_review_fix_bolt_1
+      state deployment_review_fix_bolt_1 {
+        [*] --> deployment_review_fix_bolt_1_pipeline_engineer
+        deployment_review_fix_bolt_1_pipeline_engineer --> deployment_review_fix_bolt_1_feedback_assessor : fix.advance
+        deployment_review_fix_bolt_1_feedback_assessor --> deployment_review_fix_bolt_1_validated : fix.advance
+        deployment_review_fix_bolt_1_validated --> [*]
+      }
+      deployment_review_fix_bolt_1 --> deployment_review_fix_done : feedback.closed
+      deployment_review_fix_bolt_1 --> deployment_review_fix_bolt_2 : feedback.open
+      state deployment_review_fix_bolt_2 {
+        [*] --> deployment_review_fix_bolt_2_pipeline_engineer
+        deployment_review_fix_bolt_2_pipeline_engineer --> deployment_review_fix_bolt_2_feedback_assessor : fix.advance
+        deployment_review_fix_bolt_2_feedback_assessor --> deployment_review_fix_bolt_2_validated : fix.advance
+        deployment_review_fix_bolt_2_validated --> [*]
+      }
+      deployment_review_fix_bolt_2 --> deployment_review_fix_done : feedback.closed
+      deployment_review_fix_bolt_2 --> deployment_review_fix_bolt_3 : feedback.open
+      state deployment_review_fix_bolt_3 {
+        [*] --> deployment_review_fix_bolt_3_pipeline_engineer
+        deployment_review_fix_bolt_3_pipeline_engineer --> deployment_review_fix_bolt_3_feedback_assessor : fix.advance
+        deployment_review_fix_bolt_3_feedback_assessor --> deployment_review_fix_bolt_3_validated : fix.advance
+        deployment_review_fix_bolt_3_validated --> [*]
+      }
+      deployment_review_fix_bolt_3 --> deployment_review_fix_done : feedback.closed
+      deployment_review_fix_bolt_3 --> deployment_review_fix_escalated : feedback.open
+      deployment_review_fix_done --> [*]
+      deployment_review_fix_escalated --> [*]
+    }
+    deployment_review_fix --> deployment_gate
+    deployment_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

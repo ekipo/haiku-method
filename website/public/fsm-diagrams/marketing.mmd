@@ -1,0 +1,262 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: marketing
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> research : studio.selected
+  research --> strategy
+  strategy --> content
+  content --> launch
+  launch --> measure
+  measure --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> measure : gate.changes_requested
+
+  state research {
+    [*] --> research_start_stage
+    research_start_stage --> research_elaborate : tick
+    research_elaborate --> research_execute : elaborate.advance
+    research_elaborate --> research_review_fix : feedback.pending
+    state research_execute {
+      [*] --> research_execute_market_researcher
+      research_execute_market_researcher --> research_execute_audience_analyst : hat.advance
+      research_execute_audience_analyst --> research_execute_done : hat.advance
+      research_execute_audience_analyst --> research_execute_market_researcher : hat.reject
+      research_execute_done --> [*]
+    }
+    research_execute --> research_review
+    research_review --> research_gate : review.clean
+    research_review --> research_review_fix : review.findings
+    state research_review_fix {
+      [*] --> research_review_fix_bolt_1
+      state research_review_fix_bolt_1 {
+        [*] --> research_review_fix_bolt_1_market_researcher
+        research_review_fix_bolt_1_market_researcher --> research_review_fix_bolt_1_feedback_assessor : fix.advance
+        research_review_fix_bolt_1_feedback_assessor --> research_review_fix_bolt_1_validated : fix.advance
+        research_review_fix_bolt_1_validated --> [*]
+      }
+      research_review_fix_bolt_1 --> research_review_fix_done : feedback.closed
+      research_review_fix_bolt_1 --> research_review_fix_bolt_2 : feedback.open
+      state research_review_fix_bolt_2 {
+        [*] --> research_review_fix_bolt_2_market_researcher
+        research_review_fix_bolt_2_market_researcher --> research_review_fix_bolt_2_feedback_assessor : fix.advance
+        research_review_fix_bolt_2_feedback_assessor --> research_review_fix_bolt_2_validated : fix.advance
+        research_review_fix_bolt_2_validated --> [*]
+      }
+      research_review_fix_bolt_2 --> research_review_fix_done : feedback.closed
+      research_review_fix_bolt_2 --> research_review_fix_bolt_3 : feedback.open
+      state research_review_fix_bolt_3 {
+        [*] --> research_review_fix_bolt_3_market_researcher
+        research_review_fix_bolt_3_market_researcher --> research_review_fix_bolt_3_feedback_assessor : fix.advance
+        research_review_fix_bolt_3_feedback_assessor --> research_review_fix_bolt_3_validated : fix.advance
+        research_review_fix_bolt_3_validated --> [*]
+      }
+      research_review_fix_bolt_3 --> research_review_fix_done : feedback.closed
+      research_review_fix_bolt_3 --> research_review_fix_escalated : feedback.open
+      research_review_fix_done --> [*]
+      research_review_fix_escalated --> [*]
+    }
+    research_review_fix --> research_gate
+    research_gate --> [*]
+  }
+
+  state strategy {
+    [*] --> strategy_start_stage
+    strategy_start_stage --> strategy_elaborate : tick
+    strategy_elaborate --> strategy_execute : elaborate.advance
+    strategy_elaborate --> strategy_review_fix : feedback.pending
+    state strategy_execute {
+      [*] --> strategy_execute_strategist
+      strategy_execute_strategist --> strategy_execute_brand_reviewer : hat.advance
+      strategy_execute_brand_reviewer --> strategy_execute_done : hat.advance
+      strategy_execute_brand_reviewer --> strategy_execute_strategist : hat.reject
+      strategy_execute_done --> [*]
+    }
+    strategy_execute --> strategy_review
+    strategy_review --> strategy_gate : review.clean
+    strategy_review --> strategy_review_fix : review.findings
+    state strategy_review_fix {
+      [*] --> strategy_review_fix_bolt_1
+      state strategy_review_fix_bolt_1 {
+        [*] --> strategy_review_fix_bolt_1_strategist
+        strategy_review_fix_bolt_1_strategist --> strategy_review_fix_bolt_1_feedback_assessor : fix.advance
+        strategy_review_fix_bolt_1_feedback_assessor --> strategy_review_fix_bolt_1_validated : fix.advance
+        strategy_review_fix_bolt_1_validated --> [*]
+      }
+      strategy_review_fix_bolt_1 --> strategy_review_fix_done : feedback.closed
+      strategy_review_fix_bolt_1 --> strategy_review_fix_bolt_2 : feedback.open
+      state strategy_review_fix_bolt_2 {
+        [*] --> strategy_review_fix_bolt_2_strategist
+        strategy_review_fix_bolt_2_strategist --> strategy_review_fix_bolt_2_feedback_assessor : fix.advance
+        strategy_review_fix_bolt_2_feedback_assessor --> strategy_review_fix_bolt_2_validated : fix.advance
+        strategy_review_fix_bolt_2_validated --> [*]
+      }
+      strategy_review_fix_bolt_2 --> strategy_review_fix_done : feedback.closed
+      strategy_review_fix_bolt_2 --> strategy_review_fix_bolt_3 : feedback.open
+      state strategy_review_fix_bolt_3 {
+        [*] --> strategy_review_fix_bolt_3_strategist
+        strategy_review_fix_bolt_3_strategist --> strategy_review_fix_bolt_3_feedback_assessor : fix.advance
+        strategy_review_fix_bolt_3_feedback_assessor --> strategy_review_fix_bolt_3_validated : fix.advance
+        strategy_review_fix_bolt_3_validated --> [*]
+      }
+      strategy_review_fix_bolt_3 --> strategy_review_fix_done : feedback.closed
+      strategy_review_fix_bolt_3 --> strategy_review_fix_escalated : feedback.open
+      strategy_review_fix_done --> [*]
+      strategy_review_fix_escalated --> [*]
+    }
+    strategy_review_fix --> strategy_gate
+    strategy_gate --> [*]
+  }
+
+  state content {
+    [*] --> content_start_stage
+    content_start_stage --> content_elaborate : tick
+    content_elaborate --> content_execute : elaborate.advance
+    content_elaborate --> content_review_fix : feedback.pending
+    state content_execute {
+      [*] --> content_execute_content_creator
+      content_execute_content_creator --> content_execute_copy_editor : hat.advance
+      content_execute_copy_editor --> content_execute_done : hat.advance
+      content_execute_copy_editor --> content_execute_content_creator : hat.reject
+      content_execute_done --> [*]
+    }
+    content_execute --> content_review
+    content_review --> content_gate : review.clean
+    content_review --> content_review_fix : review.findings
+    state content_review_fix {
+      [*] --> content_review_fix_bolt_1
+      state content_review_fix_bolt_1 {
+        [*] --> content_review_fix_bolt_1_content_creator
+        content_review_fix_bolt_1_content_creator --> content_review_fix_bolt_1_feedback_assessor : fix.advance
+        content_review_fix_bolt_1_feedback_assessor --> content_review_fix_bolt_1_validated : fix.advance
+        content_review_fix_bolt_1_validated --> [*]
+      }
+      content_review_fix_bolt_1 --> content_review_fix_done : feedback.closed
+      content_review_fix_bolt_1 --> content_review_fix_bolt_2 : feedback.open
+      state content_review_fix_bolt_2 {
+        [*] --> content_review_fix_bolt_2_content_creator
+        content_review_fix_bolt_2_content_creator --> content_review_fix_bolt_2_feedback_assessor : fix.advance
+        content_review_fix_bolt_2_feedback_assessor --> content_review_fix_bolt_2_validated : fix.advance
+        content_review_fix_bolt_2_validated --> [*]
+      }
+      content_review_fix_bolt_2 --> content_review_fix_done : feedback.closed
+      content_review_fix_bolt_2 --> content_review_fix_bolt_3 : feedback.open
+      state content_review_fix_bolt_3 {
+        [*] --> content_review_fix_bolt_3_content_creator
+        content_review_fix_bolt_3_content_creator --> content_review_fix_bolt_3_feedback_assessor : fix.advance
+        content_review_fix_bolt_3_feedback_assessor --> content_review_fix_bolt_3_validated : fix.advance
+        content_review_fix_bolt_3_validated --> [*]
+      }
+      content_review_fix_bolt_3 --> content_review_fix_done : feedback.closed
+      content_review_fix_bolt_3 --> content_review_fix_escalated : feedback.open
+      content_review_fix_done --> [*]
+      content_review_fix_escalated --> [*]
+    }
+    content_review_fix --> content_gate
+    content_gate --> [*]
+  }
+
+  state launch {
+    [*] --> launch_start_stage
+    launch_start_stage --> launch_elaborate : tick
+    launch_elaborate --> launch_execute : elaborate.advance
+    launch_elaborate --> launch_review_fix : feedback.pending
+    state launch_execute {
+      [*] --> launch_execute_campaign_manager
+      launch_execute_campaign_manager --> launch_execute_channel_coordinator : hat.advance
+      launch_execute_channel_coordinator --> launch_execute_done : hat.advance
+      launch_execute_channel_coordinator --> launch_execute_campaign_manager : hat.reject
+      launch_execute_done --> [*]
+    }
+    launch_execute --> launch_review
+    launch_review --> launch_gate : review.clean
+    launch_review --> launch_review_fix : review.findings
+    state launch_review_fix {
+      [*] --> launch_review_fix_bolt_1
+      state launch_review_fix_bolt_1 {
+        [*] --> launch_review_fix_bolt_1_campaign_manager
+        launch_review_fix_bolt_1_campaign_manager --> launch_review_fix_bolt_1_feedback_assessor : fix.advance
+        launch_review_fix_bolt_1_feedback_assessor --> launch_review_fix_bolt_1_validated : fix.advance
+        launch_review_fix_bolt_1_validated --> [*]
+      }
+      launch_review_fix_bolt_1 --> launch_review_fix_done : feedback.closed
+      launch_review_fix_bolt_1 --> launch_review_fix_bolt_2 : feedback.open
+      state launch_review_fix_bolt_2 {
+        [*] --> launch_review_fix_bolt_2_campaign_manager
+        launch_review_fix_bolt_2_campaign_manager --> launch_review_fix_bolt_2_feedback_assessor : fix.advance
+        launch_review_fix_bolt_2_feedback_assessor --> launch_review_fix_bolt_2_validated : fix.advance
+        launch_review_fix_bolt_2_validated --> [*]
+      }
+      launch_review_fix_bolt_2 --> launch_review_fix_done : feedback.closed
+      launch_review_fix_bolt_2 --> launch_review_fix_bolt_3 : feedback.open
+      state launch_review_fix_bolt_3 {
+        [*] --> launch_review_fix_bolt_3_campaign_manager
+        launch_review_fix_bolt_3_campaign_manager --> launch_review_fix_bolt_3_feedback_assessor : fix.advance
+        launch_review_fix_bolt_3_feedback_assessor --> launch_review_fix_bolt_3_validated : fix.advance
+        launch_review_fix_bolt_3_validated --> [*]
+      }
+      launch_review_fix_bolt_3 --> launch_review_fix_done : feedback.closed
+      launch_review_fix_bolt_3 --> launch_review_fix_escalated : feedback.open
+      launch_review_fix_done --> [*]
+      launch_review_fix_escalated --> [*]
+    }
+    launch_review_fix --> launch_gate
+    launch_gate --> [*]
+  }
+
+  state measure {
+    [*] --> measure_start_stage
+    measure_start_stage --> measure_elaborate : tick
+    measure_elaborate --> measure_execute : elaborate.advance
+    measure_elaborate --> measure_review_fix : feedback.pending
+    state measure_execute {
+      [*] --> measure_execute_analyst
+      measure_execute_analyst --> measure_execute_report_writer : hat.advance
+      measure_execute_report_writer --> measure_execute_done : hat.advance
+      measure_execute_report_writer --> measure_execute_analyst : hat.reject
+      measure_execute_done --> [*]
+    }
+    measure_execute --> measure_review
+    measure_review --> measure_gate : review.clean
+    measure_review --> measure_review_fix : review.findings
+    state measure_review_fix {
+      [*] --> measure_review_fix_bolt_1
+      state measure_review_fix_bolt_1 {
+        [*] --> measure_review_fix_bolt_1_analyst
+        measure_review_fix_bolt_1_analyst --> measure_review_fix_bolt_1_feedback_assessor : fix.advance
+        measure_review_fix_bolt_1_feedback_assessor --> measure_review_fix_bolt_1_validated : fix.advance
+        measure_review_fix_bolt_1_validated --> [*]
+      }
+      measure_review_fix_bolt_1 --> measure_review_fix_done : feedback.closed
+      measure_review_fix_bolt_1 --> measure_review_fix_bolt_2 : feedback.open
+      state measure_review_fix_bolt_2 {
+        [*] --> measure_review_fix_bolt_2_analyst
+        measure_review_fix_bolt_2_analyst --> measure_review_fix_bolt_2_feedback_assessor : fix.advance
+        measure_review_fix_bolt_2_feedback_assessor --> measure_review_fix_bolt_2_validated : fix.advance
+        measure_review_fix_bolt_2_validated --> [*]
+      }
+      measure_review_fix_bolt_2 --> measure_review_fix_done : feedback.closed
+      measure_review_fix_bolt_2 --> measure_review_fix_bolt_3 : feedback.open
+      state measure_review_fix_bolt_3 {
+        [*] --> measure_review_fix_bolt_3_analyst
+        measure_review_fix_bolt_3_analyst --> measure_review_fix_bolt_3_feedback_assessor : fix.advance
+        measure_review_fix_bolt_3_feedback_assessor --> measure_review_fix_bolt_3_validated : fix.advance
+        measure_review_fix_bolt_3_validated --> [*]
+      }
+      measure_review_fix_bolt_3 --> measure_review_fix_done : feedback.closed
+      measure_review_fix_bolt_3 --> measure_review_fix_escalated : feedback.open
+      measure_review_fix_done --> [*]
+      measure_review_fix_escalated --> [*]
+    }
+    measure_review_fix --> measure_gate
+    measure_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

@@ -1,0 +1,322 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: hwdev
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> inception : studio.selected
+  inception --> requirements
+  requirements --> design
+  design --> firmware
+  firmware --> validation
+  validation --> manufacturing
+  manufacturing --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> manufacturing : gate.changes_requested
+
+  state inception {
+    [*] --> inception_start_stage
+    inception_start_stage --> inception_elaborate : tick
+    inception_elaborate --> inception_execute : elaborate.advance
+    inception_elaborate --> inception_review_fix : feedback.pending
+    state inception_execute {
+      [*] --> inception_execute_researcher
+      inception_execute_researcher --> inception_execute_elaborator : hat.advance
+      inception_execute_elaborator --> inception_execute_done : hat.advance
+      inception_execute_elaborator --> inception_execute_researcher : hat.reject
+      inception_execute_done --> [*]
+    }
+    inception_execute --> inception_review
+    inception_review --> inception_gate : review.clean
+    inception_review --> inception_review_fix : review.findings
+    state inception_review_fix {
+      [*] --> inception_review_fix_bolt_1
+      state inception_review_fix_bolt_1 {
+        [*] --> inception_review_fix_bolt_1_researcher
+        inception_review_fix_bolt_1_researcher --> inception_review_fix_bolt_1_feedback_assessor : fix.advance
+        inception_review_fix_bolt_1_feedback_assessor --> inception_review_fix_bolt_1_validated : fix.advance
+        inception_review_fix_bolt_1_validated --> [*]
+      }
+      inception_review_fix_bolt_1 --> inception_review_fix_done : feedback.closed
+      inception_review_fix_bolt_1 --> inception_review_fix_bolt_2 : feedback.open
+      state inception_review_fix_bolt_2 {
+        [*] --> inception_review_fix_bolt_2_researcher
+        inception_review_fix_bolt_2_researcher --> inception_review_fix_bolt_2_feedback_assessor : fix.advance
+        inception_review_fix_bolt_2_feedback_assessor --> inception_review_fix_bolt_2_validated : fix.advance
+        inception_review_fix_bolt_2_validated --> [*]
+      }
+      inception_review_fix_bolt_2 --> inception_review_fix_done : feedback.closed
+      inception_review_fix_bolt_2 --> inception_review_fix_bolt_3 : feedback.open
+      state inception_review_fix_bolt_3 {
+        [*] --> inception_review_fix_bolt_3_researcher
+        inception_review_fix_bolt_3_researcher --> inception_review_fix_bolt_3_feedback_assessor : fix.advance
+        inception_review_fix_bolt_3_feedback_assessor --> inception_review_fix_bolt_3_validated : fix.advance
+        inception_review_fix_bolt_3_validated --> [*]
+      }
+      inception_review_fix_bolt_3 --> inception_review_fix_done : feedback.closed
+      inception_review_fix_bolt_3 --> inception_review_fix_escalated : feedback.open
+      inception_review_fix_done --> [*]
+      inception_review_fix_escalated --> [*]
+    }
+    inception_review_fix --> inception_gate
+    inception_gate --> [*]
+  }
+
+  state requirements {
+    [*] --> requirements_start_stage
+    requirements_start_stage --> requirements_elaborate : tick
+    requirements_elaborate --> requirements_execute : elaborate.advance
+    requirements_elaborate --> requirements_review_fix : feedback.pending
+    state requirements_execute {
+      [*] --> requirements_execute_systems_engineer
+      requirements_execute_systems_engineer --> requirements_execute_compliance_officer : hat.advance
+      requirements_execute_compliance_officer --> requirements_execute_elaborator : hat.advance
+      requirements_execute_compliance_officer --> requirements_execute_systems_engineer : hat.reject
+      requirements_execute_elaborator --> requirements_execute_done : hat.advance
+      requirements_execute_elaborator --> requirements_execute_compliance_officer : hat.reject
+      requirements_execute_done --> [*]
+    }
+    requirements_execute --> requirements_review
+    requirements_review --> requirements_gate : review.clean
+    requirements_review --> requirements_review_fix : review.findings
+    state requirements_review_fix {
+      [*] --> requirements_review_fix_bolt_1
+      state requirements_review_fix_bolt_1 {
+        [*] --> requirements_review_fix_bolt_1_systems_engineer
+        requirements_review_fix_bolt_1_systems_engineer --> requirements_review_fix_bolt_1_feedback_assessor : fix.advance
+        requirements_review_fix_bolt_1_feedback_assessor --> requirements_review_fix_bolt_1_validated : fix.advance
+        requirements_review_fix_bolt_1_validated --> [*]
+      }
+      requirements_review_fix_bolt_1 --> requirements_review_fix_done : feedback.closed
+      requirements_review_fix_bolt_1 --> requirements_review_fix_bolt_2 : feedback.open
+      state requirements_review_fix_bolt_2 {
+        [*] --> requirements_review_fix_bolt_2_systems_engineer
+        requirements_review_fix_bolt_2_systems_engineer --> requirements_review_fix_bolt_2_feedback_assessor : fix.advance
+        requirements_review_fix_bolt_2_feedback_assessor --> requirements_review_fix_bolt_2_validated : fix.advance
+        requirements_review_fix_bolt_2_validated --> [*]
+      }
+      requirements_review_fix_bolt_2 --> requirements_review_fix_done : feedback.closed
+      requirements_review_fix_bolt_2 --> requirements_review_fix_bolt_3 : feedback.open
+      state requirements_review_fix_bolt_3 {
+        [*] --> requirements_review_fix_bolt_3_systems_engineer
+        requirements_review_fix_bolt_3_systems_engineer --> requirements_review_fix_bolt_3_feedback_assessor : fix.advance
+        requirements_review_fix_bolt_3_feedback_assessor --> requirements_review_fix_bolt_3_validated : fix.advance
+        requirements_review_fix_bolt_3_validated --> [*]
+      }
+      requirements_review_fix_bolt_3 --> requirements_review_fix_done : feedback.closed
+      requirements_review_fix_bolt_3 --> requirements_review_fix_escalated : feedback.open
+      requirements_review_fix_done --> [*]
+      requirements_review_fix_escalated --> [*]
+    }
+    requirements_review_fix --> requirements_gate
+    requirements_gate --> [*]
+  }
+
+  state design {
+    [*] --> design_start_stage
+    design_start_stage --> design_elaborate : tick
+    design_elaborate --> design_execute : elaborate.advance
+    design_elaborate --> design_review_fix : feedback.pending
+    state design_execute {
+      [*] --> design_execute_electrical_engineer
+      design_execute_electrical_engineer --> design_execute_mechanical_engineer : hat.advance
+      design_execute_mechanical_engineer --> design_execute_pcb_designer : hat.advance
+      design_execute_mechanical_engineer --> design_execute_electrical_engineer : hat.reject
+      design_execute_pcb_designer --> design_execute_design_reviewer : hat.advance
+      design_execute_pcb_designer --> design_execute_mechanical_engineer : hat.reject
+      design_execute_design_reviewer --> design_execute_done : hat.advance
+      design_execute_design_reviewer --> design_execute_pcb_designer : hat.reject
+      design_execute_done --> [*]
+    }
+    design_execute --> design_review
+    design_review --> design_gate : review.clean
+    design_review --> design_review_fix : review.findings
+    state design_review_fix {
+      [*] --> design_review_fix_bolt_1
+      state design_review_fix_bolt_1 {
+        [*] --> design_review_fix_bolt_1_electrical_engineer
+        design_review_fix_bolt_1_electrical_engineer --> design_review_fix_bolt_1_pcb_designer : fix.advance
+        design_review_fix_bolt_1_pcb_designer --> design_review_fix_bolt_1_feedback_assessor : fix.advance
+        design_review_fix_bolt_1_feedback_assessor --> design_review_fix_bolt_1_validated : fix.advance
+        design_review_fix_bolt_1_validated --> [*]
+      }
+      design_review_fix_bolt_1 --> design_review_fix_done : feedback.closed
+      design_review_fix_bolt_1 --> design_review_fix_bolt_2 : feedback.open
+      state design_review_fix_bolt_2 {
+        [*] --> design_review_fix_bolt_2_electrical_engineer
+        design_review_fix_bolt_2_electrical_engineer --> design_review_fix_bolt_2_pcb_designer : fix.advance
+        design_review_fix_bolt_2_pcb_designer --> design_review_fix_bolt_2_feedback_assessor : fix.advance
+        design_review_fix_bolt_2_feedback_assessor --> design_review_fix_bolt_2_validated : fix.advance
+        design_review_fix_bolt_2_validated --> [*]
+      }
+      design_review_fix_bolt_2 --> design_review_fix_done : feedback.closed
+      design_review_fix_bolt_2 --> design_review_fix_bolt_3 : feedback.open
+      state design_review_fix_bolt_3 {
+        [*] --> design_review_fix_bolt_3_electrical_engineer
+        design_review_fix_bolt_3_electrical_engineer --> design_review_fix_bolt_3_pcb_designer : fix.advance
+        design_review_fix_bolt_3_pcb_designer --> design_review_fix_bolt_3_feedback_assessor : fix.advance
+        design_review_fix_bolt_3_feedback_assessor --> design_review_fix_bolt_3_validated : fix.advance
+        design_review_fix_bolt_3_validated --> [*]
+      }
+      design_review_fix_bolt_3 --> design_review_fix_done : feedback.closed
+      design_review_fix_bolt_3 --> design_review_fix_escalated : feedback.open
+      design_review_fix_done --> [*]
+      design_review_fix_escalated --> [*]
+    }
+    design_review_fix --> design_gate
+    design_gate --> [*]
+  }
+
+  state firmware {
+    [*] --> firmware_start_stage
+    firmware_start_stage --> firmware_elaborate : tick
+    firmware_elaborate --> firmware_execute : elaborate.advance
+    firmware_elaborate --> firmware_review_fix : feedback.pending
+    state firmware_execute {
+      [*] --> firmware_execute_firmware_engineer
+      firmware_execute_firmware_engineer --> firmware_execute_reviewer : hat.advance
+      firmware_execute_reviewer --> firmware_execute_done : hat.advance
+      firmware_execute_reviewer --> firmware_execute_firmware_engineer : hat.reject
+      firmware_execute_done --> [*]
+    }
+    firmware_execute --> firmware_review
+    firmware_review --> firmware_gate : review.clean
+    firmware_review --> firmware_review_fix : review.findings
+    state firmware_review_fix {
+      [*] --> firmware_review_fix_bolt_1
+      state firmware_review_fix_bolt_1 {
+        [*] --> firmware_review_fix_bolt_1_firmware_engineer
+        firmware_review_fix_bolt_1_firmware_engineer --> firmware_review_fix_bolt_1_feedback_assessor : fix.advance
+        firmware_review_fix_bolt_1_feedback_assessor --> firmware_review_fix_bolt_1_validated : fix.advance
+        firmware_review_fix_bolt_1_validated --> [*]
+      }
+      firmware_review_fix_bolt_1 --> firmware_review_fix_done : feedback.closed
+      firmware_review_fix_bolt_1 --> firmware_review_fix_bolt_2 : feedback.open
+      state firmware_review_fix_bolt_2 {
+        [*] --> firmware_review_fix_bolt_2_firmware_engineer
+        firmware_review_fix_bolt_2_firmware_engineer --> firmware_review_fix_bolt_2_feedback_assessor : fix.advance
+        firmware_review_fix_bolt_2_feedback_assessor --> firmware_review_fix_bolt_2_validated : fix.advance
+        firmware_review_fix_bolt_2_validated --> [*]
+      }
+      firmware_review_fix_bolt_2 --> firmware_review_fix_done : feedback.closed
+      firmware_review_fix_bolt_2 --> firmware_review_fix_bolt_3 : feedback.open
+      state firmware_review_fix_bolt_3 {
+        [*] --> firmware_review_fix_bolt_3_firmware_engineer
+        firmware_review_fix_bolt_3_firmware_engineer --> firmware_review_fix_bolt_3_feedback_assessor : fix.advance
+        firmware_review_fix_bolt_3_feedback_assessor --> firmware_review_fix_bolt_3_validated : fix.advance
+        firmware_review_fix_bolt_3_validated --> [*]
+      }
+      firmware_review_fix_bolt_3 --> firmware_review_fix_done : feedback.closed
+      firmware_review_fix_bolt_3 --> firmware_review_fix_escalated : feedback.open
+      firmware_review_fix_done --> [*]
+      firmware_review_fix_escalated --> [*]
+    }
+    firmware_review_fix --> firmware_gate
+    firmware_gate --> [*]
+  }
+
+  state validation {
+    [*] --> validation_start_stage
+    validation_start_stage --> validation_elaborate : tick
+    validation_elaborate --> validation_execute : elaborate.advance
+    validation_elaborate --> validation_review_fix : feedback.pending
+    state validation_execute {
+      [*] --> validation_execute_test_engineer
+      validation_execute_test_engineer --> validation_execute_compliance_officer : hat.advance
+      validation_execute_compliance_officer --> validation_execute_validation_lead : hat.advance
+      validation_execute_compliance_officer --> validation_execute_test_engineer : hat.reject
+      validation_execute_validation_lead --> validation_execute_done : hat.advance
+      validation_execute_validation_lead --> validation_execute_compliance_officer : hat.reject
+      validation_execute_done --> [*]
+    }
+    validation_execute --> validation_review
+    validation_review --> validation_gate : review.clean
+    validation_review --> validation_review_fix : review.findings
+    state validation_review_fix {
+      [*] --> validation_review_fix_bolt_1
+      state validation_review_fix_bolt_1 {
+        [*] --> validation_review_fix_bolt_1_test_engineer
+        validation_review_fix_bolt_1_test_engineer --> validation_review_fix_bolt_1_feedback_assessor : fix.advance
+        validation_review_fix_bolt_1_feedback_assessor --> validation_review_fix_bolt_1_validated : fix.advance
+        validation_review_fix_bolt_1_validated --> [*]
+      }
+      validation_review_fix_bolt_1 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_1 --> validation_review_fix_bolt_2 : feedback.open
+      state validation_review_fix_bolt_2 {
+        [*] --> validation_review_fix_bolt_2_test_engineer
+        validation_review_fix_bolt_2_test_engineer --> validation_review_fix_bolt_2_feedback_assessor : fix.advance
+        validation_review_fix_bolt_2_feedback_assessor --> validation_review_fix_bolt_2_validated : fix.advance
+        validation_review_fix_bolt_2_validated --> [*]
+      }
+      validation_review_fix_bolt_2 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_2 --> validation_review_fix_bolt_3 : feedback.open
+      state validation_review_fix_bolt_3 {
+        [*] --> validation_review_fix_bolt_3_test_engineer
+        validation_review_fix_bolt_3_test_engineer --> validation_review_fix_bolt_3_feedback_assessor : fix.advance
+        validation_review_fix_bolt_3_feedback_assessor --> validation_review_fix_bolt_3_validated : fix.advance
+        validation_review_fix_bolt_3_validated --> [*]
+      }
+      validation_review_fix_bolt_3 --> validation_review_fix_done : feedback.closed
+      validation_review_fix_bolt_3 --> validation_review_fix_escalated : feedback.open
+      validation_review_fix_done --> [*]
+      validation_review_fix_escalated --> [*]
+    }
+    validation_review_fix --> validation_gate
+    validation_gate --> [*]
+  }
+
+  state manufacturing {
+    [*] --> manufacturing_start_stage
+    manufacturing_start_stage --> manufacturing_elaborate : tick
+    manufacturing_elaborate --> manufacturing_execute : elaborate.advance
+    manufacturing_elaborate --> manufacturing_review_fix : feedback.pending
+    state manufacturing_execute {
+      [*] --> manufacturing_execute_manufacturing_engineer
+      manufacturing_execute_manufacturing_engineer --> manufacturing_execute_qa_lead : hat.advance
+      manufacturing_execute_qa_lead --> manufacturing_execute_done : hat.advance
+      manufacturing_execute_qa_lead --> manufacturing_execute_manufacturing_engineer : hat.reject
+      manufacturing_execute_done --> [*]
+    }
+    manufacturing_execute --> manufacturing_review
+    manufacturing_review --> manufacturing_gate : review.clean
+    manufacturing_review --> manufacturing_review_fix : review.findings
+    state manufacturing_review_fix {
+      [*] --> manufacturing_review_fix_bolt_1
+      state manufacturing_review_fix_bolt_1 {
+        [*] --> manufacturing_review_fix_bolt_1_manufacturing_engineer
+        manufacturing_review_fix_bolt_1_manufacturing_engineer --> manufacturing_review_fix_bolt_1_feedback_assessor : fix.advance
+        manufacturing_review_fix_bolt_1_feedback_assessor --> manufacturing_review_fix_bolt_1_validated : fix.advance
+        manufacturing_review_fix_bolt_1_validated --> [*]
+      }
+      manufacturing_review_fix_bolt_1 --> manufacturing_review_fix_done : feedback.closed
+      manufacturing_review_fix_bolt_1 --> manufacturing_review_fix_bolt_2 : feedback.open
+      state manufacturing_review_fix_bolt_2 {
+        [*] --> manufacturing_review_fix_bolt_2_manufacturing_engineer
+        manufacturing_review_fix_bolt_2_manufacturing_engineer --> manufacturing_review_fix_bolt_2_feedback_assessor : fix.advance
+        manufacturing_review_fix_bolt_2_feedback_assessor --> manufacturing_review_fix_bolt_2_validated : fix.advance
+        manufacturing_review_fix_bolt_2_validated --> [*]
+      }
+      manufacturing_review_fix_bolt_2 --> manufacturing_review_fix_done : feedback.closed
+      manufacturing_review_fix_bolt_2 --> manufacturing_review_fix_bolt_3 : feedback.open
+      state manufacturing_review_fix_bolt_3 {
+        [*] --> manufacturing_review_fix_bolt_3_manufacturing_engineer
+        manufacturing_review_fix_bolt_3_manufacturing_engineer --> manufacturing_review_fix_bolt_3_feedback_assessor : fix.advance
+        manufacturing_review_fix_bolt_3_feedback_assessor --> manufacturing_review_fix_bolt_3_validated : fix.advance
+        manufacturing_review_fix_bolt_3_validated --> [*]
+      }
+      manufacturing_review_fix_bolt_3 --> manufacturing_review_fix_done : feedback.closed
+      manufacturing_review_fix_bolt_3 --> manufacturing_review_fix_escalated : feedback.open
+      manufacturing_review_fix_done --> [*]
+      manufacturing_review_fix_escalated --> [*]
+    }
+    manufacturing_review_fix --> manufacturing_gate
+    manufacturing_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

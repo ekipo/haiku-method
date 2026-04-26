@@ -31,9 +31,14 @@ import fix_quality_gates from "./fix_quality_gates.js"
 import gate_blocked from "./gate_blocked.js"
 import gate_review from "./gate_review.js"
 import inputs_missing from "./inputs_missing.js"
+import integrate_fix_chains from "./integrate_fix_chains.js"
 import intent_approved from "./intent_approved.js"
 import intent_complete from "./intent_complete.js"
+import intent_completion_fix from "./intent_completion_fix.js"
+import intent_completion_review from "./intent_completion_review.js"
 import outputs_missing from "./outputs_missing.js"
+import review from "./review.js"
+import review_fix from "./review_fix.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
 import spec_validation_failed from "./spec_validation_failed.js"
@@ -66,9 +71,14 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["gate_blocked", gate_blocked],
 	["gate_review", gate_review],
 	["inputs_missing", inputs_missing],
+	["integrate_fix_chains", integrate_fix_chains],
 	["intent_approved", intent_approved],
 	["intent_complete", intent_complete],
+	["intent_completion_fix", intent_completion_fix],
+	["intent_completion_review", intent_completion_review],
 	["outputs_missing", outputs_missing],
+	["review", review],
+	["review_fix", review_fix],
 	["safe_intent_repair", safe_intent_repair],
 	["select_studio", select_studio],
 	["spec_validation_failed", spec_validation_failed],

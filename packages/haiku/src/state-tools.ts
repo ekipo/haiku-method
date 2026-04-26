@@ -377,33 +377,6 @@ export function handleStateTool(
 			setFrontmatterField(path, args.field as string, args.value)
 			return text("ok")
 		}
-		case "haiku_unit_list": {
-			// Align branch before reading — unit files live on the stage branch.
-			// On intent-main, existsSync would return false and the caller would
-			// see an empty list even when units exist on the stage branch.
-			const unitListBranchErr = enforceStageBranch(
-				args.intent as string,
-				args.stage as string,
-			)
-			if (unitListBranchErr) return unitListBranchErr
-			const dir = join(
-				stageDir(args.intent as string, args.stage as string),
-				"units",
-			)
-			if (!existsSync(dir)) return text("[]")
-			const files = readdirSync(dir).filter((f) => f.endsWith(".md"))
-			const units = files.map((f) => {
-				const { data } = parseFrontmatter(readFileSync(join(dir, f), "utf8"))
-				return {
-					name: f.replace(".md", ""),
-					status: data.status,
-					bolt: data.bolt,
-					hat: data.hat,
-					model: data.model ?? null,
-				}
-			})
-			return text(JSON.stringify(units, null, 2))
-		}
 		case "haiku_unit_start": {
 			// Resolve stage and first hat internally
 			const stage = resolveActiveStage(args.intent as string)
@@ -1538,21 +1511,6 @@ export function handleStateTool(
 		}
 
 		// ── Settings ──
-		case "haiku_settings_get": {
-			const field = args.field as string
-			let settingsPath = ""
-			try {
-				settingsPath = join(findHaikuRoot(), "settings.yml")
-			} catch {
-				/* */
-			}
-			if (!(settingsPath && existsSync(settingsPath))) return text("")
-			const raw = readFileSync(settingsPath, "utf8")
-			const settings = parseYaml(raw)
-			const val = getNestedField(settings, field)
-			if (val == null) return text("")
-			return text(typeof val === "object" ? JSON.stringify(val) : String(val))
-		}
 
 		// ── Dashboard ──
 		case "haiku_dashboard": {
@@ -2765,18 +2723,6 @@ export function handleStateTool(
 			return text(JSON.stringify(listResponse, null, 2))
 		}
 
-		case "haiku_version_info": {
-			const info: Record<string, string> = {
-				mcp_version: MCP_VERSION,
-				plugin_version: getPluginVersion(),
-			}
-			const pending = getPendingVersion()
-			if (pending) info.pending_update = pending
-			if (hasPendingUpdate())
-				info.update_note =
-					"A new version has been downloaded and will activate on the next tool call."
-			return text(JSON.stringify(info, null, 2))
-		}
 
 		default:
 			return text(`Unknown tool: ${name}`)

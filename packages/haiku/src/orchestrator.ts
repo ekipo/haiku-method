@@ -870,7 +870,7 @@ function handleExternalChangesRequested(
  * Validate that required stage outputs were created during execution.
  * Returns an error action if outputs are missing, null if all present.
  */
-function validateStageOutputs(
+export function validateStageOutputs(
 	slug: string,
 	stage: string,
 	studio: string,
@@ -1087,7 +1087,7 @@ export function buildOutputRequirements(
  * that each required artifact exists at its specified location.
  * Returns an error action if artifacts are missing, null if all present.
  */
-function validateDiscoveryArtifacts(
+export function validateDiscoveryArtifacts(
 	slug: string,
 	stage: string,
 	studio: string,
@@ -1160,7 +1160,7 @@ function validateDiscoveryArtifacts(
  * Returns violations or null if all pass.
  */
 const UNIT_NAMING_PATTERN = /^unit-\d{2,}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/
-function validateUnitNaming(
+export function validateUnitNaming(
 	intentDirPath: string,
 	stage: string,
 ): OrchestratorAction | null {
@@ -1237,7 +1237,7 @@ function validateUnitNaming(
  * Every unit must declare what upstream artifacts it references.
  * Returns an error action if any units are missing inputs, null if all pass.
  */
-function validateUnitInputs(
+export function validateUnitInputs(
 	intentDirPath: string,
 	stage: string,
 ): OrchestratorAction | null {

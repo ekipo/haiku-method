@@ -216,7 +216,7 @@ const _FSM_CONTRACTS_ELABORATE_BLOCK = [
  * Callers MUST read the file to understand the finding; a preview here
  * invites shortcut-thinking and missing critical detail in the body.
  */
-function summarizeFeedback(f: {
+export function summarizeFeedback(f: {
 	id: string
 	title: string
 	origin: string
@@ -357,7 +357,7 @@ function maybeEscalate(
  * prescribe HOW (no subagent-delegation guidance) — the parent decides how to
  * structure the work within its own context.
  */
-function buildElaboratorInstruction(opts: {
+export function buildElaboratorInstruction(opts: {
 	visits: number
 	pendingFeedbackCount: number
 	stage: string
@@ -636,7 +636,7 @@ function resolveUnitHatsInStudio(
 	return stageHats
 }
 
-function resolveStageReview(studio: string, stage: string): string {
+export function resolveStageReview(studio: string, stage: string): string {
 	// Accept any identifier (dir, name, slug, alias); falls back to raw arg
 	// for robustness when the studio cache isn't warm yet.
 	const info = resolveStudio(studio)
@@ -4243,7 +4243,7 @@ export function isStagePreExecute(
  * the new invariant (no FB persistence pre-execute) and prevents the FSM
  * from re-triggering old pre-review code paths.
  */
-function cleanupPreExecuteFeedback(
+export function cleanupPreExecuteFeedback(
 	intentDirPath: string,
 	stage: string,
 ): string[] {

@@ -14,6 +14,7 @@ import type { OrchestratorAction } from "../../../orchestrator.js"
 import type { DerivedContext } from "../derive-state.js"
 import type { StateName } from "../types.js"
 import complete from "./complete.js"
+import elaborate from "./elaborate.js"
 import error from "./error.js"
 import selectStudio from "./select-studio.js"
 import startStage from "./start-stage.js"
@@ -28,6 +29,7 @@ const REGISTRY: Partial<Record<StateName, NativeEmitter>> = {
 	select_studio: selectStudio,
 	error,
 	start_stage: startStage,
+	elaborate,
 }
 
 /** Set of state names that have a registered emitter. Equivalent to

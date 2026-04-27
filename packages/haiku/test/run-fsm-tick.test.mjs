@@ -178,7 +178,6 @@ test("registry does NOT contain stage-active states (still on runNext)", () => {
 	for (const name of [
 		"escalate",
 		"blocked",
-		"elaborate",
 		"execute",
 		"review",
 		"gate_review",

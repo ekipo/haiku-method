@@ -9,15 +9,17 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	rmSync,
 	statSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs"
-import { join, resolve } from "node:path"
+import { join, resolve, sep } from "node:path"
 import {
 	dedupeFrontmatterKeys,
 	isDuplicateKeyError,
 } from "@haiku/shared/frontmatter"
+import { Ajv } from "ajv"
 import matter from "gray-matter"
 import { getPendingVersion, hasPendingUpdate } from "./auto-update.js"
 import { features, resolvePluginRoot } from "./config.js"
@@ -50,6 +52,8 @@ import {
 	readOperationDefs,
 	readReflectionDefs,
 	readStageArtifactDefs,
+	readStageDef,
+	readStudioFixHatPaths,
 	resolveStudio,
 } from "./studio-reader.js"
 import {
@@ -1163,6 +1167,226 @@ function buildRepairReport(
 	return lines.join("\n")
 }
 
+// ── Worktree-location migration ────────────────────────────────────────────
+//
+// Pre-fix, H·AI·K·U created `.haiku/worktrees/` relative to `process.cwd()`,
+// so running the FSM from a sub-worktree (e.g. Claude's
+// `.claude/worktrees/foo/`) forked all state and unit worktrees into that
+// sub-worktree instead of the primary repo. After the fix, the new code
+// always anchors at the primary repo — but existing misplaced worktrees
+// don't move themselves. This helper detects them and migrates them.
+
+interface MisplacedWorktreeMove {
+	old: string
+	new: string
+	branch: string
+}
+
+interface MisplacedWorktreeSkip {
+	path: string
+	reason: string
+}
+
+export interface WorktreeMigrationResult {
+	moved: MisplacedWorktreeMove[]
+	skipped: MisplacedWorktreeSkip[]
+	cleanedSkeletons: string[]
+}
+
+/** Parse `git worktree list --porcelain` into structured records. */
+function listGitWorktrees(): Array<{ path: string; branch: string | null }> {
+	if (!isGitRepo()) return []
+	let raw: string
+	try {
+		raw = execFileSync("git", ["worktree", "list", "--porcelain"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+	} catch {
+		return []
+	}
+	const out: Array<{ path: string; branch: string | null }> = []
+	let cur: { path: string; branch: string | null } | null = null
+	for (const line of raw.split("\n")) {
+		if (line.startsWith("worktree ")) {
+			if (cur) out.push(cur)
+			cur = { path: line.slice("worktree ".length).trim(), branch: null }
+		} else if (line.startsWith("branch ") && cur) {
+			cur.branch = line.slice("branch ".length).trim()
+		} else if (line === "" && cur) {
+			out.push(cur)
+			cur = null
+		}
+	}
+	if (cur) out.push(cur)
+	return out
+}
+
+/** Check if a worktree has uncommitted changes. */
+function isWorktreeDirty(worktreePath: string): boolean {
+	try {
+		const out = execFileSync(
+			"git",
+			["-C", worktreePath, "status", "--porcelain"],
+			{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+		)
+		return out.trim().length > 0
+	} catch {
+		// If we can't check, treat as dirty so we don't risk data loss.
+		return true
+	}
+}
+
+/**
+ * Scan for git worktrees registered at `<somewhere>/.haiku/worktrees/...`
+ * where `<somewhere>` is NOT the primary repo, and try to relocate each
+ * via `git worktree move` to the primary's `.haiku/worktrees/`. Also
+ * sweep up empty `.haiku/worktrees/` skeleton directories left behind by
+ * the pre-fix code.
+ *
+ * Safety:
+ * - Worktrees with uncommitted changes are skipped (data preservation).
+ * - Worktrees whose target path already exists are skipped (collision).
+ * - Empty skeleton dirs (no files, no .git pointer) are removed.
+ *
+ * Returns a structured result for inclusion in the repair report.
+ */
+export function migrateMisplacedWorktrees(): WorktreeMigrationResult {
+	const result: WorktreeMigrationResult = {
+		moved: [],
+		skipped: [],
+		cleanedSkeletons: [],
+	}
+	if (!isGitRepo()) return result
+
+	const primary = primaryRepoRoot()
+	const haikuPrefix = `${sep}.haiku${sep}worktrees${sep}`
+
+	// Pass 1: registered git worktrees that live outside primary.
+	for (const wt of listGitWorktrees()) {
+		const idx = wt.path.indexOf(haikuPrefix)
+		if (idx === -1) continue
+		const root = wt.path.slice(0, idx)
+		if (root === primary) continue // already correctly placed
+		const tail = wt.path.slice(idx) // `/.haiku/worktrees/<slug>/<unit>`
+		const target = primary + tail
+
+		if (existsSync(target)) {
+			result.skipped.push({
+				path: wt.path,
+				reason: `target already exists: ${target}`,
+			})
+			continue
+		}
+		if (isWorktreeDirty(wt.path)) {
+			result.skipped.push({
+				path: wt.path,
+				reason:
+					"uncommitted changes — commit/stash inside the worktree, then re-run haiku_repair",
+			})
+			continue
+		}
+		try {
+			// Ensure parent dir exists before move.
+			const targetParent = target.slice(0, target.lastIndexOf(sep))
+			mkdirSync(targetParent, { recursive: true })
+			execFileSync("git", ["worktree", "move", wt.path, target], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			})
+			result.moved.push({
+				old: wt.path,
+				new: target,
+				branch: wt.branch ?? "(detached)",
+			})
+		} catch (err) {
+			result.skipped.push({
+				path: wt.path,
+				reason: `git worktree move failed: ${err instanceof Error ? err.message : String(err)}`,
+			})
+		}
+	}
+
+	// Pass 2: empty `.haiku/worktrees/` skeleton dirs (no .git pointer
+	// inside, no files). Walk every git worktree's root to find them.
+	const rootsToScan = new Set<string>()
+	for (const wt of listGitWorktrees()) {
+		if (wt.path !== primary) rootsToScan.add(wt.path)
+	}
+	for (const root of rootsToScan) {
+		const skel = join(root, ".haiku", "worktrees")
+		if (!existsSync(skel)) continue
+		// If anything inside is a real git worktree (still registered) or
+		// contains files, leave it alone. We only sweep pure-empty trees.
+		let hasFiles = false
+		try {
+			const walk = (dir: string): void => {
+				if (hasFiles) return
+				for (const entry of readdirSync(dir, { withFileTypes: true })) {
+					const p = join(dir, entry.name)
+					if (entry.isFile() || entry.isSymbolicLink()) {
+						hasFiles = true
+						return
+					}
+					if (entry.isDirectory()) walk(p)
+				}
+			}
+			walk(skel)
+		} catch {
+			hasFiles = true // bail on permission errors
+		}
+		if (hasFiles) continue
+		try {
+			rmSync(skel, { recursive: true, force: true })
+			result.cleanedSkeletons.push(skel)
+			// Also remove the parent `.haiku/` dir if now empty (the whole
+			// skeleton was just `.haiku/worktrees/...`).
+			const parent = join(root, ".haiku")
+			if (existsSync(parent) && readdirSync(parent).length === 0) {
+				rmSync(parent, { recursive: true, force: true })
+			}
+		} catch {
+			// Best-effort cleanup; don't fail the whole migration.
+		}
+	}
+
+	return result
+}
+
+/** Render the worktree-migration result as a markdown section. */
+function buildWorktreeMigrationReport(result: WorktreeMigrationResult): string {
+	if (
+		result.moved.length === 0 &&
+		result.skipped.length === 0 &&
+		result.cleanedSkeletons.length === 0
+	) {
+		return ""
+	}
+	const lines: string[] = ["## Worktree Migration", ""]
+	if (result.moved.length > 0) {
+		lines.push(`Moved ${result.moved.length} misplaced worktree(s):`)
+		for (const m of result.moved) {
+			lines.push(`- \`${m.branch}\`: ${m.old} → ${m.new}`)
+		}
+		lines.push("")
+	}
+	if (result.skipped.length > 0) {
+		lines.push(`Skipped ${result.skipped.length} worktree(s):`)
+		for (const s of result.skipped) {
+			lines.push(`- ${s.path} — ${s.reason}`)
+		}
+		lines.push("")
+	}
+	if (result.cleanedSkeletons.length > 0) {
+		lines.push(
+			`Cleaned ${result.cleanedSkeletons.length} empty skeleton dir(s):`,
+		)
+		for (const p of result.cleanedSkeletons) lines.push(`- ${p}`)
+		lines.push("")
+	}
+	return lines.join("\n")
+}
+
 interface BranchRepairSummary {
 	slug: string
 	branch: string
@@ -1638,6 +1862,68 @@ export function isGitRepo(): boolean {
  *  called in production — the process runs with a single cwd. */
 export function _resetIsGitRepoForTests(): void {
 	_isGitRepo = null
+	_primaryRepoRoot = null
+}
+
+// Cache keyed by cwd so test suites that chdir between project dirs each
+// get their own primary-root resolution (production never changes cwd, so
+// the cache effectively becomes a single-entry hit).
+let _primaryRepoRoot: { cwd: string; root: string } | null = null
+
+/** Return the primary repo root — the parent of the canonical `.git/`
+ *  directory, regardless of which worktree (primary or sub-) is the
+ *  current cwd. All H·AI·K·U state (intents, worktrees, knowledge) lives
+ *  here so that running the FSM from a sub-worktree (e.g.
+ *  `.claude/worktrees/foo/`) doesn't fork state into the sub-worktree.
+ *
+ *  This matches Claude Code's convention where `.claude/worktrees/` are
+ *  always created relative to the primary repo, never to a nested
+ *  worktree.
+ *
+ *  Falls back to `process.cwd()` in non-git environments (tests use
+ *  non-git temp dirs and rely on this fallback).
+ */
+export function primaryRepoRoot(): string {
+	const cwd = process.cwd()
+	if (_primaryRepoRoot !== null && _primaryRepoRoot.cwd === cwd) {
+		return _primaryRepoRoot.root
+	}
+	if (!isGitRepo()) {
+		_primaryRepoRoot = { cwd, root: cwd }
+		return cwd
+	}
+	let root: string
+	try {
+		// `git rev-parse --git-common-dir` resolves to the SHARED .git dir
+		// — for the primary worktree it returns the primary's .git; for any
+		// linked worktree it returns the SAME .git path (not the linked
+		// worktree's .git file). The parent of that is the primary repo
+		// root.
+		const gitCommonDir = execFileSync(
+			"git",
+			["rev-parse", "--git-common-dir"],
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		).trim()
+		// Empty output means git is stubbed (test environments use a fake
+		// `git` binary that just `exit 0`). Fall back to cwd so tests stay
+		// scoped to their tmp project dir.
+		if (!gitCommonDir) {
+			root = cwd
+		} else {
+			const absCommonDir = gitCommonDir.startsWith("/")
+				? gitCommonDir
+				: resolve(cwd, gitCommonDir)
+			// dirname strips trailing /.git → primary worktree path
+			root = resolve(absCommonDir, "..")
+		}
+	} catch {
+		root = cwd
+	}
+	_primaryRepoRoot = { cwd, root }
+	return root
 }
 
 // ── Inline quality gates (for hookless harnesses) ─────────────────────────
@@ -1738,7 +2024,21 @@ function runInlineQualityGates(
 // ── Path resolution ────────────────────────────────────────────────────────
 
 export function findHaikuRoot(): string {
-	// Walk up from cwd looking for .haiku/
+	// Walk up from cwd to find `.haiku/`. State files
+	// (`.haiku/intents/*/stages/*/state.json`, unit md files, FB md files)
+	// are PER-STAGE-BRANCH content — they MUST be written and read from
+	// whichever working tree currently has the stage branch checked out.
+	// If the user is in a sub-worktree on the stage branch, state lives in
+	// that sub-worktree's `.haiku/`; the primary repo's checkout (likely
+	// on a different branch) sees a stale or absent copy.
+	//
+	// Anchoring at the primary repo here would write per-branch state to
+	// whatever branch the primary happens to have checked out, invisible
+	// to the user's worktree on the stage branch.
+	//
+	// `.haiku/worktrees/` (git worktrees for unit isolation) is a separate
+	// concern — those use `primaryRepoRoot()` directly, since git refuses
+	// two worktrees on the same branch.
 	let dir = process.cwd()
 	for (let i = 0; i < 20; i++) {
 		if (existsSync(join(dir, ".haiku"))) return join(dir, ".haiku")
@@ -2466,6 +2766,354 @@ export function completeUnitIteration(
 	if (reason) last.reason = reason
 	data.iterations = iters
 	writeFileSync(unitFile, matter.stringify(body, data))
+}
+
+// ── Unit frontmatter validation (architecture rule §1.1: FSM owns FM) ────
+//
+// Called from haiku_unit_write before persisting an agent-authored unit.
+// Returns either { valid: true } or { valid: false, errors: string[] }.
+// Validators are MECHANICAL and DETERMINISTIC — no LLM judgment, no
+// interpretation. Each rule has a specific failure mode that maps to a
+// concrete error message for the caller.
+
+// ── Unit frontmatter — SCHEMA IS THE SSOT ─────────────────────────────────
+//
+// `UNIT_FRONTMATTER_SCHEMA` below is plain JSONSchema and is the single
+// source of truth for what an agent can submit via haiku_unit_write.
+// AJV validates input against it — no custom field-by-field code for
+// the static rules. The compiled validator at `validateUnitSchema`
+// runs on every haiku_unit_write call.
+//
+// What JSONSchema covers (enforced by AJV):
+//   - allow-list of properties + per-field types
+//   - `model` enum
+//   - `quality_gates` inner shape (`{name, command, dir?}` with required keys)
+//   - `title` minLength
+//   - `propertyNames.not.enum` forbids FSM-driven fields
+//
+// What JSONSchema can NOT cover (runtime context required, lives in
+// validateUnitFrontmatter as additional steps):
+//   - depends_on self-reference (needs the unit's own name)
+//   - depends_on resolves to actual siblings (needs sibling list)
+//   - depends_on doesn't form a cycle (needs full stage DAG)
+//   - body placeholder strings (needs body inspection)
+//   - ghost-FB closes references (needs FB list)
+
+export const UNIT_FRONTMATTER_SCHEMA = {
+	type: "object",
+	properties: {
+		title: {
+			type: "string",
+			minLength: 1,
+			description:
+				"Unit title — non-empty string. Defaults to first H1 in the body, or to the unit name.",
+		},
+		depends_on: {
+			type: "array",
+			items: { type: "string" },
+			description:
+				"Names of sibling units in the SAME stage that must complete before this one. Each entry must resolve to an actual sibling. No self-reference. No cycles. (Cross-sibling and cycle checks are runtime — they need the full stage DAG, not expressible in this schema.)",
+		},
+		inputs: {
+			type: "array",
+			items: {
+				type: "string",
+				// Path-shape check: must be a non-empty string with no
+				// embedded whitespace, must contain a `/` (any path) or `.`
+				// (file extension), and must NOT contain `:` or `,` or
+				// sentence-style punctuation. Catches freeform-text entries
+				// like "ACCEPTANCE-CRITERIA: must define edge cases" that
+				// aren't really paths.
+				pattern: "^[^\\s:,]+(?:/[^\\s:,]+)*$",
+			},
+			description:
+				"Cross-stage inputs this unit reads — paths to artifacts produced by prior stages. Each entry MUST be a file/dir path (no whitespace, no colons or commas, no prose).",
+		},
+		outputs: {
+			type: "array",
+			items: {
+				type: "string",
+				// Same path-shape check as inputs. The advance gate verifies
+				// each output path actually exists as a file at unit
+				// completion (see runInlineQualityGates / outputs-empty
+				// check), so freeform sentences would slip past the
+				// non-empty check before this pattern-validation gate
+				// rejected them.
+				pattern: "^[^\\s:,]+(?:/[^\\s:,]+)*$",
+			},
+			description:
+				"Artifacts this unit produces. Each entry MUST be a real file path (no whitespace, no colons or commas, no prose) — the gate verifies the path exists on disk at unit completion. Use `inputs:` if you mean to declare what the unit READS; use the body's `## Completion Criteria` section if you mean to declare prose-style success conditions.",
+		},
+		quality_gates: {
+			type: "array",
+			items: {
+				type: "object",
+				properties: {
+					name: { type: "string" },
+					command: { type: "string" },
+					dir: { type: "string" },
+				},
+				required: ["name", "command"],
+			},
+			description:
+				"Build-class only: list of `{name, command, dir?}` executable gate objects. Run at advance_hat time; non-zero exit blocks. Prose strings are silently skipped — they give no enforcement.",
+		},
+		model: {
+			type: "string",
+			enum: ["haiku", "sonnet", "opus"],
+			description:
+				"Subagent tier for this unit's hats. `haiku` = mechanical, `sonnet` = standard (default), `opus` = deep reasoning. Cascade: unit > hat > stage > studio.",
+		},
+		closes: {
+			type: "array",
+			items: { type: "string" },
+			description:
+				"On revisit iterations, list of FB IDs this unit addresses (e.g. `[FB-01, FB-03]`). Every pending FB must be claimed by some unit's `closes:` to allow advancement.",
+		},
+	},
+	// FSM-driven fields. Agents MUST NOT set these — the FSM owns
+	// transitions via haiku_unit_advance_hat / haiku_unit_reject_hat /
+	// haiku_unit_increment_bolt. AJV's propertyNames check rejects any
+	// of these at validate time; strict MCP clients reject at parse
+	// time before the call goes out.
+	propertyNames: {
+		not: {
+			enum: [
+				"status",
+				"hat",
+				"bolt",
+				"iterations",
+				"started_at",
+				"completed_at",
+			],
+		},
+	},
+	// Stage-specific fields are allowed (per-stage `phases/ELABORATION.md`
+	// documents them). Schema can't enumerate stage-specific fields
+	// without reading every stage def.
+	additionalProperties: true,
+}
+
+// AJV-compiled validator — instantiated once at module load. Runs on every
+// haiku_unit_write call. Returns boolean + populates `validateUnitSchema.errors`.
+const ajv = new Ajv({ allErrors: true, strict: false })
+const validateUnitSchema = ajv.compile(UNIT_FRONTMATTER_SCHEMA)
+
+// Field-name lists used by tool descriptions and dispatch contracts.
+// These read DIRECTLY from the schema — JSONSchema is the SSOT, these
+// are just convenience accessors so callers don't repeat the path.
+export const AGENT_AUTHORABLE_UNIT_FIELDS = Object.keys(
+	UNIT_FRONTMATTER_SCHEMA.properties,
+) as ReadonlyArray<string>
+
+export const FSM_DRIVEN_UNIT_FIELDS = UNIT_FRONTMATTER_SCHEMA.propertyNames.not
+	.enum as ReadonlyArray<string>
+
+// ── Feedback frontmatter — reference (no input schema) ────────────────────
+//
+// haiku_feedback_write is body-only — there is no input schema for FB
+// frontmatter to be the SSOT for. These constants are pure documentation,
+// consumed only by the fix-loop dispatch contract so fix-mode hats know
+// what FM fields they'll see when reading FB context. If a future tool
+// needs to accept FB FM input, it should bring its own schema and these
+// constants would derive from it (matching the unit pattern above).
+
+export const FSM_DRIVEN_FB_FIELDS = [
+	"status",
+	"hat",
+	"bolt",
+	"iterations",
+	"closed_by",
+	"integrator_attempts",
+	"replies",
+] as const
+
+export const CREATE_TIME_FB_FIELDS = [
+	"title",
+	"origin",
+	"author",
+	"author_type",
+	"created_at",
+	"iteration",
+	"visit",
+	"source_ref",
+	"upstream_stage",
+	"resolution",
+	"attachment",
+	"inline_anchor",
+] as const
+
+// ── Output schema fragments (reused across tool defs) ─────────────────────
+//
+// Per MCP spec 2025-06-18 §Tool Result, when a tool declares an
+// outputSchema, the server MUST emit `structuredContent` matching it.
+// Tools below either compose these fragments or define their own shape.
+// The `reply()` helper inside handleStateTool wraps a payload as both
+// stringified text content (backwards compat) and structuredContent.
+
+// Standard error envelope. Returned (with isError: true) when a handler
+// rejects the call for a structured reason. The `error` field is a
+// stable named code (e.g. `frontmatter_validation_failed`,
+// `feedback_not_found`, `lifecycle_violation`); `message` is human-
+// readable remediation guidance.
+export const ERROR_OUTPUT_SCHEMA = {
+	type: "object",
+	properties: {
+		error: { type: "string", description: "Stable named error code." },
+		message: {
+			type: "string",
+			description: "Human-readable remediation guidance.",
+		},
+	},
+	required: ["error", "message"],
+	additionalProperties: true,
+}
+
+// Standard ok envelope for confirmation-style writes. Tools that mutate
+// state and return only a confirmation message use this.
+export const OK_OUTPUT_SCHEMA = {
+	type: "object",
+	properties: {
+		ok: { type: "boolean", const: true },
+		message: { type: "string" },
+	},
+	required: ["ok", "message"],
+	additionalProperties: true,
+}
+
+/**
+ * Translate an AJV error into a structured error string with a stable
+ * named code prefix. The code is what consumers (tests, error
+ * reporters, the agent) match on; the message gives the agent a
+ * remediation hint.
+ *
+ * AJV emits errors keyed by `keyword` + `instancePath`. We map the
+ * combinations we actually use in UNIT_FRONTMATTER_SCHEMA to the
+ * pre-existing named codes (`fsm_field_forbidden`, `depends_on_shape`,
+ * `title_shape`, `model_shape`, `closes_shape`, `quality_gates_shape`)
+ * so callers — including tests — keep matching on the same codes they
+ * matched on before AJV took over the static rules.
+ */
+function ajvErrorToCode(err: {
+	keyword: string
+	instancePath: string
+	params: Record<string, unknown>
+	message?: string
+}): string {
+	// `propertyNames.not.enum` rejection — AJV reports this as keyword
+	// `propertyNames` with the offending field in `params.propertyName`.
+	if (err.keyword === "propertyNames") {
+		const field = (err.params.propertyName as string) ?? "<unknown>"
+		return `fsm_field_forbidden: '${field}' is FSM-driven and must not be set by agents. The FSM owns this field via haiku_unit_advance_hat / haiku_unit_increment_bolt / etc.`
+	}
+	// Map per-field by inspecting the JSON-pointer instancePath
+	// (e.g. "/depends_on" or "/quality_gates/0/command").
+	const seg = err.instancePath.split("/").filter(Boolean)
+	const top = seg[0]
+	switch (top) {
+		case "title":
+			return `title_shape: title must be a non-empty string, or omit the field (it will default to the unit name). (${err.message ?? err.keyword})`
+		case "model":
+			return `model_shape: model must be 'haiku', 'sonnet', or 'opus'. Omit the field to fall through to hat/stage/studio defaults.`
+		case "depends_on":
+			return `depends_on_shape: depends_on must be a list of unit names (strings), or omit the field entirely for units with no dependencies. (${err.message ?? err.keyword} at ${err.instancePath})`
+		case "closes":
+			return `closes_shape: closes must be a list of FB ID strings, or omit the field for units that don't address feedback. (${err.message ?? err.keyword} at ${err.instancePath})`
+		case "quality_gates":
+			return `quality_gates_shape: quality_gates must be a list of {name, command, dir?} objects with non-empty name+command. Prose-only gates are silently skipped — write a real command. (${err.message ?? err.keyword} at ${err.instancePath})`
+		case "inputs":
+		case "outputs":
+			return `${top}_shape: ${top} must be a list of strings. (${err.message ?? err.keyword} at ${err.instancePath})`
+		default:
+			return `frontmatter_shape: ${err.message ?? err.keyword} at ${err.instancePath || "/"}`
+	}
+}
+
+export function validateUnitFrontmatter(
+	frontmatter: Record<string, unknown>,
+	context: {
+		intent: string
+		stage: string
+		unit: string
+		/** Names of all sibling units (without .md), used for DAG validation. */
+		siblingUnits: string[]
+	},
+): { valid: true } | { valid: false; errors: string[] } {
+	const errors: string[] = []
+
+	// Step 1: schema-based static rules — AJV consumes
+	// UNIT_FRONTMATTER_SCHEMA. Catches forbidden FSM fields, type errors,
+	// `model` enum, `quality_gates` inner shape, `title` minLength, and
+	// general type/array shape for depends_on / inputs / outputs / closes.
+	const ok = validateUnitSchema(frontmatter)
+	if (!ok && validateUnitSchema.errors) {
+		for (const err of validateUnitSchema.errors) {
+			errors.push(ajvErrorToCode(err))
+		}
+	}
+
+	// Step 2: context-dependent rules — these need runtime data
+	// (the unit's own name, the sibling list) and can't be expressed
+	// in JSONSchema. Run only if depends_on passed the schema's array-of-
+	// strings shape check; otherwise the AJV errors above already cover it.
+	if (Array.isArray(frontmatter.depends_on)) {
+		for (const entry of frontmatter.depends_on) {
+			if (typeof entry !== "string") continue // already flagged by AJV
+			if (entry === context.unit) {
+				errors.push(
+					`depends_on_self_reference: unit '${context.unit}' lists itself in depends_on. A unit cannot depend on itself.`,
+				)
+			}
+			if (!context.siblingUnits.includes(entry) && entry !== context.unit) {
+				errors.push(
+					`depends_on_unresolved: depends_on entry '${entry}' does not resolve to a unit in stage '${context.stage}'. Sibling units in this stage: [${context.siblingUnits.join(", ")}].`,
+				)
+			}
+		}
+	}
+
+	return errors.length === 0 ? { valid: true } : { valid: false, errors }
+}
+
+// ── DAG cycle detection (architecture §1.1: FSM enforces DAG validity) ──
+//
+// Given a stage's complete unit set + each unit's depends_on, returns the
+// names of any units involved in a cycle. Empty array means the DAG is
+// acyclic. Used by haiku_unit_write to refuse writes that introduce a
+// cycle (the new edge plus existing depends_on form a back-reference).
+
+export function detectDagCycles(dag: Record<string, string[]>): string[] {
+	const WHITE = 0
+	const GRAY = 1
+	const BLACK = 2
+	const color: Record<string, number> = {}
+	const cycleNodes = new Set<string>()
+	for (const node of Object.keys(dag)) color[node] = WHITE
+
+	function visit(node: string): boolean {
+		if (color[node] === GRAY) {
+			cycleNodes.add(node)
+			return true
+		}
+		if (color[node] === BLACK) return false
+		color[node] = GRAY
+		const deps = dag[node] || []
+		let foundCycle = false
+		for (const dep of deps) {
+			if (!(dep in dag)) continue // unresolved entries are caught elsewhere
+			if (visit(dep)) {
+				cycleNodes.add(node)
+				foundCycle = true
+			}
+		}
+		color[node] = BLACK
+		return foundCycle
+	}
+
+	for (const node of Object.keys(dag)) {
+		if (color[node] === WHITE) visit(node)
+	}
+	return [...cycleNodes].sort()
 }
 
 // ── Frontmatter helpers ────────────────────────────────────────────────────
@@ -3690,12 +4338,19 @@ export function findFeedbackFile(
 	const dir = feedbackDir(slug, stage)
 	if (!existsSync(dir)) return null
 
-	// Normalize: "FB-03" → "03", "03" → "03"
-	const nn = feedbackId.replace(/^FB-/i, "")
-	const prefix = `${nn}-`
+	// Normalize the input id to its numeric value: "FB-03" / "FB-3" / "3"
+	// / "03" all map to 3. Files on disk are zero-padded
+	// (`02-some-slug.md`), so a string-prefix match against the un-padded
+	// input would miss them — go through the parsed integer to be robust.
+	const numMatch = feedbackId.match(/^(?:FB-)?(\d+)$/i)
+	if (!numMatch) return null
+	const targetNum = Number.parseInt(numMatch[1], 10)
 
 	const files = readdirSync(dir).filter((f) => f.endsWith(".md"))
-	const match = files.find((f) => f.startsWith(prefix))
+	const match = files.find((f) => {
+		const fileNumMatch = f.match(/^(\d+)-/)
+		return fileNumMatch && Number.parseInt(fileNumMatch[1], 10) === targetNum
+	})
 	if (!match) return null
 
 	const raw = readFileSync(join(dir, match), "utf8")
@@ -3998,6 +4653,24 @@ export const stateToolDefs = [
 			properties: { slug: { type: "string" }, field: { type: "string" } },
 			required: ["slug", "field"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				found: {
+					type: "boolean",
+					description: "True if the intent file exists.",
+				},
+				field: {
+					type: "string",
+					description: "Echoed field name from the request.",
+				},
+				value: {
+					description:
+						"Field value as parsed from frontmatter. Null when missing or when the intent doesn't exist.",
+				},
+			},
+			required: ["found", "field"],
+		},
 	},
 	{
 		name: "haiku_intent_list",
@@ -4011,6 +4684,26 @@ export const stateToolDefs = [
 						"When true, include archived intents in the result and add an 'archived' field to each response object. Defaults to false.",
 				},
 			},
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				intents: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							slug: { type: "string" },
+							title: { type: "string" },
+							status: { type: "string" },
+							studio: { type: "string" },
+							archived: { type: "boolean" },
+						},
+						required: ["slug"],
+					},
+				},
+			},
+			required: ["intents"],
 		},
 	},
 	// Stage tools
@@ -4026,22 +4719,24 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "stage", "field"],
 		},
-	},
-	// Unit tools
-	{
-		name: "haiku_unit_get",
-		description: "Read a field from a unit's frontmatter",
-		inputSchema: {
-			type: "object" as const,
+		outputSchema: {
+			type: "object",
 			properties: {
-				intent: { type: "string" },
-				stage: { type: "string" },
-				unit: { type: "string" },
+				found: { type: "boolean" },
 				field: { type: "string" },
+				value: {
+					description: "Field value from stage state.json — null when missing.",
+				},
 			},
-			required: ["intent", "stage", "unit", "field"],
+			required: ["found", "field"],
 		},
 	},
+	// Unit tools
+	// haiku_unit_get — REMOVED from the agent-callable schema per
+	// architecture §1.1 / §1.2 (FM is FSM-only; agent-callable reads must
+	// return body + title only via haiku_unit_read). The case handler in
+	// handleStateTool is retained for FSM-internal callers (orchestrator,
+	// state-integrity, etc.) but agents can no longer reach it through MCP.
 	{
 		name: "haiku_unit_set",
 		description: "Set a field in a unit's frontmatter",
@@ -4056,6 +4751,20 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "stage", "unit", "field", "value"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				message: { type: "string" },
+				error: { type: "string" },
+				current_status: {
+					type: "string",
+					description:
+						"On lifecycle_violation: the unit's current immutable status.",
+				},
+				field: { type: "string" },
+			},
+		},
 	},
 	{
 		name: "haiku_unit_list",
@@ -4064,6 +4773,29 @@ export const stateToolDefs = [
 			type: "object" as const,
 			properties: { intent: { type: "string" }, stage: { type: "string" } },
 			required: ["intent", "stage"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				units: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							name: { type: "string" },
+							status: {
+								type: "string",
+								description: "pending | active | completed",
+							},
+							bolt: { type: "number" },
+							hat: { type: "string" },
+							model: { type: ["string", "null"] },
+						},
+						required: ["name"],
+					},
+				},
+			},
+			required: ["units"],
 		},
 	},
 	{
@@ -4075,6 +4807,17 @@ export const stateToolDefs = [
 			properties: { intent: { type: "string" }, unit: { type: "string" } },
 			required: ["intent", "unit"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				unit: { type: "string" },
+				stage: { type: "string" },
+				first_hat: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
 	},
 	{
 		name: "haiku_unit_advance_hat",
@@ -4084,6 +4827,34 @@ export const stateToolDefs = [
 			type: "object" as const,
 			properties: { intent: { type: "string" }, unit: { type: "string" } },
 			required: ["intent", "unit"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				unit: { type: "string" },
+				current_hat: {
+					type: "string",
+					description: "The hat that just finished.",
+				},
+				next_hat: {
+					type: ["string", "null"],
+					description:
+						"The hat to dispatch next, or null when the unit auto-completed.",
+				},
+				completed: {
+					type: "boolean",
+					description:
+						"True if this advance closed the unit (last hat in the sequence).",
+				},
+				bolt: { type: "number" },
+				message: { type: "string" },
+				error: {
+					type: "string",
+					description: "On failure: stable named error code.",
+				},
+			},
+			required: ["message"],
 		},
 	},
 	{
@@ -4103,6 +4874,20 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "unit"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				unit: { type: "string" },
+				rejecting_hat: { type: "string" },
+				next_dispatched_hat: { type: ["string", "null"] },
+				new_bolt: { type: "number" },
+				reason: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+			required: ["message"],
+		},
 	},
 	{
 		name: "haiku_unit_increment_bolt",
@@ -4115,6 +4900,141 @@ export const stateToolDefs = [
 				unit: { type: "string" },
 			},
 			required: ["intent", "stage", "unit"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				new_bolt: { type: "number" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_unit_read",
+		description:
+			"Read a unit's body content (and title). Returns ONLY the body and title — frontmatter is FSM-internal and not exposed to agents per the architecture's FM-is-FSM-only rule. Use this when a hat needs to read another unit's substance (sibling references, prior-stage knowledge artifacts) without interpreting FM. Returns { title, body } as JSON.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				stage: { type: "string" },
+				unit: { type: "string" },
+			},
+			required: ["intent", "stage", "unit"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				title: {
+					type: "string",
+					description:
+						"Unit title from frontmatter (or derived from first H1).",
+				},
+				body: {
+					type: "string",
+					description:
+						"Full markdown body. Frontmatter is intentionally not exposed (FSM-only per architecture §1.1).",
+				},
+				error: { type: "string", description: "On not-found / wrong-stage." },
+			},
+		},
+	},
+	{
+		name: "haiku_unit_delete",
+		description:
+			"Delete a unit. ONLY permitted when the unit's status is `pending`. Active and completed units are immutable per the forward-only lifecycle rule — once a unit has informed downstream work, deleting it would silently invalidate that work. Returns an error naming the rule when called against a non-pending unit.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				stage: { type: "string" },
+				unit: { type: "string" },
+			},
+			required: ["intent", "stage", "unit"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				message: { type: "string" },
+				error: { type: "string" },
+				current_status: { type: "string" },
+				required_status: { type: "string", const: "pending" },
+			},
+		},
+	},
+	{
+		name: "haiku_unit_write",
+		description: `Create or fully rewrite a unit file. This is the ONLY agent-callable path for authoring units — generic file Write/Edit on \`units/*.md\` is denied at the hook layer. The body is freeform markdown; the optional \`frontmatter\` is validated against the FM schema (depends_on entries must be strings with no self-reference and no cycles among declared units; etc.). Lifecycle: only allowed when the unit doesn't exist yet OR when its status is \`pending\`. Active and completed units are immutable.
+
+Allowed FM fields (agent-authorable): ${AGENT_AUTHORABLE_UNIT_FIELDS.join(", ")} — plus any stage-specific fields the per-stage \`phases/ELABORATION.md\` documents.
+
+Forbidden FM fields (FSM-driven, mutating these returns \`fsm_field_forbidden\`): ${FSM_DRIVEN_UNIT_FIELDS.join(", ")}.`,
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				stage: { type: "string" },
+				unit: {
+					type: "string",
+					description:
+						"Unit name without `.md` extension, e.g. `unit-01-foo`. Convention: `unit-NN-slug` with zero-padded NN.",
+				},
+				body: {
+					type: "string",
+					description:
+						"Full markdown body of the unit. Must be substantive (no placeholders like TBD, TODO, '...').",
+				},
+				// Schema is the SSOT (defined in UNIT_FRONTMATTER_SCHEMA).
+				// AJV validates input against it on every call; this
+				// inputSchema reference is what strict MCP clients use to
+				// reject malformed calls before they go out.
+				frontmatter: {
+					...UNIT_FRONTMATTER_SCHEMA,
+					description: `Optional frontmatter. Allowed: ${AGENT_AUTHORABLE_UNIT_FIELDS.join(", ")}, plus stage-specific. Forbidden (FSM-driven, validator returns \`fsm_field_forbidden\`): ${FSM_DRIVEN_UNIT_FIELDS.join(", ")}.`,
+				},
+			},
+			required: ["intent", "stage", "unit", "body"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				created: {
+					type: "boolean",
+					description:
+						"True if a new file was created; false if an existing pending unit was rewritten.",
+				},
+				unit: { type: "string", description: "Unit name." },
+				stage: { type: "string", description: "Stage name." },
+				intent: { type: "string", description: "Intent slug." },
+				message: { type: "string" },
+				// Error path
+				error: {
+					type: "string",
+					description:
+						"Stable error code: `frontmatter_validation_failed`, `dag_cycle_detected`, `lifecycle_violation`, `missing_args`, etc.",
+				},
+				errors: {
+					type: "array",
+					items: { type: "string" },
+					description:
+						"Per-rule error messages from the FM validator (e.g. `fsm_field_forbidden: '...'`).",
+				},
+				cycle_nodes: {
+					type: "array",
+					items: { type: "string" },
+					description:
+						"On `dag_cycle_detected`: the unit names involved in the cycle.",
+				},
+				current_status: {
+					type: "string",
+					description:
+						"On `lifecycle_violation`: the current immutable status (active/completed).",
+				},
+			},
+			required: ["message"],
 		},
 	},
 	{
@@ -4165,6 +5085,14 @@ export const stateToolDefs = [
 			},
 			required: ["intent"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
 	},
 	// Knowledge tools
 	{
@@ -4175,6 +5103,13 @@ export const stateToolDefs = [
 			properties: { intent: { type: "string" } },
 			required: ["intent"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				files: { type: "array", items: { type: "string" } },
+			},
+			required: ["files"],
+		},
 	},
 	{
 		name: "haiku_knowledge_read",
@@ -4184,6 +5119,15 @@ export const stateToolDefs = [
 			properties: { intent: { type: "string" }, name: { type: "string" } },
 			required: ["intent", "name"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				found: { type: "boolean" },
+				name: { type: "string" },
+				content: { type: "string", description: "Raw markdown body." },
+			},
+			required: ["found", "name", "content"],
+		},
 	},
 	// Studio tools
 	{
@@ -4191,6 +5135,27 @@ export const stateToolDefs = [
 		description:
 			"List all available studios with their description, stages, and category. Project-level studios (.haiku/studios/) override built-in ones on name collision.",
 		inputSchema: { type: "object" as const, properties: {} },
+		outputSchema: {
+			type: "object",
+			properties: {
+				studios: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							name: { type: "string" },
+							slug: { type: "string" },
+							description: { type: "string" },
+							category: { type: "string" },
+							stages: { type: "array", items: { type: "string" } },
+							source: { type: "string", description: "project | plugin" },
+						},
+						required: ["name", "slug"],
+					},
+				},
+			},
+			required: ["studios"],
+		},
 	},
 	{
 		name: "haiku_studio_get",
@@ -4201,6 +5166,25 @@ export const stateToolDefs = [
 			properties: { studio: { type: "string" } },
 			required: ["studio"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				found: { type: "boolean" },
+				name: { type: "string" },
+				slug: { type: "string" },
+				aliases: { type: "array", items: { type: "string" } },
+				dir: { type: "string" },
+				description: { type: "string" },
+				category: { type: "string" },
+				stages: { type: "array", items: { type: "string" } },
+				source: { type: "string" },
+				path: { type: "string" },
+				studio_md: { type: "string" },
+				body: { type: "string" },
+			},
+			required: ["found"],
+			additionalProperties: true,
+		},
 	},
 	{
 		name: "haiku_studio_stage_get",
@@ -4210,6 +5194,18 @@ export const stateToolDefs = [
 			type: "object" as const,
 			properties: { studio: { type: "string" }, stage: { type: "string" } },
 			required: ["studio", "stage"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				found: { type: "boolean" },
+				body: { type: "string" },
+				studio: { type: "string" },
+				studio_dir: { type: "string" },
+				stage_md: { type: "string" },
+			},
+			required: ["found"],
+			additionalProperties: true,
 		},
 	},
 	// Settings tools
@@ -4228,6 +5224,15 @@ export const stateToolDefs = [
 			},
 			required: ["field"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				found: { type: "boolean" },
+				field: { type: "string" },
+				value: { description: "Field value — null when missing." },
+			},
+			required: ["found", "field"],
+		},
 	},
 	// Aggregate / report tools
 	{
@@ -4235,6 +5240,16 @@ export const stateToolDefs = [
 		description:
 			"Returns a formatted dashboard of all intents showing status, studio, active stage, mode, and per-stage status tables.",
 		inputSchema: { type: "object" as const, properties: {} },
+		outputSchema: {
+			type: "object",
+			properties: {
+				markdown: {
+					type: "string",
+					description: "Rendered dashboard report as markdown text.",
+				},
+			},
+			required: ["markdown"],
+		},
 	},
 	{
 		name: "haiku_capacity",
@@ -4249,6 +5264,20 @@ export const stateToolDefs = [
 				},
 			},
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				markdown: {
+					type: "string",
+					description: "Rendered capacity report as markdown text.",
+				},
+				studio: {
+					type: ["string", "null"],
+					description: "Echoed studio filter when one was provided.",
+				},
+			},
+			required: ["markdown"],
+		},
 	},
 	{
 		name: "haiku_reflect",
@@ -4258,6 +5287,10 @@ export const stateToolDefs = [
 			type: "object" as const,
 			properties: { intent: { type: "string" } },
 			required: ["intent"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: { message: { type: "string" } },
 		},
 	},
 	{
@@ -4272,6 +5305,10 @@ export const stateToolDefs = [
 					description: "Optional: intent slug for context",
 				},
 			},
+		},
+		outputSchema: {
+			type: "object",
+			properties: { message: { type: "string" } },
 		},
 	},
 	{
@@ -4293,6 +5330,10 @@ export const stateToolDefs = [
 				},
 			},
 		},
+		outputSchema: {
+			type: "object",
+			properties: { message: { type: "string" } },
+		},
 	},
 	{
 		name: "haiku_backlog",
@@ -4303,13 +5344,29 @@ export const stateToolDefs = [
 			properties: {
 				action: {
 					type: "string",
-					description: "list | add | review | promote (default: list)",
+					enum: ["list", "add", "review", "promote"],
+					description: "Defaults to `list`.",
 				},
 				description: {
 					type: "string",
-					description: "Description for the new backlog item (used with add)",
+					description:
+						"Description for the new backlog item (used with action=add).",
 				},
 			},
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				markdown: {
+					type: "string",
+					description: "Rendered backlog report as markdown text.",
+				},
+				action: {
+					type: "string",
+					enum: ["list", "add", "review", "promote"],
+				},
+			},
+			required: ["markdown"],
 		},
 	},
 	{
@@ -4321,9 +5378,14 @@ export const stateToolDefs = [
 			properties: {
 				action: {
 					type: "string",
-					description: "list | plant | check (default: list)",
+					enum: ["list", "plant", "check"],
+					description: "Defaults to `list`.",
 				},
 			},
+		},
+		outputSchema: {
+			type: "object",
+			properties: { message: { type: "string" } },
 		},
 	},
 	// Feedback tools
@@ -4370,6 +5432,22 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "title", "body"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				feedback_id: { type: "string", description: "e.g. FB-01" },
+				file: {
+					type: "string",
+					description: "Repo-relative path to the FB markdown file.",
+				},
+				status: { type: "string" },
+				message: { type: "string" },
+				push_warning: {
+					type: "string",
+					description: "Set when the post-write git push failed.",
+				},
+			},
+		},
 	},
 	{
 		name: "haiku_feedback_update",
@@ -4405,6 +5483,15 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "feedback_id"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				feedback_id: { type: "string" },
+				file: { type: "string" },
+				updated_fields: { type: "object", additionalProperties: true },
+				message: { type: "string" },
+			},
+		},
 	},
 	{
 		name: "haiku_feedback_delete",
@@ -4424,6 +5511,14 @@ export const stateToolDefs = [
 				},
 			},
 			required: ["intent", "feedback_id"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				feedback_id: { type: "string" },
+				deleted: { type: "boolean" },
+				message: { type: "string" },
+			},
 		},
 	},
 	{
@@ -4449,6 +5544,14 @@ export const stateToolDefs = [
 			},
 			required: ["intent", "feedback_id", "reason"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				feedback_id: { type: "string" },
+				status: { type: "string", const: "rejected" },
+				message: { type: "string" },
+			},
+		},
 	},
 	{
 		name: "haiku_feedback_list",
@@ -4470,6 +5573,158 @@ export const stateToolDefs = [
 			},
 			required: ["intent"],
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				items: {
+					type: "array",
+					items: { type: "object", additionalProperties: true },
+				},
+			},
+			required: ["items"],
+		},
+	},
+	{
+		name: "haiku_feedback_read",
+		description:
+			"Read a feedback file's body content (and title). Returns ONLY the body and title — frontmatter is FSM-internal and not exposed to agents per the architecture's FM-is-FSM-only rule. Use this when a fixer hat needs to read its own FB diagnosis or when a reviewer needs to read prior findings on the same artifact. Returns { title, body } as JSON. Omit `stage` to read an intent-scope FB.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string", description: "Intent slug" },
+				stage: {
+					type: "string",
+					description: "Stage name (optional — omit for intent-scope FBs)",
+				},
+				feedback_id: {
+					type: "string",
+					description: "Feedback ID, e.g. FB-01",
+				},
+			},
+			required: ["intent", "feedback_id"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				title: { type: "string" },
+				body: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_feedback_write",
+		description: `Update a feedback file's body content. This is the architecture-mandated path for fixer hats to populate the FB body with diagnosis (root cause, proposed action, file:line refs) per the FB-as-unit model. Generic Write/Edit on feedback/*.md is denied at the hook layer. Lifecycle: only pending or addressed (under-fix) FBs accept body rewrites. Closed and rejected FBs are immutable.
+
+Frontmatter is FSM-controlled and cannot be set through this tool. For reference (when reading FB context):
+  • FSM-driven (mutated over the FB lifecycle): ${FSM_DRIVEN_FB_FIELDS.join(", ")}
+  • Set at creation, immutable thereafter: ${CREATE_TIME_FB_FIELDS.join(", ")}
+
+Use haiku_feedback_update for status transitions and haiku_feedback_reject for rejections.`,
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string", description: "Intent slug" },
+				stage: {
+					type: "string",
+					description: "Stage name (optional — omit for intent-scope FBs)",
+				},
+				feedback_id: {
+					type: "string",
+					description: "Feedback ID, e.g. FB-01",
+				},
+				body: {
+					type: "string",
+					description:
+						"Full markdown body to write. Replaces the prior body entirely.",
+				},
+			},
+			required: ["intent", "feedback_id", "body"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				feedback_id: { type: "string" },
+				stage: { type: ["string", "null"] },
+				intent: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+				current_status: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_feedback_advance_hat",
+		description:
+			"Advance an FB to the next hat in the stage's `fix_hats:` sequence. Per the architecture's FB-as-unit model: each fixer hat operates on the FB body (via haiku_feedback_write) and then calls this tool to progress. When called on the last hat in the fix_hats sequence, the FSM auto-completes the FB (status → closed, closed_by recorded, iteration appended). Mirrors haiku_unit_advance_hat for FBs.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string", description: "Intent slug" },
+				stage: {
+					type: "string",
+					description: "Stage name (optional — omit for intent-scope FBs)",
+				},
+				feedback_id: {
+					type: "string",
+					description: "Feedback ID, e.g. FB-01",
+				},
+			},
+			required: ["intent", "feedback_id"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				feedback_id: { type: "string" },
+				stage: { type: ["string", "null"] },
+				calling_hat: { type: "string" },
+				next_dispatched_hat: { type: ["string", "null"] },
+				closed: { type: "boolean" },
+				bolt: { type: "number" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_feedback_reject_hat",
+		description:
+			"Reject the current fix-hat's work on an FB — moves back to the previous hat and increments the FB's bolt counter. Pass `reason` so the FB's iteration history records why the hat was rejected. Mirrors haiku_unit_reject_hat for FBs.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string", description: "Intent slug" },
+				stage: {
+					type: "string",
+					description: "Stage name (optional — omit for intent-scope FBs)",
+				},
+				feedback_id: {
+					type: "string",
+					description: "Feedback ID, e.g. FB-01",
+				},
+				reason: {
+					type: "string",
+					description:
+						"Short explanation of why the current hat's work was rejected (recorded in the FB iteration history).",
+				},
+			},
+			required: ["intent", "feedback_id"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				feedback_id: { type: "string" },
+				rejecting_hat: { type: "string" },
+				next_dispatched_hat: { type: ["string", "null"] },
+				new_bolt: { type: "number" },
+				reason: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
 	},
 	{
 		name: "haiku_release_notes",
@@ -4484,11 +5739,23 @@ export const stateToolDefs = [
 				},
 			},
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				markdown: { type: "string", description: "Release notes as markdown." },
+				version: {
+					type: ["string", "null"],
+					description:
+						"Echoed version filter (null when 5-most-recent was returned).",
+				},
+			},
+			required: ["markdown"],
+		},
 	},
 	{
 		name: "haiku_repair",
 		description:
-			"Scan intents for metadata issues and auto-apply safe fixes. In a git repo, scans all intent branches sequentially, auto-applies safe fixes, syncs changes, and opens PRs/MRs for already-merged branches. In filesystem mode, scans intents in the current working directory. Pass `intent` to repair a single intent only. Pass `skip_branches: true` to force cwd-only mode in a git repo. Pass `apply: false` to scan without applying fixes.",
+			"Scan intents for metadata issues and auto-apply safe fixes. In a git repo, scans all intent branches sequentially, auto-applies safe fixes, syncs changes, and opens PRs/MRs for already-merged branches. In filesystem mode, scans intents in the current working directory. Also relocates any worktrees misplaced by older H·AI·K·U versions (which rooted `.haiku/worktrees/` at cwd instead of the primary repo) — clean worktrees are moved via `git worktree move`; dirty ones are reported for manual resolution. Pass `intent` to repair a single intent only. Pass `skip_branches: true` to force cwd-only mode in a git repo. Pass `apply: false` to scan without applying fixes.",
 		inputSchema: {
 			type: "object" as const,
 			properties: {
@@ -4508,6 +5775,17 @@ export const stateToolDefs = [
 				},
 			},
 		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				markdown: {
+					type: "string",
+					description:
+						"Repair report — markdown text including any worktree-migration findings.",
+				},
+			},
+			required: ["markdown"],
+		},
 	},
 	{
 		name: "haiku_version_info",
@@ -4515,6 +5793,14 @@ export const stateToolDefs = [
 			"Return the running MCP binary version and plugin version. " +
 			"MCP version is baked into the binary at build time; plugin version is read from plugin.json at runtime.",
 		inputSchema: { type: "object" as const, properties: {} },
+		outputSchema: {
+			type: "object",
+			properties: {
+				mcp_version: { type: "string" },
+				plugin_version: { type: "string" },
+			},
+			required: ["mcp_version", "plugin_version"],
+		},
 	},
 ]
 
@@ -4557,9 +5843,31 @@ export function validateSlugArgs(
 export function handleStateTool(
 	name: string,
 	args: Record<string, unknown>,
-): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
+): {
+	content: Array<{ type: "text"; text: string }>
+	structuredContent?: Record<string, unknown>
+	isError?: boolean
+} {
 	const text = (s: string) => ({
 		content: [{ type: "text" as const, text: s }],
+	})
+
+	// `reply(payload)` is the canonical return for tools that declare an
+	// `outputSchema`. Per MCP spec 2025-06-18 §Tool Result, the server MUST
+	// emit `structuredContent` matching the schema and SHOULD also emit
+	// the same payload as serialized JSON in a TextContent block for
+	// backwards compatibility with clients that don't yet read
+	// structuredContent. This helper does both atomically so handlers
+	// can't drift the two views apart.
+	const reply = (
+		payload: Record<string, unknown>,
+		opts?: { isError?: boolean },
+	) => ({
+		content: [
+			{ type: "text" as const, text: JSON.stringify(payload, null, 2) },
+		],
+		structuredContent: payload,
+		...(opts?.isError ? { isError: true } : {}),
 	})
 
 	// Capture the CC session id from the hook-injected _session_context so
@@ -4577,16 +5885,16 @@ export function handleStateTool(
 		// ── Intent ──
 		case "haiku_intent_get": {
 			const file = join(intentDir(args.slug as string), "intent.md")
-			if (!existsSync(file)) return text("")
+			if (!existsSync(file)) {
+				return reply({ found: false, field: args.field as string, value: null })
+			}
 			const { data } = parseFrontmatter(readFileSync(file, "utf8"))
 			const val = data[args.field as string]
-			return text(
-				val == null
-					? ""
-					: typeof val === "object"
-						? JSON.stringify(val)
-						: String(val),
-			)
+			return reply({
+				found: val != null,
+				field: args.field as string,
+				value: val == null ? null : (val as unknown),
+			})
 		}
 		case "haiku_intent_list": {
 			const root = findHaikuRoot()
@@ -4617,7 +5925,7 @@ export function handleStateTool(
 				}
 				return base
 			})
-			return text(JSON.stringify(intents, null, 2))
+			return reply({ intents })
 		}
 
 		// ── Stage ──
@@ -4625,7 +5933,11 @@ export function handleStateTool(
 			const path = stageStatePath(args.intent as string, args.stage as string)
 			const data = readJson(path)
 			const val = data[args.field as string]
-			return text(val == null ? "" : String(val))
+			return reply({
+				found: val != null,
+				field: args.field as string,
+				value: val == null ? null : (val as unknown),
+			})
 		}
 
 		// ── Unit ──
@@ -4647,23 +5959,27 @@ export function handleStateTool(
 			)
 		}
 		case "haiku_unit_set": {
-			// Guard: only `status = "completed"` is FSM-protected. Agents may
-			// freely change status to pending/active/blocked and set any other
-			// field for legitimate repair — the FSM owns the completion moment
-			// exclusively (via advance_hat's auto-complete on the last hat).
-			// Direct "completed" writes bypass merge-back, scope validation,
-			// and the feedback-assessor, so they're the only value blocked.
+			// Guards (architecture rules §1.1, §1.3):
+			//   1. status: completed is FSM-protected (always — only the FSM
+			//      auto-completes via advance_hat).
+			//   2. Lifecycle immutability — once a unit is `active` or
+			//      `completed`, all FM writes are denied. The forward-only
+			//      lifecycle rule means downstream work has been informed by
+			//      the unit's spec; mutating it would silently invalidate
+			//      that work. The FSM is the only legitimate writer at that
+			//      point (advance_hat, increment_bolt, reject_hat).
 			const field = args.field as string
 			const value = args.value
 			if (field === "status" && value === "completed") {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "fsm_completion_protected",
 						field,
 						value,
 						message:
-							'Cannot set status to "completed" directly — unit completion is FSM-controlled. Call `haiku_unit_advance_hat` to let the FSM auto-complete the unit\'s last hat, which runs scope validation, feedback-assessor closure, and worktree merge-back. Setting status to other values (pending, active, blocked) is fine.',
-					}),
+							'Cannot set status to "completed" directly — unit completion is FSM-controlled. Call `haiku_unit_advance_hat` to let the FSM auto-complete the unit\'s last hat, which runs scope validation, feedback-assessor closure, and worktree merge-back.',
+					},
+					{ isError: true },
 				)
 			}
 			const unitSetBranchErr = enforceStageBranch(
@@ -4676,6 +5992,34 @@ export function handleStateTool(
 				args.stage as string,
 				args.unit as string,
 			)
+			// Enforce lifecycle: only `pending` units accept arbitrary FM
+			// writes. The FSM-driven lifecycle fields (status, hat, bolt,
+			// iterations) are exempt because the FSM tools call setFrontmatterField
+			// directly (not through this MCP-callable case); agent calls go
+			// through here.
+			const FSM_DRIVEN_FIELDS = new Set([
+				"status",
+				"hat",
+				"bolt",
+				"iterations",
+				"started_at",
+				"completed_at",
+			])
+			if (existsSync(path) && !FSM_DRIVEN_FIELDS.has(field)) {
+				const { data: currentFm } = parseFrontmatter(readFileSync(path, "utf8"))
+				const currentStatus = (currentFm.status as string) || "pending"
+				if (currentStatus === "active" || currentStatus === "completed") {
+					return reply(
+						{
+							error: "lifecycle_violation",
+							current_status: currentStatus,
+							field,
+							message: `Cannot set field '${field}' on unit '${args.unit}' — status is '${currentStatus}'. Per the forward-only lifecycle rule (architecture §1.3), units become immutable once they enter active or completed status. Pending units only.`,
+						},
+						{ isError: true },
+					)
+				}
+			}
 			setFrontmatterField(path, args.field as string, args.value)
 			return text("ok")
 		}
@@ -4692,7 +6036,7 @@ export function handleStateTool(
 				stageDir(args.intent as string, args.stage as string),
 				"units",
 			)
-			if (!existsSync(dir)) return text("[]")
+			if (!existsSync(dir)) return reply({ units: [] })
 			const files = readdirSync(dir).filter((f) => f.endsWith(".md"))
 			const units = files.map((f) => {
 				const { data } = parseFrontmatter(readFileSync(join(dir, f), "utf8"))
@@ -4704,18 +6048,19 @@ export function handleStateTool(
 					model: data.model ?? null,
 				}
 			})
-			return text(JSON.stringify(units, null, 2))
+			return reply({ units })
 		}
 		case "haiku_unit_start": {
 			// Resolve stage and first hat internally
 			const stage = resolveActiveStage(args.intent as string)
 			if (!stage)
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "no_active_stage",
 						message:
 							"No active stage found for this intent. Call haiku_run_next first.",
-					}),
+					},
+					{ isError: true },
 				)
 			const unitStartBranchErr = enforceStageBranch(
 				args.intent as string,
@@ -4731,13 +6076,48 @@ export function handleStateTool(
 				)
 				if (existingFm.status === "active") {
 					const scope = resolveStageScope(args.intent as string, stage)
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_already_active",
 							unit: args.unit,
 							hat: existingFm.hat || "",
+							scope: scope || null,
 							message: `Unit '${args.unit}' is already active (hat: ${existingFm.hat || "unknown"}). Do not start it again — continue working on it or call haiku_unit_advance_hat when done.`,
-						}) + (scope ? `\n\n${scope}` : ""),
+						},
+						{ isError: true },
+					)
+				}
+			}
+
+			// Validate every declared input path exists on disk BEFORE the
+			// unit transitions to active. The FM schema's pattern check
+			// catches freeform-text entries at write time, but a path that
+			// LOOKS valid (e.g. references a prior-stage artifact that
+			// never landed) needs a runtime gate too — without this, the
+			// unit's hats start work against missing inputs and either
+			// silently produce wrong artifacts or fail later in cryptic
+			// ways.
+			{
+				const startUnitFm = parseFrontmatter(readFileSync(uPath, "utf8")).data
+				const startInputs = Array.isArray(startUnitFm.inputs)
+					? (startUnitFm.inputs as string[])
+					: []
+				const missingInputs: string[] = []
+				for (const inp of startInputs) {
+					if (
+						!unitOutputExists(args.intent as string, args.unit as string, inp)
+					) {
+						missingInputs.push(inp)
+					}
+				}
+				if (missingInputs.length > 0) {
+					return reply(
+						{
+							error: "unit_inputs_missing",
+							missing: missingInputs,
+							message: `Cannot start unit '${args.unit}': ${missingInputs.length} declared input(s) do not exist on disk: [${missingInputs.map((p) => `'${p}'`).join(", ")}]. Each entry in \`inputs:\` MUST reference a real file (typically an artifact a prior stage produced). Verify the upstream stage actually wrote the file, OR remove the input entry if the unit doesn't actually need it.`,
+						},
+						{ isError: true },
 					)
 				}
 			}
@@ -4793,11 +6173,12 @@ export function handleStateTool(
 			// Resolve stage and unit path internally
 			const unitInfo = findUnitFile(args.intent as string, args.unit as string)
 			if (!unitInfo)
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "unit_not_found",
 						message: `Unit '${args.unit}' not found in any stage of intent '${args.intent}'.`,
-					}),
+					},
+					{ isError: true },
 				)
 			const advPath = unitInfo.path
 			const advStage = unitInfo.stage
@@ -4812,12 +6193,13 @@ export function handleStateTool(
 
 			// Guard: reject if unit is already completed
 			if (unitFm.status === "completed") {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "unit_already_completed",
 						unit: args.unit,
 						message: `Unit '${args.unit}' is already completed. Cannot advance hat on a completed unit.`,
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
@@ -4828,14 +6210,15 @@ export function handleStateTool(
 			if (hatStartedAt) {
 				const elapsed = (Date.now() - new Date(hatStartedAt).getTime()) / 1000
 				if (elapsed < 30) {
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "hat_too_fast",
 							elapsed_seconds: Math.round(elapsed),
 							minimum_seconds: 30,
 							message:
 								"Cannot advance hat — the current hat started less than 30 seconds ago. Each hat must do meaningful work before advancing.",
-						}),
+						},
+						{ isError: true },
 					)
 				}
 			}
@@ -4852,12 +6235,13 @@ export function handleStateTool(
 					return !resolved.startsWith(`${resolve(iDir)}/`)
 				})
 				if (escaped.length > 0) {
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_outputs_escaped",
 							escaped,
 							message: `Cannot advance hat: ${escaped.length} output path(s) escape the intent directory: ${escaped.join(", ")}. Fix the outputs in the unit frontmatter.`,
-						}),
+						},
+						{ isError: true },
 					)
 				}
 				const missing = unitOutputs.filter(
@@ -4874,12 +6258,13 @@ export function handleStateTool(
 							unit: args.unit,
 							missing,
 						})
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_outputs_missing",
 							missing,
 							message: `Cannot advance hat: ${missing.length} declared output(s) not found in unit worktree or main intent dir: ${missing.join(", ")}. Create them (in the unit worktree if you have one, otherwise in the main intent dir) or remove them from the outputs list.`,
-						}),
+						},
+						{ isError: true },
 					)
 				}
 			}
@@ -4936,15 +6321,16 @@ export function handleStateTool(
 						if (gateResult) {
 							const currentBolt = (unitFm.bolt as number) || 1
 							if (currentBolt + 1 > MAX_UNIT_BOLTS) {
-								return text(
-									JSON.stringify({
+								return reply(
+									{
 										error: "max_bolts_exceeded",
 										reason: "quality_gate_auto_reject",
 										bolt: currentBolt,
 										max: MAX_UNIT_BOLTS,
 										failures: gateResult.failures,
 										message: `Quality gates failed on hat '${currentHat}' and the unit has hit ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — the gates are catching real issues this hat cannot resolve in another bolt.\n\n${gateResult.failures.map((f) => `- ${f.name}: '${f.command}' exited ${f.exit_code}${f.output ? `\n  ${f.output.split("\n").slice(0, 3).join("\n  ")}` : ""}`).join("\n")}`,
-									}),
+									},
+									{ isError: true },
 								)
 							}
 
@@ -5031,7 +6417,7 @@ export function handleStateTool(
 						advPath,
 					)
 					if (qualityGates) {
-						return text(JSON.stringify(qualityGates))
+						return reply(qualityGates)
 					}
 				}
 
@@ -5078,8 +6464,8 @@ export function handleStateTool(
 						]
 							.filter(Boolean)
 							.join("\n")
-						return text(
-							JSON.stringify({
+						return reply(
+							{
 								error: "unit_scope_violation",
 								violations: scopeResult.violations,
 								scope: scopeResult.scope,
@@ -5088,7 +6474,8 @@ export function handleStateTool(
 									`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
 									`Allowed paths (stage output templates + FSM metadata):\n${allowedSummary}\n\n` +
 									`To resolve (in the unit worktree): (a) drop ALL unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${advStage})\` — recommended if the unit just started and few commits landed; or (b) amend the bad file out of the latest commit with \`git rm <file> && git commit --amend --no-edit\`; or (c) whole-commit rollback with \`git revert --no-edit <commit-sha>\` for each bad commit.\n\nNOTE: \`git checkout HEAD -- <file>\` does NOT work on committed files (it's a no-op when the file matches HEAD). Use one of the above.\n\nAlternatively: (d) update the stage's output template \`location:\` / \`scope:\` if this pattern is legitimate, or (e) call \`haiku_revisit\` if the scope itself is wrong.`,
-							}),
+							},
+							{ isError: true },
 						)
 					}
 				}
@@ -5123,12 +6510,53 @@ export function handleStateTool(
 							stage: advStage,
 							unit: args.unit,
 						})
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_outputs_empty",
 							message:
 								"Cannot complete unit: no outputs were produced. Every unit must write at least one artifact that the FSM can detect (stage artifact under `stages/<stage>/...` excluding `units/`/`state.json`, knowledge document under `knowledge/`, or a file matching a stage output template `location:`). The FSM auto-populates `outputs:` from the git diff at advance time; if you've written files but they're not showing up, verify they've been committed in the unit worktree, or add them explicitly to the unit's `outputs:` frontmatter field.",
-						}),
+						},
+						{ isError: true },
+					)
+				}
+
+				// Validate every declared output path exists on disk. The
+				// FM schema's pattern check catches "Weekly carryover roll:
+				// scheduler trigger…"-style prose entries at write time,
+				// but pre-existing units (or escaped writes) need a runtime
+				// gate too: an output that claims a path the unit never
+				// produced silently passes downstream as if the artifact
+				// landed.
+				//
+				// Resolution order matches `unitOutputExists` (used by
+				// stage output-template validation): check the unit's
+				// worktree first, then the parent intent dir, then the
+				// repo root for repo-relative paths.
+				const missingOutputs: string[] = []
+				for (const out of unitOutputsAfter) {
+					if (
+						!unitOutputExists(args.intent as string, args.unit as string, out)
+					) {
+						missingOutputs.push(out)
+					}
+				}
+				if (missingOutputs.length > 0) {
+					const sf = args.state_file as string | undefined
+					if (sf)
+						logSessionEvent(sf, {
+							event: "outputs_missing",
+							intent: args.intent,
+							stage: advStage,
+							unit: args.unit,
+							missing: missingOutputs.length,
+						})
+					return reply(
+						{
+							error: "unit_outputs_missing",
+							missing: missingOutputs,
+							message: `Cannot complete unit: ${missingOutputs.length} declared output(s) do not exist on disk: [${missingOutputs.map((p) => `'${p}'`).join(", ")}]. Each entry in \`outputs:\` MUST be a real file path. If you wrote prose (e.g. "Weekly carryover roll: scheduler trigger, idempotent roll logic"), that's a completion-criteria description, not an output path — move it to the body's \`## Completion Criteria\` section and let auto-populate fill \`outputs:\` from the actual git diff.`,
+						},
+						{ isError: true },
 					)
 				}
 
@@ -5144,12 +6572,13 @@ export function handleStateTool(
 							unit: args.unit,
 							unchecked,
 						})
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "criteria_not_met",
 							unchecked,
 							message: `Cannot complete unit: ${unchecked} completion criteria still unchecked. Address them, then call haiku_unit_advance_hat again.`,
-						}),
+						},
+						{ isError: true },
 					)
 				}
 
@@ -5248,20 +6677,17 @@ export function handleStateTool(
 						intentSlug,
 						args.unit as string,
 					)
-					return text(
-						JSON.stringify(
-							{
-								action: "merge_conflict",
-								status: "completed_merge_failed",
-								intent: args.intent,
-								unit: args.unit,
-								worktree: worktreePath,
-								error: mergeResult.message,
-								message: `Unit completed but merge to parent branch failed: ${mergeResult.message}. RESOLVE: cd to the parent branch (\`git checkout ${parentBranchName}\`), merge manually (\`git merge haiku/${intentSlug}/${args.unit} --no-edit\`), resolve any conflicts, then commit and push. If you cannot resolve, ask the user for help.`,
-							},
-							null,
-							2,
-						),
+					return reply(
+						{
+							action: "merge_conflict",
+							status: "completed_merge_failed",
+							intent: args.intent,
+							unit: args.unit,
+							worktree: worktreePath,
+							error: mergeResult.message,
+							message: `Unit completed but merge to parent branch failed: ${mergeResult.message}. RESOLVE: cd to the parent branch (\`git checkout ${parentBranchName}\`), merge manually (\`git merge haiku/${intentSlug}/${args.unit} --no-edit\`), resolve any conflicts, then commit and push. If you cannot resolve, ask the user for help.`,
+						},
+						{ isError: true },
 					)
 				}
 
@@ -5369,8 +6795,8 @@ export function handleStateTool(
 					]
 						.filter(Boolean)
 						.join("\n")
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_scope_violation",
 							hat: currentHat,
 							violations: scopeResult.violations,
@@ -5380,7 +6806,8 @@ export function handleStateTool(
 								`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
 								`Allowed paths (stage output templates + FSM metadata):\n${allowedSummary}\n\n` +
 								`Revert the out-of-bounds commits in the unit worktree: drop all unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${advStage})\`, or amend a single file out with \`git rm <file> && git commit --amend --no-edit\`, or \`git revert --no-edit <commit-sha>\` for a whole commit. NOTE: \`git checkout HEAD -- <file>\` is a no-op on committed files. Or update the stage's output template if this pattern is legitimate. Do NOT advance with scope violations — downstream hats will run blind.`,
-						}),
+						},
+						{ isError: true },
 					)
 				}
 			}
@@ -5467,11 +6894,12 @@ export function handleStateTool(
 				args.unit as string,
 			)
 			if (!rejectInfo)
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "unit_not_found",
 						message: `Unit '${args.unit}' not found in any stage of intent '${args.intent}'.`,
-					}),
+					},
+					{ isError: true },
 				)
 			const failPath = rejectInfo.path
 			const rejectStage = rejectInfo.stage
@@ -5494,13 +6922,14 @@ export function handleStateTool(
 			// unit with a committed scope violation can still hit MAX_BOLTS
 			// and escalate to the user instead of deadlocking.
 			if (currentBolt + 1 > MAX_UNIT_BOLTS) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "max_bolts_exceeded",
 						bolt: currentBolt,
 						max: MAX_UNIT_BOLTS,
 						message: `Unit has exceeded ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — this unit may need to be redesigned, split, or have a persistent scope violation manually reverted (\`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\` in the unit worktree).`,
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
@@ -5536,20 +6965,21 @@ export function handleStateTool(
 					sealIntentState(args.intent as string)
 
 					if (newAttempts >= MAX_UNIT_BOLTS) {
-						return text(
-							JSON.stringify({
+						return reply(
+							{
 								error: "max_bolts_exceeded",
 								reason: "persistent_scope_violation",
 								attempts: newAttempts,
 								max: MAX_UNIT_BOLTS,
 								violations: scopeResult.violations,
 								message: `Unit has hit ${newAttempts} consecutive scope-violation rejects. Escalate to the user. The worktree still contains out-of-scope commits that must be reverted manually: \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\` in the unit worktree.`,
-							}),
+							},
+							{ isError: true },
 						)
 					}
 
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "unit_scope_violation_on_reject",
 							bolt: currentBolt,
 							scope_reject_attempts: newAttempts,
@@ -5561,7 +6991,8 @@ export function handleStateTool(
 								`Attempt ${newAttempts}/${MAX_UNIT_BOLTS} — after ${MAX_UNIT_BOLTS} scope-violation rejects, the FSM escalates to the user.\n\n` +
 								`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
 								`Revert the out-of-bounds commits in the unit worktree: drop all unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\`, or amend a single file out with \`git rm <file> && git commit --amend --no-edit\`, or \`git revert --no-edit <commit-sha>\` for a whole commit. NOTE: \`git checkout HEAD -- <file>\` is a NO-OP on committed files and will not clear the violation. After the revert, call reject_hat again.`,
-						}),
+						},
+						{ isError: true },
 					)
 				}
 
@@ -5680,13 +7111,14 @@ export function handleStateTool(
 
 			// Enforce max bolt limit (module-level MAX_UNIT_BOLTS)
 			if (current + 1 > MAX_UNIT_BOLTS) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "max_bolts_exceeded",
 						bolt: current,
 						max: MAX_UNIT_BOLTS,
 						message: `Unit has exceeded ${MAX_UNIT_BOLTS} bolt iterations. Escalate to the user — this unit may need to be redesigned or split.`,
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
@@ -5702,28 +7134,268 @@ export function handleStateTool(
 			return text(String(current + 1))
 		}
 
+		// ── Unit body-only read (architecture rule §1.1: no FM exposed) ──
+		case "haiku_unit_read": {
+			const readBranchErr = enforceStageBranch(
+				args.intent as string,
+				args.stage as string,
+			)
+			if (readBranchErr) return readBranchErr
+			const path = unitPath(
+				args.intent as string,
+				args.stage as string,
+				args.unit as string,
+			)
+			if (!existsSync(path)) {
+				return reply(
+					{
+						error: "unit_not_found",
+						intent: args.intent,
+						stage: args.stage,
+						unit: args.unit,
+						message: `No unit '${args.unit}' in stage '${args.stage}'.`,
+					},
+					{ isError: true },
+				)
+			}
+			const { data, body } = parseFrontmatter(readFileSync(path, "utf8"))
+			// Title resolves from FM `title:` if present, else first H1, else
+			// the unit name. We expose ONLY the title and body — every other
+			// FM field is FSM-internal per architecture §1.1.
+			const fmTitle =
+				typeof data.title === "string" ? (data.title as string) : ""
+			const h1Match = body.match(/^#\s+(.+)$/m)
+			const title =
+				fmTitle || (h1Match ? h1Match[1].trim() : (args.unit as string))
+			return reply({ title, body })
+		}
+
+		// ── Unit delete (architecture rule §1.3: pending only) ──
+		case "haiku_unit_delete": {
+			const delBranchErr = enforceStageBranch(
+				args.intent as string,
+				args.stage as string,
+			)
+			if (delBranchErr) return delBranchErr
+			const path = unitPath(
+				args.intent as string,
+				args.stage as string,
+				args.unit as string,
+			)
+			if (!existsSync(path)) {
+				return reply(
+					{
+						error: "unit_not_found",
+						intent: args.intent,
+						stage: args.stage,
+						unit: args.unit,
+						message: `No unit '${args.unit}' in stage '${args.stage}'.`,
+					},
+					{ isError: true },
+				)
+			}
+			const { data } = parseFrontmatter(readFileSync(path, "utf8"))
+			const status = (data.status as string) || "pending"
+			if (status !== "pending") {
+				return reply(
+					{
+						error: "lifecycle_violation",
+						current_status: status,
+						required_status: "pending",
+						message: `Cannot delete unit '${args.unit}' — status is '${status}'. Per the forward-only lifecycle rule (architecture §1.3), units become immutable once they enter active or completed status because downstream work has been informed by them. Pending units only.`,
+					},
+					{ isError: true },
+				)
+			}
+			rmSync(path)
+			sealIntentState(args.intent as string)
+			emitTelemetry("haiku.unit.deleted", {
+				intent: args.intent as string,
+				stage: args.stage as string,
+				unit: args.unit as string,
+			})
+			return reply({
+				ok: true,
+				message: `Deleted pending unit '${args.unit}'.`,
+			})
+		}
+
+		// ── Unit write (create or full-rewrite, pending only) ──
+		// The architecture-mandated path for authoring unit files. Generic
+		// Write/Edit on units/*.md is denied at the hook layer; this is the
+		// only way agents can put a unit on disk. FM is validated; lifecycle
+		// is enforced; FSM-driven fields are stripped (the FSM owns them).
+		case "haiku_unit_write": {
+			const writeBranchErr = enforceStageBranch(
+				args.intent as string,
+				args.stage as string,
+			)
+			if (writeBranchErr) return writeBranchErr
+
+			const intentArg = args.intent as string
+			const stageArg = args.stage as string
+			const unitName = args.unit as string
+			const body = (args.body as string) ?? ""
+			const fmInput = (args.frontmatter as Record<string, unknown>) ?? {}
+
+			if (!body || body.trim().length === 0) {
+				return reply(
+					{
+						error: "empty_body",
+						message:
+							"body is required and must be substantive. Empty bodies cannot pass downstream verification.",
+					},
+					{ isError: true },
+				)
+			}
+
+			const path = unitPath(intentArg, stageArg, unitName)
+
+			// Lifecycle enforcement: only pending OR new units may be (re)written.
+			let isCreate = true
+			if (existsSync(path)) {
+				const { data: existingFm } = parseFrontmatter(
+					readFileSync(path, "utf8"),
+				)
+				const currentStatus = (existingFm.status as string) || "pending"
+				if (currentStatus !== "pending") {
+					return reply(
+						{
+							error: "lifecycle_violation",
+							current_status: currentStatus,
+							message: `Cannot rewrite unit '${unitName}' — status is '${currentStatus}'. Per the forward-only lifecycle rule (architecture §1.3), units become immutable once active or completed. To address a defect in a completed unit, draft a NEW pending unit in the next elaborate iteration; do not modify the original.`,
+						},
+						{ isError: true },
+					)
+				}
+				isCreate = false
+			}
+
+			// Build sibling list for DAG validation. The new/rewritten unit
+			// is included so self-reference detection works.
+			const stageUnitsDir = join(stageDir(intentArg, stageArg), "units")
+			const siblingUnits: string[] = []
+			if (existsSync(stageUnitsDir)) {
+				for (const f of readdirSync(stageUnitsDir).filter((n) =>
+					n.endsWith(".md"),
+				)) {
+					siblingUnits.push(f.replace(/\.md$/, ""))
+				}
+			}
+			if (!siblingUnits.includes(unitName)) siblingUnits.push(unitName)
+
+			// FM validation (AJV consumes UNIT_FRONTMATTER_SCHEMA for static
+			// rules; context-dependent checks run as additional steps).
+			const validation = validateUnitFrontmatter(fmInput, {
+				intent: intentArg,
+				stage: stageArg,
+				unit: unitName,
+				siblingUnits,
+			})
+			if (!validation.valid) {
+				return reply(
+					{
+						error: "frontmatter_validation_failed",
+						errors: validation.errors,
+						message: `Frontmatter failed validation. Fix each error and call again. Architecture §1.1 mandates that the FSM enforces FM validity at write time, so the agent never sees defects sneak through.`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// DAG cycle check — assemble the full stage DAG including the
+			// proposed write, then run cycle detection.
+			const dag: Record<string, string[]> = {}
+			if (existsSync(stageUnitsDir)) {
+				for (const f of readdirSync(stageUnitsDir).filter((n) =>
+					n.endsWith(".md"),
+				)) {
+					const sibName = f.replace(/\.md$/, "")
+					if (sibName === unitName) continue
+					const { data: sibFm } = parseFrontmatter(
+						readFileSync(join(stageUnitsDir, f), "utf8"),
+					)
+					dag[sibName] = Array.isArray(sibFm.depends_on)
+						? (sibFm.depends_on as string[])
+						: []
+				}
+			}
+			dag[unitName] = Array.isArray(fmInput.depends_on)
+				? (fmInput.depends_on as string[])
+				: []
+			const cycleNodes = detectDagCycles(dag)
+			if (cycleNodes.length > 0) {
+				return reply(
+					{
+						error: "dag_cycle_detected",
+						cycle_nodes: cycleNodes,
+						message: `Writing unit '${unitName}' with depends_on=[${(fmInput.depends_on as string[] | undefined)?.join(", ") ?? ""}] would create a dependency cycle involving: [${cycleNodes.join(", ")}]. The FSM rejects writes that produce a cyclic DAG. Reorder dependencies or restructure the units.`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// All validators passed. Persist. Set FSM-driven fields to their
+			// initial values (status: pending, etc.) — agents never touch
+			// these.
+			const finalFm: Record<string, unknown> = {
+				...fmInput,
+				status: "pending",
+			}
+			// Title default: if absent, derive from body's first H1 or fall
+			// back to unit name.
+			if (!("title" in finalFm)) {
+				const h1 = body.match(/^#\s+(.+)$/m)
+				finalFm.title = h1 ? h1[1].trim() : unitName
+			}
+
+			// Ensure parent directory exists for create paths.
+			if (isCreate && !existsSync(stageUnitsDir)) {
+				mkdirSync(stageUnitsDir, { recursive: true })
+			}
+			writeFileSync(path, matter.stringify(`${body.trimEnd()}\n`, finalFm))
+			sealIntentState(intentArg)
+			emitTelemetry(isCreate ? "haiku.unit.created" : "haiku.unit.rewritten", {
+				intent: intentArg,
+				stage: stageArg,
+				unit: unitName,
+			})
+			return reply({
+				ok: true,
+				created: isCreate,
+				unit: unitName,
+				stage: stageArg,
+				intent: intentArg,
+				message: isCreate
+					? `Created unit '${unitName}' in stage '${stageArg}' (status: pending).`
+					: `Rewrote unit '${unitName}' in stage '${stageArg}' (status preserved as pending).`,
+			})
+		}
+
 		case "haiku_decision_record": {
 			const intentArg = args.intent as string
 			const requestedStage = args.stage as string | undefined
 			const stage = requestedStage || resolveActiveStage(intentArg)
 			if (!stage) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "no_active_stage",
 						message:
 							"No stage specified and no active stage found on the intent.",
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
 			const stageDir = join(intentDir(intentArg), "stages", stage)
 			const stateFile = join(stageDir, "state.json")
 			if (!existsSync(stateFile)) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "stage_state_missing",
 						message: `Stage state file not found: ${stateFile}`,
-					}),
+					},
+					{ isError: true },
 				)
 			}
 			const stageState = JSON.parse(readFileSync(stateFile, "utf8")) as Record<
@@ -5736,12 +7408,13 @@ export function handleStateTool(
 
 			if (noDecisions) {
 				if (!rationale || rationale.length < 10) {
-					return text(
-						JSON.stringify({
+					return reply(
+						{
 							error: "rationale_required",
 							message:
 								"no_decisions=true requires a rationale of at least 10 characters explaining why no architectural decisions are in scope for this stage. State the convention or constraint that makes the work routine (e.g. 'all units follow the team's standard CRUD scaffolding; no architectural choices remain after design stage').",
-						}),
+						},
+						{ isError: true },
 					)
 				}
 				stageState.elaboration_no_decisions = true
@@ -5753,15 +7426,13 @@ export function handleStateTool(
 					intent: intentArg,
 					stage,
 				})
-				return text(
-					JSON.stringify({
-						ok: true,
-						intent: intentArg,
-						stage,
-						no_decisions: true,
-						rationale,
-					}),
-				)
+				return reply({
+					ok: true,
+					intent: intentArg,
+					stage,
+					no_decisions: true,
+					rationale,
+				})
 			}
 
 			const decision = (args.decision as string | undefined)?.trim()
@@ -5770,41 +7441,45 @@ export function handleStateTool(
 			const source = args.source as string | undefined
 
 			if (!decision || !options || !choice || !source) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "missing_fields",
 						message:
 							"haiku_decision_record requires `decision`, `options`, `choice`, and `source` (or `no_decisions: true` with `rationale`).",
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
 			if (!Array.isArray(options) || options.length < 2) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "options_too_few",
 						message:
 							"`options` must be an array of at least 2 concrete alternatives. A 'decision' with only one option isn't a decision — it's just doing the work. If the work is forced, use `no_decisions: true` with a rationale instead.",
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
 			if (!options.includes(choice)) {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "choice_not_in_options",
 						message: `\`choice\` must match one of the entries in \`options\`. Got choice=${JSON.stringify(choice)}; options=${JSON.stringify(options)}. The decision-log is provenance — recording a choice that wasn't in the presented alternatives corrupts the very property the log exists to preserve.`,
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
 			if (source !== "user" && source !== "autonomous-acknowledged") {
-				return text(
-					JSON.stringify({
+				return reply(
+					{
 						error: "invalid_source",
 						message:
 							'`source` must be "user" (the user picked between the options) or "autonomous-acknowledged" (you chose and surfaced the choice for the user to veto, and they did not push back).',
-					}),
+					},
+					{ isError: true },
 				)
 			}
 
@@ -5827,22 +7502,20 @@ export function handleStateTool(
 				stage,
 				source,
 			})
-			return text(
-				JSON.stringify({
-					ok: true,
-					intent: intentArg,
-					stage,
-					decision_count: log.length,
-				}),
-			)
+			return reply({
+				ok: true,
+				intent: intentArg,
+				stage,
+				decision_count: log.length,
+			})
 		}
 
 		// ── Knowledge ──
 		case "haiku_knowledge_list": {
 			const dir = join(intentDir(args.intent as string), "knowledge")
-			if (!existsSync(dir)) return text("[]")
+			if (!existsSync(dir)) return reply({ files: [] })
 			const files = readdirSync(dir).filter((f) => f.endsWith(".md"))
-			return text(JSON.stringify(files))
+			return reply({ files })
 		}
 		case "haiku_knowledge_read": {
 			const path = join(
@@ -5850,8 +7523,14 @@ export function handleStateTool(
 				"knowledge",
 				args.name as string,
 			)
-			if (!existsSync(path)) return text("")
-			return text(readFileSync(path, "utf8"))
+			if (!existsSync(path)) {
+				return reply({ found: false, name: args.name as string, content: "" })
+			}
+			return reply({
+				found: true,
+				name: args.name as string,
+				content: readFileSync(path, "utf8"),
+			})
 		}
 
 		// ── Studio ──
@@ -5871,53 +7550,43 @@ export function handleStateTool(
 				studio_md: s.studioFile,
 				body: s.body.slice(0, 200),
 			}))
-			return text(JSON.stringify(studios, null, 2))
+			return reply({ studios })
 		}
 		case "haiku_studio_get": {
 			const studio = resolveStudio(args.studio as string)
-			if (!studio) return text("")
-			return text(
-				JSON.stringify(
-					{
-						name: studio.name,
-						slug: studio.slug,
-						aliases: studio.aliases,
-						dir: studio.dir,
-						description: studio.description,
-						category: studio.category,
-						stages: studio.stages,
-						source: studio.source,
-						path: studio.path,
-						studio_md: studio.studioFile,
-						body: studio.body,
-						...studio.data,
-					},
-					null,
-					2,
-				),
-			)
+			if (!studio) return reply({ found: false })
+			return reply({
+				found: true,
+				name: studio.name,
+				slug: studio.slug,
+				aliases: studio.aliases,
+				dir: studio.dir,
+				description: studio.description,
+				category: studio.category,
+				stages: studio.stages,
+				source: studio.source,
+				path: studio.path,
+				studio_md: studio.studioFile,
+				body: studio.body,
+				...studio.data,
+			})
 		}
 		case "haiku_studio_stage_get": {
 			const studio = resolveStudio(args.studio as string)
-			if (!studio) return text("")
+			if (!studio) return reply({ found: false })
 			const sgName = args.stage as string
 			const stageFile = join(studio.path, "stages", sgName, "STAGE.md")
-			if (!existsSync(stageFile)) return text("")
+			if (!existsSync(stageFile)) return reply({ found: false })
 			const raw = readFileSync(stageFile, "utf8")
 			const { data, body } = parseFrontmatter(raw)
-			return text(
-				JSON.stringify(
-					{
-						...data,
-						body,
-						studio: studio.name,
-						studio_dir: studio.dir,
-						stage_md: stageFile,
-					},
-					null,
-					2,
-				),
-			)
+			return reply({
+				found: true,
+				...data,
+				body,
+				studio: studio.name,
+				studio_dir: studio.dir,
+				stage_md: stageFile,
+			})
 		}
 
 		// ── Settings ──
@@ -5929,28 +7598,32 @@ export function handleStateTool(
 			} catch {
 				/* */
 			}
-			if (!(settingsPath && existsSync(settingsPath))) return text("")
+			if (!(settingsPath && existsSync(settingsPath))) {
+				return reply({ found: false, field, value: null })
+			}
 			const raw = readFileSync(settingsPath, "utf8")
 			const settings = parseYaml(raw)
 			const val = getNestedField(settings, field)
-			if (val == null) return text("")
-			return text(typeof val === "object" ? JSON.stringify(val) : String(val))
+			return reply({
+				found: val != null,
+				field,
+				value: val == null ? null : (val as unknown),
+			})
 		}
 
 		// ── Dashboard ──
 		case "haiku_dashboard": {
+			const empty = "No intents found. Use /haiku:start to create one."
 			let root: string
 			try {
 				root = findHaikuRoot()
 			} catch {
-				return text("No intents found. Use /haiku:start to create one.")
+				return reply({ markdown: empty })
 			}
 			const intentsDir = join(root, "intents")
-			if (!existsSync(intentsDir))
-				return text("No intents found. Use /haiku:start to create one.")
+			if (!existsSync(intentsDir)) return reply({ markdown: empty })
 			const entries = listVisibleIntents(intentsDir)
-			if (entries.length === 0)
-				return text("No intents found. Use /haiku:start to create one.")
+			if (entries.length === 0) return reply({ markdown: empty })
 
 			let out = "# Dashboard\n"
 			for (const { slug, data } of entries) {
@@ -6045,20 +7718,26 @@ export function handleStateTool(
 					}
 				}
 			}
-			return text(out)
+			return reply({ markdown: out })
 		}
 
 		// ── Capacity ──
 		case "haiku_capacity": {
 			const filterStudio = (args.studio as string) || ""
+			const studioField = filterStudio || null
 			let root: string
 			try {
 				root = findHaikuRoot()
 			} catch {
-				return text("No .haiku directory found.")
+				return reply({
+					markdown: "No .haiku directory found.",
+					studio: studioField,
+				})
 			}
 			const intentsDir = join(root, "intents")
-			if (!existsSync(intentsDir)) return text("No intents found.")
+			if (!existsSync(intentsDir)) {
+				return reply({ markdown: "No intents found.", studio: studioField })
+			}
 			const entries = listVisibleIntents(intentsDir)
 
 			const median = (arr: number[]): number => {
@@ -6084,12 +7763,14 @@ export function handleStateTool(
 					?.push({ slug, status: (data.status as string) || "unknown", data })
 			}
 
-			if (byStudio.size === 0)
-				return text(
-					filterStudio
+			if (byStudio.size === 0) {
+				return reply({
+					markdown: filterStudio
 						? `No intents found for studio '${filterStudio}'.`
 						: "No intents found.",
-				)
+					studio: studioField,
+				})
+			}
 
 			let out = "# Capacity Report\n"
 			for (const [studio, intents] of byStudio) {
@@ -6129,7 +7810,7 @@ export function handleStateTool(
 					}
 				}
 			}
-			return text(out)
+			return reply({ markdown: out, studio: studioField })
 		}
 
 		// ── Reflect ──
@@ -6332,19 +8013,20 @@ export function handleStateTool(
 		// ── Backlog ──
 		case "haiku_backlog": {
 			const action = (args.action as string) || "list"
+			const md = (markdown: string) => reply({ markdown, action })
 			let root: string
 			try {
 				root = findHaikuRoot()
 			} catch {
-				return text("No .haiku directory found.")
+				return md("No .haiku directory found.")
 			}
 			const backlogDir = join(root, "backlog")
 
 			switch (action) {
 				case "list": {
-					if (!existsSync(backlogDir)) return text("No backlog items found.")
+					if (!existsSync(backlogDir)) return md("No backlog items found.")
 					const files = readdirSync(backlogDir).filter((f) => f.endsWith(".md"))
-					if (files.length === 0) return text("No backlog items found.")
+					if (files.length === 0) return md("No backlog items found.")
 
 					let out =
 						"# Backlog\n\n| # | Item | Priority | Created |\n|---|------|----------|---------|\n"
@@ -6354,7 +8036,7 @@ export function handleStateTool(
 						)
 						out += `| ${i + 1} | ${files[i].replace(".md", "")} | ${data.priority || "unset"} | ${data.created_at || "unknown"} |\n`
 					}
-					return text(out)
+					return md(out)
 				}
 				case "add": {
 					const desc = (args.description as string) || ""
@@ -6365,13 +8047,12 @@ export function handleStateTool(
 					out += `${desc || "Description of the backlog item"}\n\`\`\`\n`
 					out +=
 						"\nFilename should be a slug of the item description (e.g. `improve-error-handling.md`).\n"
-					return text(out)
+					return md(out)
 				}
 				case "review": {
-					if (!existsSync(backlogDir))
-						return text("No backlog items to review.")
+					if (!existsSync(backlogDir)) return md("No backlog items to review.")
 					const files = readdirSync(backlogDir).filter((f) => f.endsWith(".md"))
-					if (files.length === 0) return text("No backlog items to review.")
+					if (files.length === 0) return md("No backlog items to review.")
 
 					let out =
 						"## Backlog Review\n\nPresent each item to the user and ask: **Keep / Reprioritize / Drop / Promote / Skip**\n\n"
@@ -6384,7 +8065,7 @@ export function handleStateTool(
 						out += `${body.slice(0, 300)}\n\n`
 					}
 					out += "---\nFor each item, ask the user and apply their choice.\n"
-					return text(out)
+					return md(out)
 				}
 				case "promote": {
 					let out = "## Promote Backlog Item\n\n"
@@ -6393,10 +8074,10 @@ export function handleStateTool(
 					out +=
 						"2. Use /haiku:start to create an intent from its description\n"
 					out += "3. Delete the backlog file after the intent is created\n"
-					return text(out)
+					return md(out)
 				}
 				default:
-					return text(
+					return md(
 						`Unknown backlog action: '${action}'. Valid actions: list, add, review, promote.`,
 					)
 			}
@@ -6488,6 +8169,9 @@ export function handleStateTool(
 		// ── Release Notes ──
 		case "haiku_release_notes": {
 			const version = (args.version as string) || ""
+			const versionField = version || null
+			const md = (markdown: string) =>
+				reply({ markdown, version: versionField })
 			// Search for CHANGELOG.md — try plugin root first, then walk up from cwd
 			let changelogPath = ""
 			const pluginRoot = resolvePluginRoot()
@@ -6508,7 +8192,7 @@ export function handleStateTool(
 					dir = parent
 				}
 			}
-			if (!changelogPath) return text("No CHANGELOG.md found.")
+			if (!changelogPath) return md("No CHANGELOG.md found.")
 
 			const changelog = readFileSync(changelogPath, "utf8")
 			// Split by ## [version] headers
@@ -6521,13 +8205,13 @@ export function handleStateTool(
 			}
 
 			if (matches.length === 0)
-				return text("No versioned entries found in CHANGELOG.md.")
+				return md("No versioned entries found in CHANGELOG.md.")
 
 			if (version) {
 				// Find the specific version
 				const idx = matches.findIndex((m) => m.version === version)
 				if (idx === -1)
-					return text(
+					return md(
 						`Version '${version}' not found in CHANGELOG.md. Available: ${matches
 							.slice(0, 10)
 							.map((m) => m.version)
@@ -6536,7 +8220,7 @@ export function handleStateTool(
 				const endIdx =
 					idx + 1 < matches.length ? matches[idx + 1].start : changelog.length
 				const section = changelog.slice(matches[idx].start, endIdx).trim()
-				return text(
+				return md(
 					`# Release Notes\n\n${section}\n\n---\nTotal releases in changelog: ${matches.length}`,
 				)
 			}
@@ -6550,7 +8234,7 @@ export function handleStateTool(
 				out += `\n${changelog.slice(recent[i].start, endIdx).trim()}\n`
 			}
 			out += `\n---\nTotal releases in changelog: ${matches.length}\n`
-			return text(out)
+			return md(out)
 		}
 
 		case "haiku_repair": {
@@ -6569,6 +8253,17 @@ export function handleStateTool(
 			const repairIntentArg = args.intent as string | undefined
 			const repairAutoApply = args.apply !== false // default true
 			const repairSkipBranches = args.skip_branches === true
+			const md = (markdown: string) => reply({ markdown })
+
+			// First: migrate any worktrees that were created at the wrong
+			// path by the pre-fix code (when haiku rooted worktrees at
+			// `process.cwd()` instead of the primary repo). Runs regardless
+			// of mode — the migration is structural and benefits both
+			// single-cwd and multi-branch repair flows.
+			const migration = repairAutoApply
+				? migrateMisplacedWorktrees()
+				: { moved: [], skipped: [], cleanedSkeletons: [] }
+			const migrationReport = buildWorktreeMigrationReport(migration)
 
 			// Multi-branch path: in a git repo, no single-intent restriction, branches not skipped.
 			// Runs whether or not active haiku/<slug>/main branches exist — the archived pass
@@ -6578,15 +8273,17 @@ export function handleStateTool(
 					const { summaries, mainline, archivedSummary } =
 						repairAllBranches(repairAutoApply)
 					if (summaries.length > 0 || archivedSummary) {
-						return text(
-							buildMultiBranchReport(summaries, mainline, archivedSummary),
+						const body = buildMultiBranchReport(
+							summaries,
+							mainline,
+							archivedSummary,
 						)
+						return md(migrationReport ? `${migrationReport}\n${body}` : body)
 					}
 					// No active branches AND no archived intents — fall through to cwd repair
 				} catch (err) {
-					return text(
-						`Multi-branch repair failed: ${err instanceof Error ? err.message : String(err)}`,
-					)
+					const errMsg = `Multi-branch repair failed: ${err instanceof Error ? err.message : String(err)}`
+					return md(migrationReport ? `${migrationReport}\n${errMsg}` : errMsg)
 				}
 			}
 
@@ -6594,24 +8291,37 @@ export function handleStateTool(
 			try {
 				findHaikuRoot()
 			} catch {
-				return text("No .haiku/ directory found.")
+				return md(
+					migrationReport
+						? `${migrationReport}\nNo .haiku/ directory found.`
+						: "No .haiku/ directory found.",
+				)
 			}
 
 			let cwdResult: RepairCwdResult
 			try {
 				cwdResult = repairCwd(undefined, repairIntentArg, repairAutoApply)
 			} catch (err) {
-				return text(
-					`Repair failed: ${err instanceof Error ? err.message : String(err)}`,
-				)
+				const errMsg = `Repair failed: ${err instanceof Error ? err.message : String(err)}`
+				return md(migrationReport ? `${migrationReport}\n${errMsg}` : errMsg)
 			}
 
 			if (repairIntentArg && cwdResult.scanned === 0) {
-				return text(`Intent '${repairIntentArg}' not found.`)
+				const notFound = `Intent '${repairIntentArg}' not found.`
+				return md(
+					migrationReport ? `${migrationReport}\n${notFound}` : notFound,
+				)
 			}
-			if (cwdResult.scanned === 0) return text("No intents found.")
+			if (cwdResult.scanned === 0) {
+				return md(
+					migrationReport
+						? `${migrationReport}\nNo intents found.`
+						: "No intents found.",
+				)
+			}
 
-			return text(buildRepairReport(cwdResult))
+			const body = buildRepairReport(cwdResult)
+			return md(migrationReport ? `${migrationReport}\n${body}` : body)
 		}
 
 		// ── Feedback ──
@@ -6768,9 +8478,7 @@ export function handleStateTool(
 				status: "pending",
 				message: `Feedback ${result.feedback_id} created.`,
 			}
-			return text(
-				JSON.stringify(injectPushWarning(response, gitResult), null, 2),
-			)
+			return reply(injectPushWarning(response, gitResult))
 		}
 
 		case "haiku_feedback_update": {
@@ -6812,6 +8520,32 @@ export function handleStateTool(
 			)
 			if (feedbackUpdateBranchErr) return feedbackUpdateBranchErr
 
+			// Lifecycle enforcement (architecture §1.3 forward-only): refuse
+			// updates when the FB is already in a terminal state (closed or
+			// rejected). This prevents accidental "re-opening" or status flips
+			// after the fix-loop assessor has signed off.
+			//
+			// Uses findFeedbackFile() — the canonical numeric-prefix-aware
+			// resolver. The previous inline scan looked for `data.id` /
+			// `data.feedback_id` FM fields, which writeFeedbackFile() never
+			// writes; that made the guard dead code for every real FB.
+			{
+				const found = findFeedbackFile(intent, stage, feedbackId)
+				if (found) {
+					const cur = (found.data.status as string) || "pending"
+					if (cur === "closed" || cur === "rejected") {
+						return reply(
+							{
+								error: "lifecycle_violation",
+								current_status: cur,
+								message: `Cannot update feedback '${feedbackId}' — status is '${cur}'. Per the forward-only lifecycle rule, closed and rejected feedback are terminal. To raise a related concern, file a NEW feedback via haiku_feedback.`,
+							},
+							{ isError: true },
+						)
+					}
+				}
+			}
+
 			const updateResult = updateFeedbackFile(
 				intent,
 				stage,
@@ -6844,13 +8578,7 @@ export function handleStateTool(
 				updated_fields: updateResult.updated_fields,
 				message: `Feedback ${feedbackId} updated.`,
 			}
-			return text(
-				JSON.stringify(
-					injectPushWarning(updateResponse, updateGitResult),
-					null,
-					2,
-				),
-			)
+			return reply(injectPushWarning(updateResponse, updateGitResult))
 		}
 
 		case "haiku_feedback_delete": {
@@ -6902,13 +8630,7 @@ export function handleStateTool(
 					? `Feedback ${feedbackId} deleted from stage '${stage}'.`
 					: `Feedback ${feedbackId} deleted (intent-scope).`,
 			}
-			return text(
-				JSON.stringify(
-					injectPushWarning(deleteResponse, deleteGitResult),
-					null,
-					2,
-				),
-			)
+			return reply(injectPushWarning(deleteResponse, deleteGitResult))
 		}
 
 		case "haiku_feedback_reject": {
@@ -7011,13 +8733,7 @@ export function handleStateTool(
 				status: "rejected",
 				message: `Feedback ${feedbackId} rejected: ${reason}`,
 			}
-			return text(
-				JSON.stringify(
-					injectPushWarning(rejectResponse, rejectGitResult),
-					null,
-					2,
-				),
-			)
+			return reply(injectPushWarning(rejectResponse, rejectGitResult))
 		}
 
 		case "haiku_feedback_list": {
@@ -7145,7 +8861,511 @@ export function handleStateTool(
 				count: allItems.length,
 				items: allItems,
 			}
-			return text(JSON.stringify(listResponse, null, 2))
+			return reply(listResponse)
+		}
+
+		// ── Feedback body-only read (architecture rule §1.1: no FM exposed) ──
+		case "haiku_feedback_read": {
+			const intentArg = args.intent as string
+			const stageArg = (args.stage as string) || ""
+			const fbId = args.feedback_id as string
+			if (!intentArg || !fbId) {
+				return reply(
+					{
+						error: "missing_args",
+						message: "intent and feedback_id are required.",
+					},
+					{ isError: true },
+				)
+			}
+			// Locate the FB file. Stage-scope FBs live in stages/<stage>/feedback/;
+			// intent-scope FBs (from the intent-completion review) live in
+			// intents/<slug>/feedback/. The on-disk filename has a numeric
+			// prefix + slug, so we resolve by reading the directory and
+			// matching the FB id from frontmatter.
+			const dir = stageArg
+				? feedbackDir(intentArg, stageArg)
+				: feedbackDir(intentArg, "")
+			if (!existsSync(dir)) {
+				return reply(
+					{
+						error: "feedback_not_found",
+						intent: intentArg,
+						stage: stageArg || null,
+						feedback_id: fbId,
+						message: `No feedback directory at ${dir}.`,
+					},
+					{ isError: true },
+				)
+			}
+			let foundPath: string | null = null
+			let foundData: Record<string, unknown> | null = null
+			let foundBody: string | null = null
+			// Derive numeric part from fbId: "FB-01" → 1, "FB-1" → 1, "1" → 1
+			const fbNumMatch = fbId.match(/^(?:FB-)?(\d+)$/i)
+			const fbNum = fbNumMatch ? Number.parseInt(fbNumMatch[1], 10) : null
+			for (const f of readdirSync(dir).filter((n) => n.endsWith(".md"))) {
+				const p = join(dir, f)
+				const { data, body } = parseFrontmatter(readFileSync(p, "utf8"))
+				// Match by frontmatter id/feedback_id field (future files),
+				// OR by filename numeric prefix (files created by createFeedback which
+				// does not embed an id field in frontmatter).
+				const fileNumMatch = f.match(/^(\d+)-/)
+				const fileNum = fileNumMatch
+					? Number.parseInt(fileNumMatch[1], 10)
+					: null
+				if (
+					(data.id as string) === fbId ||
+					(data.feedback_id as string) === fbId ||
+					(fbNum !== null && fileNum === fbNum)
+				) {
+					foundPath = p
+					foundData = data
+					foundBody = body
+					break
+				}
+			}
+			if (!foundPath || !foundBody) {
+				return reply(
+					{
+						error: "feedback_not_found",
+						intent: intentArg,
+						stage: stageArg || null,
+						feedback_id: fbId,
+						message: `No feedback file matching ${fbId} in ${dir}.`,
+					},
+					{ isError: true },
+				)
+			}
+			const fmTitle =
+				typeof foundData?.title === "string" ? (foundData.title as string) : ""
+			const h1Match = foundBody.match(/^#\s+(.+)$/m)
+			const title = fmTitle || (h1Match ? h1Match[1].trim() : fbId)
+			return reply({ title, body: foundBody })
+		}
+
+		// ── Feedback body write (architecture FB-as-unit, lifecycle-bound) ──
+		case "haiku_feedback_write": {
+			const intentArg = args.intent as string
+			const stageArg = (args.stage as string) || ""
+			const fbId = args.feedback_id as string
+			const newBody = (args.body as string) ?? ""
+
+			if (!intentArg || !fbId) {
+				return reply(
+					{
+						error: "missing_args",
+						message: "intent and feedback_id are required.",
+					},
+					{ isError: true },
+				)
+			}
+			if (!newBody || newBody.trim().length === 0) {
+				return reply(
+					{
+						error: "empty_body",
+						message:
+							"body is required and must be substantive. Empty FB bodies cannot pass the assessor's spec-match check.",
+					},
+					{ isError: true },
+				)
+			}
+
+			const fbWriteBranchErr = enforceStageBranch(
+				intentArg,
+				stageArg || undefined,
+			)
+			if (fbWriteBranchErr) return fbWriteBranchErr
+
+			// Locate the FB file by id via the canonical resolver (numeric-
+			// prefix matching against the file's `NN-slug.md` name).
+			const found = findFeedbackFile(intentArg, stageArg, fbId)
+			if (!found) {
+				const dir = stageArg
+					? feedbackDir(intentArg, stageArg)
+					: feedbackDir(intentArg, "")
+				return reply(
+					{
+						error: "feedback_not_found",
+						intent: intentArg,
+						stage: stageArg || null,
+						feedback_id: fbId,
+						message: `No feedback file matching ${fbId} in ${dir}.`,
+					},
+					{ isError: true },
+				)
+			}
+			const foundPath = found.path
+			const foundFm = found.data
+
+			// Lifecycle enforcement: closed/rejected FBs are terminal and
+			// immutable. Pending and addressed (under-fix) accept body
+			// rewrites — the fixer hat populates the FB body with diagnosis.
+			const status = (foundFm.status as string) || "pending"
+			if (status === "closed" || status === "rejected") {
+				return reply(
+					{
+						error: "lifecycle_violation",
+						current_status: status,
+						message: `Cannot rewrite feedback '${fbId}' — status is '${status}'. Per the forward-only lifecycle rule, closed and rejected feedback are terminal and immutable. To raise a related concern, file a NEW feedback via haiku_feedback.`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Persist body, preserve FM unchanged.
+			writeFileSync(
+				foundPath,
+				matter.stringify(`${newBody.trimEnd()}\n`, foundFm),
+			)
+			sealIntentState(intentArg)
+			emitTelemetry("haiku.feedback.body_rewritten", {
+				intent: intentArg,
+				stage: stageArg || "",
+				feedback_id: fbId,
+			})
+			return reply({
+				ok: true,
+				feedback_id: fbId,
+				stage: stageArg || null,
+				intent: intentArg,
+				message: `Rewrote body of feedback '${fbId}' (status preserved as '${status}').`,
+			})
+		}
+
+		// ── Feedback advance/reject hat (FB-as-unit model, architecture §5) ──
+		// These mirror haiku_unit_advance_hat / haiku_unit_reject_hat but for
+		// FB files. Each fixer hat populates the FB body via haiku_feedback_write
+		// and then calls advance to progress through the stage's fix_hats:
+		// sequence. When the last hat advances, the FSM auto-closes the FB.
+		case "haiku_feedback_advance_hat": {
+			const intentArg = args.intent as string
+			const stageArg = (args.stage as string) || ""
+			const fbId = args.feedback_id as string
+			if (!intentArg || !fbId) {
+				return reply(
+					{
+						error: "missing_args",
+						message: "intent and feedback_id are required.",
+					},
+					{ isError: true },
+				)
+			}
+
+			const fbBranchErr = enforceStageBranch(intentArg, stageArg || undefined)
+			if (fbBranchErr) return fbBranchErr
+
+			// Locate FB file by id via the canonical resolver.
+			const advFound = findFeedbackFile(intentArg, stageArg, fbId)
+			if (!advFound) {
+				const fbAdvDir = stageArg
+					? feedbackDir(intentArg, stageArg)
+					: feedbackDir(intentArg, "")
+				return reply(
+					{
+						error: "feedback_not_found",
+						intent: intentArg,
+						stage: stageArg || null,
+						feedback_id: fbId,
+						message: `No feedback file matching ${fbId} in ${fbAdvDir}.`,
+					},
+					{ isError: true },
+				)
+			}
+			const advPath = advFound.path
+			const advFm = advFound.data
+			const advBody = advFound.body
+
+			// Lifecycle: don't advance terminal FBs.
+			const advStatus = (advFm.status as string) || "pending"
+			if (advStatus === "closed" || advStatus === "rejected") {
+				return reply(
+					{
+						error: "lifecycle_violation",
+						current_status: advStatus,
+						message: `Cannot advance hat on FB '${fbId}' — already ${advStatus} (terminal).`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Resolve fix_hats sequence. Stage-scoped: from STAGE.md.
+			// Intent-scoped: from the studio's `fix-hats/` directory (mirrors
+			// how the orchestrator's intent_completion_fix dispatch resolves
+			// the chain — Object.keys(readStudioFixHatPaths(studio)) order).
+			let fixHats: string[] = []
+			const intentFmPath = join(intentDir(intentArg), "intent.md")
+			let studioName = "software"
+			if (existsSync(intentFmPath)) {
+				const { data: intentFm } = parseFrontmatter(
+					readFileSync(intentFmPath, "utf8"),
+				)
+				studioName = (intentFm.studio as string) || "software"
+			}
+			if (stageArg) {
+				const sd = readStageDef(studioName, stageArg)
+				if (sd?.data?.fix_hats && Array.isArray(sd.data.fix_hats)) {
+					fixHats = sd.data.fix_hats as string[]
+				}
+			} else {
+				// Intent-scope FB — use studio-level fix-hats.
+				const studioFixHatPaths = readStudioFixHatPaths(studioName)
+				fixHats = Object.keys(studioFixHatPaths)
+			}
+			if (fixHats.length === 0) {
+				return reply(
+					{
+						error: "no_fix_hats",
+						stage: stageArg || null,
+						scope: stageArg ? "stage" : "intent",
+						message: stageArg
+							? `Stage '${stageArg}' has no \`fix_hats:\` configured in STAGE.md. The fix-loop FB-as-unit model requires a fix_hats sequence.`
+							: `Studio '${studioName}' has no fix-hats in \`plugin/studios/${studioName}/fix-hats/\`. Intent-completion fix loops require at least one studio-level fix-hat.`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Determine the CALLING hat — the hat that just finished its work
+			// and is calling advance now. The `hat` field on disk represents
+			// the hat that LAST advanced (i.e. the prior caller's hat); the
+			// caller's hat is the one immediately after it in the fix_hats
+			// chain. On the very first call, the caller is fixHats[0].
+			//
+			// Earlier this handler indexed `isLast` against the stored hat
+			// (the prior finisher), which made 2-hat sequences fail to close
+			// on the assessor's call: stored=fixer (idx 0), curIdx=0,
+			// curIdx === fixHats.length-1 → false for length=2. The fix:
+			// index `isLast` against the CALLING hat's position.
+			const curHat = (advFm.hat as string) || ""
+			const curBolt = (advFm.bolt as number) || 1
+			const curIdx = curHat ? fixHats.indexOf(curHat) : -1
+			const callingIdx = curIdx + 1
+			const callingHat = fixHats[callingIdx]
+			if (!callingHat) {
+				// curIdx pointed at the last hat already — the FB should have
+				// closed on the prior advance. This is a defensive guard for
+				// a state that shouldn't be reachable under correct dispatch.
+				return reply(
+					{
+						error: "no_hat_to_advance",
+						message: `FB '${fbId}' is at hat '${curHat}', already the last hat in fix_hats. The FB should have closed on the prior advance call. State may be inconsistent.`,
+					},
+					{ isError: true },
+				)
+			}
+			const isLast = callingIdx === fixHats.length - 1
+
+			// Append iteration record for the just-completed (calling) hat.
+			const iterations = Array.isArray(advFm.iterations)
+				? (advFm.iterations as Array<Record<string, unknown>>).slice()
+				: []
+			iterations.push({
+				bolt: curBolt,
+				hat: callingHat,
+				completed_at: timestamp(),
+				result: isLast ? "closed" : "advanced",
+			})
+
+			let newStatus = advStatus
+			let closedBy: string | undefined
+			if (isLast) {
+				newStatus = "closed"
+				closedBy = `fix-loop:${fbId}:bolt-${curBolt}`
+			} else {
+				newStatus = "addressed"
+			}
+			// Always store the calling hat in the FM `hat` field so the next
+			// advance can correctly compute "the next caller is at storage+1".
+			const nextHat = callingHat
+
+			const newFm: Record<string, unknown> = {
+				...advFm,
+				hat: nextHat,
+				iterations,
+				status: newStatus,
+			}
+			if (closedBy) newFm.closed_by = closedBy
+			writeFileSync(advPath, matter.stringify(`${advBody.trimEnd()}\n`, newFm))
+			sealIntentState(intentArg)
+			emitTelemetry(
+				isLast ? "haiku.feedback.closed" : "haiku.feedback.hat_advanced",
+				{
+					intent: intentArg,
+					stage: stageArg || "",
+					feedback_id: fbId,
+					hat: nextHat,
+				},
+			)
+			const nextDispatchedHat = isLast ? null : fixHats[callingIdx + 1]
+			return reply({
+				ok: true,
+				feedback_id: fbId,
+				stage: stageArg || null,
+				calling_hat: callingHat,
+				next_dispatched_hat: nextDispatchedHat,
+				closed: isLast,
+				bolt: curBolt,
+				message: isLast
+					? `FB '${fbId}' closed by ${closedBy} after '${callingHat}' (last hat in fix_hats sequence ${callingIdx + 1}/${fixHats.length}).`
+					: `FB '${fbId}': '${callingHat}' (${callingIdx + 1}/${fixHats.length}) finished; next hat to dispatch is '${nextDispatchedHat}'.`,
+			})
+		}
+
+		case "haiku_feedback_reject_hat": {
+			const intentArg = args.intent as string
+			const stageArg = (args.stage as string) || ""
+			const fbId = args.feedback_id as string
+			const reason = (args.reason as string) || ""
+			if (!intentArg || !fbId) {
+				return reply(
+					{
+						error: "missing_args",
+						message: "intent and feedback_id are required.",
+					},
+					{ isError: true },
+				)
+			}
+
+			const rejBranchErr = enforceStageBranch(intentArg, stageArg || undefined)
+			if (rejBranchErr) return rejBranchErr
+
+			const rejFound = findFeedbackFile(intentArg, stageArg, fbId)
+			if (!rejFound) {
+				const fbRejDir = stageArg
+					? feedbackDir(intentArg, stageArg)
+					: feedbackDir(intentArg, "")
+				return reply(
+					{
+						error: "feedback_not_found",
+						feedback_id: fbId,
+						message: `No feedback file matching ${fbId} in ${fbRejDir}.`,
+					},
+					{ isError: true },
+				)
+			}
+			const rejPath = rejFound.path
+			const rejFm = rejFound.data
+			const rejBody = rejFound.body
+
+			const rejStatus = (rejFm.status as string) || "pending"
+			if (rejStatus === "closed" || rejStatus === "rejected") {
+				return reply(
+					{
+						error: "lifecycle_violation",
+						current_status: rejStatus,
+						message: `Cannot reject hat on FB '${fbId}' — already ${rejStatus} (terminal).`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Resolve fix_hats to find prior hat. Stage-scoped: from STAGE.md.
+			// Intent-scoped: from the studio's `fix-hats/` directory.
+			let fixHatsRej: string[] = []
+			const intentFmPath = join(intentDir(intentArg), "intent.md")
+			let studioNameRej = "software"
+			if (existsSync(intentFmPath)) {
+				const { data: intentFm } = parseFrontmatter(
+					readFileSync(intentFmPath, "utf8"),
+				)
+				studioNameRej = (intentFm.studio as string) || "software"
+			}
+			if (stageArg) {
+				const sd = readStageDef(studioNameRej, stageArg)
+				if (sd?.data?.fix_hats && Array.isArray(sd.data.fix_hats)) {
+					fixHatsRej = sd.data.fix_hats as string[]
+				}
+			} else {
+				const studioFixHatPaths = readStudioFixHatPaths(studioNameRej)
+				fixHatsRej = Object.keys(studioFixHatPaths)
+			}
+			if (fixHatsRej.length === 0) {
+				return reply(
+					{
+						error: "no_fix_hats",
+						stage: stageArg || null,
+						scope: stageArg ? "stage" : "intent",
+						message: stageArg
+							? `Stage '${stageArg}' has no \`fix_hats:\` configured.`
+							: `Studio '${studioNameRej}' has no fix-hats in \`plugin/studios/${studioNameRej}/fix-hats/\`.`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Mirror the corrected advance_hat semantic (storage `hat` field
+			// = the hat that LAST called advance/reject; the CALLING hat is
+			// at storage_idx + 1 in the fix_hats chain). The earlier
+			// implementation indexed against the storage hat, which under
+			// the corrected advance semantic would re-dispatch the WRONG
+			// hat (asking the calling hat to retry instead of sending work
+			// back to the prior hat to redo).
+			const curHatRej = (rejFm.hat as string) || ""
+			const curBoltRej = (rejFm.bolt as number) || 1
+			const curIdxRej = curHatRej ? fixHatsRej.indexOf(curHatRej) : -1
+			const callingIdxRej = curIdxRej + 1
+			const callingHatRej = fixHatsRej[callingIdxRej]
+			if (!callingHatRej) {
+				return reply(
+					{
+						error: "no_hat_to_reject",
+						message: `FB '${fbId}' has no hat to reject — already past the last hat in fix_hats (storage at '${curHatRej}').`,
+					},
+					{ isError: true },
+				)
+			}
+
+			// Compute the new storage so the next dispatch picks the prior
+			// hat (the one whose work the calling hat is rejecting). If the
+			// calling hat IS the first hat in the chain, no prior hat exists
+			// — bump bolt and let the same hat retry (storage stays empty).
+			const newStoredIdxRej = callingIdxRej - 2
+			const newStoredHatRej =
+				newStoredIdxRej >= 0 ? fixHatsRej[newStoredIdxRej] : ""
+			const nextDispatchedHatRej =
+				callingIdxRej > 0 ? fixHatsRej[callingIdxRej - 1] : callingHatRej
+
+			// Append rejection iteration record (the calling hat's work was
+			// rejected) and bump bolt.
+			const iterations = Array.isArray(rejFm.iterations)
+				? (rejFm.iterations as Array<Record<string, unknown>>).slice()
+				: []
+			iterations.push({
+				bolt: curBoltRej,
+				hat: callingHatRej,
+				completed_at: timestamp(),
+				result: "rejected",
+				reason: reason || "(no reason provided)",
+			})
+
+			const newFm: Record<string, unknown> = {
+				...rejFm,
+				hat: newStoredHatRej,
+				bolt: curBoltRej + 1,
+				iterations,
+			}
+			writeFileSync(rejPath, matter.stringify(`${rejBody.trimEnd()}\n`, newFm))
+			sealIntentState(intentArg)
+			emitTelemetry("haiku.feedback.hat_rejected", {
+				intent: intentArg,
+				stage: stageArg || "",
+				feedback_id: fbId,
+				hat: callingHatRej,
+				new_bolt: String(curBoltRej + 1),
+			})
+			return reply({
+				ok: true,
+				feedback_id: fbId,
+				rejecting_hat: callingHatRej,
+				next_dispatched_hat: nextDispatchedHatRej,
+				new_bolt: curBoltRej + 1,
+				reason,
+				message:
+					callingIdxRej > 0
+						? `FB '${fbId}' hat '${callingHatRej}' rejected — sending back to '${nextDispatchedHatRej}', bolt incremented to ${curBoltRej + 1}.`
+						: `FB '${fbId}' first hat '${callingHatRej}' rejected — no prior hat to send back to; same hat will retry, bolt incremented to ${curBoltRej + 1}.`,
+			})
 		}
 
 		case "haiku_version_info": {
@@ -7158,7 +9378,7 @@ export function handleStateTool(
 			if (hasPendingUpdate())
 				info.update_note =
 					"A new version has been downloaded and will activate on the next tool call."
-			return text(JSON.stringify(info, null, 2))
+			return reply(info)
 		}
 
 		default:

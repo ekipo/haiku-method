@@ -168,10 +168,45 @@ export const QuestionPinSchema = z
 	.describe("Per-image pin annotation on a question session")
 export type QuestionPin = z.infer<typeof QuestionPinSchema>
 
+/** One reviewer annotation pass over a specific question reference
+ *  image. Mirrors the direction-page screenshot annotation: a comment
+ *  + a screenshot of the captured surface (image + composited
+ *  strokes). The MCP tool unpacks the data URL into an MCP image
+ *  content block on the response so Claude sees the actual surface. */
+export const QuestionScreenshotAnnotationSchema = z
+	.object({
+		comment: z
+			.string()
+			.max(10_000)
+			.describe("Reviewer's note on this annotation pass"),
+		screenshot_data_url: z
+			.string()
+			.max(1_500_000)
+			.describe(
+				"`data:image/png;base64,...` URL of the captured surface + composited strokes (1.5 MB cap)",
+			),
+		image_index: z
+			.number()
+			.int()
+			.nonnegative()
+			.describe(
+				"Index into the question's image_urls[] this annotation was captured on",
+			),
+	})
+	.describe("One reviewer annotation pass over a question reference image")
+export type QuestionScreenshotAnnotation = z.infer<
+	typeof QuestionScreenshotAnnotationSchema
+>
+
 export const QuestionAnnotationsSchema = z
 	.object({
 		comments: z.array(InlineCommentSchema).optional(),
 		pins: z.array(QuestionPinSchema).optional(),
+		/** Per-pass screenshot annotations from ArtifactAnnotator. */
+		screenshots: z
+			.array(QuestionScreenshotAnnotationSchema)
+			.max(20)
+			.optional(),
 	})
 	.describe("Annotations attached to a question answer")
 export type QuestionAnnotations = z.infer<typeof QuestionAnnotationsSchema>

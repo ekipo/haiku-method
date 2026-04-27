@@ -200,6 +200,14 @@ export const DirectionSelectionSchema = z
 						}),
 					)
 					.optional(),
+				screenshots: z
+					.array(
+						z.object({
+							comment: z.string(),
+							screenshot_data_url: z.string(),
+						}),
+					)
+					.optional(),
 			})
 			.optional(),
 	})

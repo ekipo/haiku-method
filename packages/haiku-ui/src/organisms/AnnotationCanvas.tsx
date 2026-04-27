@@ -33,7 +33,15 @@ export function AnnotationCanvas({ imageUrl, onPinsChange }: Props) {
 	const canvasRef = useRef<HTMLCanvasElement>(null)
 	const wrapperRef = useRef<HTMLDivElement>(null)
 
-	const [tool, setTool] = useState<"pin" | "pen">("pin")
+	// `null` = no tool selected → canvas overlay is inert and the
+	// underlying mockup stays interactive. Picking a tool activates the
+	// overlay; clicking the same tool again deselects it. Mockups can be
+	// "slightly interactive" (clickable buttons in an HTML/SVG preview),
+	// so requiring an explicit tool engagement preserves that.
+	const [tool, setTool] = useState<"pin" | "pen" | null>(null)
+	const toggleTool = useCallback((next: "pin" | "pen") => {
+		setTool((prev) => (prev === next ? null : next))
+	}, [])
 	const [pins, setPins] = useState<AnnotationPin[]>([])
 	const [activePin, setActivePin] = useState<number | null>(null)
 	const [tooltipState, setTooltipState] = useState<{
@@ -309,14 +317,14 @@ export function AnnotationCanvas({ imageUrl, onPinsChange }: Props) {
 			<div className="flex items-center gap-2 mb-3 p-2 bg-white dark:bg-stone-900 rounded-lg border border-stone-200 dark:border-stone-700 shadow-sm">
 				<ToolButton
 					active={tool === "pin"}
-					onClick={() => setTool("pin")}
+					onClick={() => toggleTool("pin")}
 					title="Pin tool: click on the image to add a numbered annotation marker"
 					label="Pin"
 					icon={"\uD83D\uDCCC"}
 				/>
 				<ToolButton
 					active={tool === "pen"}
-					onClick={() => setTool("pen")}
+					onClick={() => toggleTool("pen")}
 					title="Pen tool: draw freehand on the image to highlight areas"
 					label="Pen"
 					icon={"\u270E"}
@@ -340,7 +348,11 @@ export function AnnotationCanvas({ imageUrl, onPinsChange }: Props) {
 				</button>
 				<div className="flex-1" />
 				<span className="text-xs text-stone-500 dark:text-stone-400">
-					{tool === "pin" ? "Click to add pin" : "Draw to annotate"}
+					{tool === "pin"
+						? "Click to add pin"
+						: tool === "pen"
+							? "Draw to annotate"
+							: "Pick a tool to annotate"}
 				</span>
 			</div>
 
@@ -351,7 +363,7 @@ export function AnnotationCanvas({ imageUrl, onPinsChange }: Props) {
 				role="group"
 				aria-label="Annotation canvas"
 				tabIndex={-1}
-				className="relative inline-block border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 cursor-crosshair"
+				className={`relative inline-block border border-stone-200 dark:border-stone-700 rounded-lg overflow-hidden bg-stone-100 dark:bg-stone-800 ${tool ? "cursor-crosshair" : ""}`}
 				onKeyDown={(e) => {
 					// Delegated arrow-key traversal over pin set sorted by (y, x).
 					// Clamps at endpoints; does not wrap.
@@ -376,7 +388,10 @@ export function AnnotationCanvas({ imageUrl, onPinsChange }: Props) {
 				<canvas
 					ref={canvasRef}
 					className="absolute top-0 left-0 w-full h-full"
-					style={{ pointerEvents: "auto" }}
+					// When no tool is engaged the overlay must let pointer events
+					// fall through to the underlying mockup (which may be
+					// interactive — clickable buttons in an HTML/SVG preview).
+					style={{ pointerEvents: tool ? "auto" : "none" }}
 					onMouseDown={handleMouseDown}
 					onMouseMove={handleMouseMove}
 					onMouseUp={handleMouseUp}

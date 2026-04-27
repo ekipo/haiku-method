@@ -237,13 +237,11 @@ function assertStructuralMarkers(
 	expect(rendered).toContain('id="feedback-live-polite"')
 	expect(rendered).toContain('id="feedback-live-assertive"')
 
-	// The review page is a full-bleed app (per canonical review UI mockup)
-	// and intentionally does NOT render the "Powered by" ShellLayout footer
-	// or a role="contentinfo" landmark. The non-review pages still do.
-	if (fxName !== "review") {
-		expect(rendered).toContain("Powered by")
-		expect(rendered).toContain('role="contentinfo"')
-	}
+	// All session pages (review, question, direction) are full-bleed apps
+	// per the canonical review-UI mockup — they intentionally do NOT
+	// render the legacy "Powered by" ShellLayout footer or a
+	// role="contentinfo" landmark. Question + direction were brought in
+	// line with review's chrome via SessionShell.
 
 	if (fxName === "review") {
 		const r = session as ReviewSessionPayload

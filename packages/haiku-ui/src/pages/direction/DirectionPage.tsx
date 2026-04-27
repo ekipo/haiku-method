@@ -27,17 +27,23 @@ import { useApiClient } from "../../api/context"
 import { Card, SectionHeading } from "../../atoms/Card"
 import { tryCloseTab } from "../../lib/tryCloseTab"
 import { SubmitSuccess } from "../../molecules/SubmitSuccess"
+import { ArtifactAnnotator } from "../../organisms/ArtifactAnnotator"
+
+/** A single user-submitted annotation pass over the chosen preview.
+ *  ArtifactAnnotator captures the rendered iframe via `getDisplayMedia`,
+ *  composites the reviewer's strokes on top, and hands us back a PNG
+ *  data URL. We collect these alongside the comment so the agent can
+ *  see "this is what the user was looking at when they wrote this
+ *  feedback" in addition to the freeform direction comment. */
+interface PreviewAnnotation {
+	comment: string
+	screenshot_data_url: string
+}
 
 interface Props {
 	session: { archetypes?: DesignArchetypeData[]; title?: string }
 	sessionId: string
 	wsRef?: React.RefObject<WebSocket | null>
-}
-
-interface PinInput {
-	x: number // percentage 0-100
-	y: number // percentage 0-100
-	text: string
 }
 
 type Mode = "select" | "regenerate"
@@ -63,11 +69,10 @@ export function DirectionPage({
 		() => new Set(),
 	)
 	const [comment, setComment] = useState("")
-	const [pins, setPins] = useState<PinInput[]>([])
-	// Pin overlay is opt-in — keeps the default render footprint small,
-	// which matters for test isolation (the FB-69 focus-trap suite is
-	// sensitive to extra mounted DOM in jsdom across the full vitest run).
-	const [showPinOverlay, setShowPinOverlay] = useState(false)
+	// Annotations submitted via the on-iframe ArtifactAnnotator.
+	// Each pass = one comment + one screenshot data URL. Submitting
+	// the form ships them all alongside the direction selection.
+	const [annotations, setAnnotations] = useState<PreviewAnnotation[]>([])
 	const [submitting, setSubmitting] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | null>(null)
 	const [done, setDone] = useState(false)
@@ -76,8 +81,20 @@ export function DirectionPage({
 
 	const selectArchetype = useCallback((name: string) => {
 		setSelectedArchetype(name)
-		setPins([]) // pins are scoped to the selected archetype
+		// Annotations are scoped to the chosen archetype — switching
+		// archetypes drops them rather than mis-attaching them.
+		setAnnotations([])
 	}, [])
+
+	const handleAnnotationSubmit = useCallback(
+		async (annotComment: string, screenshotDataUrl: string) => {
+			setAnnotations((prev) => [
+				...prev,
+				{ comment: annotComment, screenshot_data_url: screenshotDataUrl },
+			])
+		},
+		[],
+	)
 
 	const toggleKeep = useCallback((name: string) => {
 		setKeptArchetypes((prev) => {
@@ -127,13 +144,12 @@ export function DirectionPage({
 		setErrorMessage(null)
 		try {
 			if (mode === "select") {
-				const annotations =
-					pins.length > 0
+				const wireAnnotations =
+					annotations.length > 0
 						? {
-								pins: pins.map((p) => ({
-									x: p.x,
-									y: p.y,
-									text: p.text,
+								screenshots: annotations.map((a) => ({
+									comment: a.comment,
+									screenshot_data_url: a.screenshot_data_url,
 								})),
 							}
 						: undefined
@@ -141,7 +157,7 @@ export function DirectionPage({
 					mode: "select",
 					archetype: selectedArchetype,
 					...(comment ? { comments: comment } : {}),
-					...(annotations ? { annotations } : {}),
+					...(wireAnnotations ? { annotations: wireAnnotations } : {}),
 				})
 				announce("polite", "Direction selected")
 				setDoneMessage(`Direction selected: ${selectedArchetype}`)
@@ -152,7 +168,7 @@ export function DirectionPage({
 						mode: "select",
 						archetype: selectedArchetype,
 						comments: comment,
-						annotations,
+						...(wireAnnotations ? { annotations: wireAnnotations } : {}),
 					},
 				})
 			} else {
@@ -238,44 +254,70 @@ export function DirectionPage({
 
 			{mode === "select" && selected && (
 				<Card>
-					<SectionHeading>Annotate the {selected.name} preview</SectionHeading>
-					{showPinOverlay ? (
-						<>
-							<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
-								Click on the surface to drop pins relative to the preview
-								above. Pins ride along with the selection so the agent gets
-								pointed feedback.
+					<SectionHeading>{selected.name} preview</SectionHeading>
+					<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
+						The preview is interactive by default. Click the pencil FAB
+						(bottom-right) to enter annotation mode, draw on the surface,
+						and add a comment. Each annotation pass is screenshotted via
+						the browser's screen-share permission so the agent sees what
+						you saw — same pattern as the review UI.
+					</p>
+					<ArtifactAnnotator
+						artifactName={selected.name}
+						onSubmit={handleAnnotationSubmit}
+					>
+						<iframe
+							srcDoc={selected.preview_html}
+							sandbox="allow-scripts allow-same-origin"
+							title={`Preview: ${selected.name}`}
+							aria-label={`Preview: ${selected.name}`}
+							className="w-full h-[60vh] border-0 bg-white"
+						/>
+					</ArtifactAnnotator>
+					{annotations.length > 0 && (
+						<div className="mt-4 space-y-2">
+							<p className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-300">
+								Captured annotations ({annotations.length})
 							</p>
-							<PinDropOverlay
-								archetype={selected}
-								pins={pins}
-								onPinsChange={setPins}
-								disabled={submitting}
-							/>
-							<button
-								type="button"
-								onClick={() => setShowPinOverlay(false)}
-								className={`mt-3 text-xs text-stone-600 dark:text-stone-300 underline underline-offset-2 ${focusRingClass}`}
-							>
-								Hide annotation surface
-							</button>
-						</>
-					) : (
-						<>
-							<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
-								Want to leave pinned feedback on a specific spot? Open the
-								annotation surface.
+							<ul className="space-y-2">
+								{annotations.map((a, i) => (
+									<li
+										key={`annot-${i}-${a.comment.slice(0, 16)}`}
+										className="flex items-start gap-3 p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+									>
+										<img
+											src={a.screenshot_data_url}
+											alt={`Annotation ${i + 1} thumbnail`}
+											className="shrink-0 w-24 h-16 object-cover rounded border border-stone-200 dark:border-stone-700"
+										/>
+										<div className="flex-1 min-w-0">
+											<p className="text-xs text-stone-500 dark:text-stone-400 mb-1">
+												Annotation {i + 1}
+											</p>
+											<p className="text-sm text-stone-800 dark:text-stone-100 break-words">
+												{a.comment}
+											</p>
+										</div>
+										<button
+											type="button"
+											onClick={() =>
+												setAnnotations((prev) =>
+													prev.filter((_, idx) => idx !== i),
+												)
+											}
+											aria-label={`Remove annotation ${i + 1}`}
+											className={`shrink-0 px-2 py-1 text-xs font-semibold rounded-md border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-300 transition-colors ${focusRingClass}`}
+										>
+											Remove
+										</button>
+									</li>
+								))}
+							</ul>
+							<p className="text-xs text-stone-500 dark:text-stone-400">
+								These ship with the direction selection so the agent sees
+								exactly what you were looking at when you commented.
 							</p>
-							<button
-								type="button"
-								onClick={() => setShowPinOverlay(true)}
-								disabled={submitting}
-								className={`px-4 py-2 text-sm border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors ${focusRingClass} ${touchTargetClass}`}
-							>
-								Add visual annotations
-								{pins.length > 0 ? ` (${pins.length})` : ""}
-							</button>
-						</>
+						</div>
 					)}
 				</Card>
 			)}
@@ -540,156 +582,6 @@ function ArchetypeRadiogroup({
 				})}
 			</div>
 		</fieldset>
-	)
-}
-
-// ── Pin-drop overlay (visual annotation on the iframe preview) ─────────────
-
-interface PinDropOverlayProps {
-	archetype: DesignArchetypeData
-	pins: PinInput[]
-	onPinsChange: (pins: PinInput[]) => void
-	disabled: boolean
-}
-
-function PinDropOverlay({
-	archetype,
-	pins,
-	onPinsChange,
-	disabled,
-}: PinDropOverlayProps): React.ReactElement {
-	const wrapperRef = useRef<HTMLDivElement | null>(null)
-	const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
-		null,
-	)
-	const [pendingText, setPendingText] = useState("")
-
-	function handleClick(e: React.MouseEvent<HTMLDivElement>) {
-		if (disabled) return
-		const wrapper = wrapperRef.current
-		if (!wrapper) return
-		const rect = wrapper.getBoundingClientRect()
-		const x = ((e.clientX - rect.left) / rect.width) * 100
-		const y = ((e.clientY - rect.top) / rect.height) * 100
-		setPendingPin({ x, y })
-		setPendingText("")
-	}
-
-	function commitPin() {
-		if (!pendingPin) return
-		const text = pendingText.trim()
-		if (text.length === 0) {
-			setPendingPin(null)
-			return
-		}
-		onPinsChange([...pins, { x: pendingPin.x, y: pendingPin.y, text }])
-		setPendingPin(null)
-		setPendingText("")
-	}
-
-	function cancelPendingPin() {
-		setPendingPin(null)
-		setPendingText("")
-	}
-
-	function removePin(idx: number) {
-		onPinsChange(pins.filter((_, i) => i !== idx))
-	}
-
-	return (
-		<>
-			{/*
-			 * The pin surface mirrors the `View full size` card above for
-			 * spatial reference, but renders the archetype as a labelled
-			 * placeholder rather than a second sandboxed iframe — duplicate
-			 * srcDoc iframes leak DOM resources across vitest+jsdom test
-			 * isolations and made the FB-69 focus-trap suite contaminated.
-			 * Users see the live preview in the radio card above; this
-			 * surface exists only to host pins.
-			 */}
-			<div
-				ref={wrapperRef}
-				role="img"
-				aria-label={`Pin surface for ${archetype.name}`}
-				className="relative h-72 rounded-lg overflow-hidden border-2 border-dashed border-stone-300 dark:border-stone-600 bg-stone-50 dark:bg-stone-800 cursor-crosshair flex items-center justify-center"
-				onClick={handleClick}
-			>
-				<div className="pointer-events-none text-center px-4">
-					<p className="text-sm font-medium text-stone-700 dark:text-stone-200">
-						{archetype.name}
-					</p>
-					<p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-						Click to drop pins relative to the preview above.
-					</p>
-				</div>
-				{pins.map((pin, i) => (
-					<button
-						key={`${pin.x}-${pin.y}-${i}`}
-						type="button"
-						aria-label={`Pin ${i + 1}: ${pin.text}`}
-						title={pin.text}
-						onClick={(e) => {
-							e.stopPropagation()
-							removePin(i)
-						}}
-						style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-						className={`absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-teal-700 text-white text-xs font-bold flex items-center justify-center shadow-md hover:bg-red-600 ${focusRingClass}`}
-					>
-						{i + 1}
-					</button>
-				))}
-				{pendingPin && (
-					<div
-						style={{ left: `${pendingPin.x}%`, top: `${pendingPin.y}%` }}
-						className="absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center shadow-md ring-2 ring-amber-300 animate-pulse"
-					>
-						?
-					</div>
-				)}
-			</div>
-			{pendingPin && (
-				<div className="mt-3 p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800">
-					<label
-						htmlFor="pending-pin-text"
-						className="block text-sm font-medium text-stone-900 dark:text-stone-100 mb-2"
-					>
-						What about this spot?
-					</label>
-					<textarea
-						id="pending-pin-text"
-						className={`w-full p-2 border border-stone-300 dark:border-stone-600 rounded-md bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 resize-y text-sm ${focusRingClass}`}
-						rows={2}
-						value={pendingText}
-						onChange={(e) => setPendingText(e.target.value)}
-						placeholder="Too cramped here, swap the order, etc."
-						autoFocus
-					/>
-					<div className="mt-2 flex gap-2">
-						<button
-							type="button"
-							onClick={commitPin}
-							disabled={pendingText.trim().length === 0}
-							className={`px-3 py-1 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded ${focusRingClass} disabled:bg-stone-300 disabled:text-stone-500 disabled:cursor-not-allowed`}
-						>
-							Add pin
-						</button>
-						<button
-							type="button"
-							onClick={cancelPendingPin}
-							className={`px-3 py-1 text-sm border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 rounded hover:bg-stone-100 dark:hover:bg-stone-700 ${focusRingClass}`}
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
-			)}
-			{pins.length > 0 && (
-				<p className="mt-2 text-xs text-stone-600 dark:text-stone-300">
-					{pins.length} pin{pins.length === 1 ? "" : "s"} — click a pin to
-					remove it.
-				</p>
-			)}
-		</>
 	)
 }
 

@@ -6,18 +6,14 @@
 /**
  * QuestionPage — canonical implementation for /question/:sessionId.
  *
- * Structure per unit-14 spec:
- *   - Optional context block (markdown).
- *   - Image carousel when multiple images; single <img> otherwise.
- *   - Response form discriminated on question shape:
- *       options.length > 0  -> <fieldset><legend><input type="radio" /></fieldset>
- *       options.length === 0 -> <textarea> with explicit htmlFor/id label association.
- *   - On submit success announces "Answer submitted" via the global polite live region.
- *
- * Design references:
- *   - aria-landmark-spec.md §1 (landmarks already owned by <ShellLayout>).
- *   - aria-live-sequencing-spec.md §2 (useAnnounce wraps #feedback-live-polite).
- *   - focus-ring-spec.html §1 (focusRingClass on every interactive element).
+ * Annotations follow the same pattern as the review page and the
+ * direction page: each reference image is wrapped in <ArtifactAnnotator>
+ * so the live image stays interactive by default; the pencil FAB
+ * toggles annotation mode; on submit the browser screen-captures the
+ * rendered surface (via getDisplayMedia) + composites the reviewer's
+ * strokes. The captured screenshots ride along with the answer payload
+ * and the MCP tool unpacks them into image content blocks so Claude
+ * sees what the reviewer was looking at.
  */
 
 import { MarkdownViewer } from "@haiku/shared"
@@ -25,7 +21,7 @@ import {
 	paths,
 	type QuestionAnnotations,
 	type QuestionDef,
-	type QuestionPin,
+	type QuestionScreenshotAnnotation,
 	type QuestionSessionPayload,
 } from "haiku-api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -34,6 +30,7 @@ import { useApiClient } from "../../api/context"
 import { Card, SectionHeading } from "../../atoms/Card"
 import { tryCloseTab } from "../../lib/tryCloseTab"
 import { SubmitSuccess } from "../../molecules/SubmitSuccess"
+import { ArtifactAnnotator } from "../../organisms/ArtifactAnnotator"
 
 interface Props {
 	session: QuestionSessionPayload
@@ -70,7 +67,28 @@ export function QuestionPage({
 			freeText: "",
 		})),
 	)
-	const [pins, setPins] = useState<QuestionPin[]>([])
+	// Each annotation pass = one comment + one captured screenshot,
+	// tagged with which reference image (image_index) it came from.
+	const [annotations, setAnnotations] = useState<
+		QuestionScreenshotAnnotation[]
+	>([])
+	const handleAnnotationSubmit = useCallback(
+		(imageIndex: number) =>
+			async (comment: string, screenshotDataUrl: string) => {
+				setAnnotations((prev) => [
+					...prev,
+					{
+						comment,
+						screenshot_data_url: screenshotDataUrl,
+						image_index: imageIndex,
+					},
+				])
+			},
+		[],
+	)
+	const removeAnnotation = useCallback((index: number) => {
+		setAnnotations((prev) => prev.filter((_, i) => i !== index))
+	}, [])
 	const [submitting, setSubmitting] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | null>(null)
 	const [done, setDone] = useState(false)
@@ -125,13 +143,13 @@ export function QuestionPage({
 			}
 		})
 
-		const annotations: QuestionAnnotations | undefined =
-			pins.length > 0 ? { pins } : undefined
+		const wireAnnotations: QuestionAnnotations | undefined =
+			annotations.length > 0 ? { screenshots: annotations } : undefined
 
 		try {
 			await client.submitAnswer(sessionId, {
 				answers: requestAnswers,
-				...(annotations ? { annotations } : {}),
+				...(wireAnnotations ? { annotations: wireAnnotations } : {}),
 			})
 			announce("polite", "Answer submitted")
 			setDone(true)
@@ -139,7 +157,7 @@ export function QuestionPage({
 				url: paths.questionAnswer(sessionId),
 				body: {
 					answers: requestAnswers,
-					...(annotations ? { annotations } : {}),
+					...(wireAnnotations ? { annotations: wireAnnotations } : {}),
 				},
 			})
 		} catch (err) {
@@ -167,26 +185,69 @@ export function QuestionPage({
 			{imageUrls.length >= 2 ? (
 				<QuestionCarousel
 					images={imageUrls}
-					pins={pins}
-					onPinsChange={setPins}
-					disabled={submitting}
+					onAnnotationSubmit={handleAnnotationSubmit}
 				/>
 			) : imageUrls.length === 1 ? (
 				<Card>
 					<SectionHeading>Reference image</SectionHeading>
 					<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
-						Click the image to drop a pin and add a comment for pointed
-						feedback.
+						The image is interactive by default. Click the pencil FAB
+						(bottom-right) to annotate — draw on the surface, add a
+						comment, submit. Each pass screenshots the rendered image so
+						Claude sees the captured spot.
 					</p>
-					<ImagePinSurface
-						url={imageUrls[0]}
-						imageIndex={0}
-						pins={pins}
-						onPinsChange={setPins}
-						disabled={submitting}
-					/>
+					<ArtifactAnnotator
+						artifactName="reference image"
+						onSubmit={handleAnnotationSubmit(0)}
+					>
+						<img
+							src={imageUrls[0]}
+							alt="Question reference"
+							className="w-full h-auto bg-white"
+						/>
+					</ArtifactAnnotator>
 				</Card>
 			) : null}
+
+			{annotations.length > 0 && (
+				<Card>
+					<SectionHeading>Captured annotations ({annotations.length})</SectionHeading>
+					<ul className="space-y-2">
+						{annotations.map((a, i) => (
+							<li
+								key={`q-annot-${i}-${a.comment.slice(0, 16)}`}
+								className="flex items-start gap-3 p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+							>
+								<img
+									src={a.screenshot_data_url}
+									alt={`Annotation ${i + 1} thumbnail`}
+									className="shrink-0 w-24 h-16 object-cover rounded border border-stone-200 dark:border-stone-700"
+								/>
+								<div className="flex-1 min-w-0">
+									<p className="text-xs text-stone-500 dark:text-stone-400 mb-1">
+										Annotation {i + 1} · image {a.image_index + 1}
+									</p>
+									<p className="text-sm text-stone-800 dark:text-stone-100 break-words">
+										{a.comment}
+									</p>
+								</div>
+								<button
+									type="button"
+									onClick={() => removeAnnotation(i)}
+									aria-label={`Remove annotation ${i + 1}`}
+									className={`shrink-0 px-2 py-1 text-xs font-semibold rounded-md border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-300 transition-colors ${focusRingClass}`}
+								>
+									Remove
+								</button>
+							</li>
+						))}
+					</ul>
+					<p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+						These ship with your answer so the agent sees exactly what you
+						were looking at when you commented.
+					</p>
+				</Card>
+			)}
 
 			<form onSubmit={handleSubmit} noValidate>
 				{questions.map((q, qIdx) => {
@@ -239,16 +300,14 @@ export function QuestionPage({
 
 interface QuestionCarouselProps {
 	images: string[]
-	pins: QuestionPin[]
-	onPinsChange: (pins: QuestionPin[]) => void
-	disabled: boolean
+	onAnnotationSubmit: (
+		imageIndex: number,
+	) => (comment: string, screenshotDataUrl: string) => Promise<void>
 }
 
 function QuestionCarousel({
 	images,
-	pins,
-	onPinsChange,
-	disabled,
+	onAnnotationSubmit,
 }: QuestionCarouselProps): React.ReactElement {
 	const [active, setActive] = useState(0)
 	const regionRef = useRef<HTMLDivElement | null>(null)
@@ -291,8 +350,9 @@ function QuestionCarousel({
 		<Card>
 			<SectionHeading>Reference images</SectionHeading>
 			<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
-				Click any image to drop a pin and add a comment for pointed
-				feedback.
+				Each image stays interactive. Click the pencil FAB (bottom-right) to
+				annotate — draw on the surface, add a comment, submit. Captured
+				annotations show in a list below.
 			</p>
 			<CarouselRegion
 				regionRef={regionRef}
@@ -301,9 +361,7 @@ function QuestionCarousel({
 				active={active}
 				onPrev={() => go(-1)}
 				onNext={() => go(1)}
-				pins={pins}
-				onPinsChange={onPinsChange}
-				disabled={disabled}
+				onAnnotationSubmit={onAnnotationSubmit}
 			/>
 		</Card>
 	)
@@ -318,9 +376,9 @@ interface CarouselRegionProps {
 	active: number
 	onPrev: () => void
 	onNext: () => void
-	pins: QuestionPin[]
-	onPinsChange: (pins: QuestionPin[]) => void
-	disabled: boolean
+	onAnnotationSubmit: (
+		imageIndex: number,
+	) => (comment: string, screenshotDataUrl: string) => Promise<void>
 }
 
 function CarouselRegion({
@@ -330,9 +388,7 @@ function CarouselRegion({
 	active,
 	onPrev,
 	onNext,
-	pins,
-	onPinsChange,
-	disabled,
+	onAnnotationSubmit,
 }: CarouselRegionProps): React.ReactElement {
 	// Per FB-73, Prev/Next controls live INSIDE the role="region" container
 	// so a keyboard user who reaches the region also reaches the controls,
@@ -355,9 +411,7 @@ function CarouselRegion({
 						index={i}
 						total={images.length}
 						isActive={i === active}
-						pins={pins}
-						onPinsChange={onPinsChange}
-						disabled={disabled}
+						onSubmit={onAnnotationSubmit(i)}
 					/>
 				))}
 			</div>
@@ -392,9 +446,7 @@ interface CarouselSlideProps {
 	index: number
 	total: number
 	isActive: boolean
-	pins: QuestionPin[]
-	onPinsChange: (pins: QuestionPin[]) => void
-	disabled: boolean
+	onSubmit: (comment: string, screenshotDataUrl: string) => Promise<void>
 }
 
 function CarouselSlide({
@@ -402,9 +454,7 @@ function CarouselSlide({
 	index,
 	total,
 	isActive,
-	pins,
-	onPinsChange,
-	disabled,
+	onSubmit,
 }: CarouselSlideProps): React.ReactElement {
 	// Inactive slides are hidden via display:none (`.hidden`) AND
 	// `aria-hidden="true"` — some SRs buffer display:none content differently,
@@ -417,168 +467,17 @@ function CarouselSlide({
 			aria-hidden={isActive ? undefined : "true"}
 			className={isActive ? "block" : "hidden"}
 		>
-			<ImagePinSurface
-				url={url}
-				imageIndex={index}
-				pins={pins}
-				onPinsChange={onPinsChange}
-				disabled={disabled}
-				altText={`Reference ${index + 1} of ${total}`}
-			/>
-		</div>
-	)
-}
-
-// ── Image pin surface — visual annotation overlay on a single image ────────
-
-interface ImagePinSurfaceProps {
-	url: string
-	imageIndex: number
-	pins: QuestionPin[]
-	onPinsChange: (pins: QuestionPin[]) => void
-	disabled: boolean
-	altText?: string
-}
-
-function ImagePinSurface({
-	url,
-	imageIndex,
-	pins,
-	onPinsChange,
-	disabled,
-	altText,
-}: ImagePinSurfaceProps): React.ReactElement {
-	const wrapperRef = useRef<HTMLDivElement | null>(null)
-	const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
-		null,
-	)
-	const [pendingText, setPendingText] = useState("")
-
-	function handleClick(e: React.MouseEvent<HTMLDivElement>) {
-		if (disabled) return
-		const wrapper = wrapperRef.current
-		if (!wrapper) return
-		const rect = wrapper.getBoundingClientRect()
-		const x = ((e.clientX - rect.left) / rect.width) * 100
-		const y = ((e.clientY - rect.top) / rect.height) * 100
-		setPendingPin({ x, y })
-		setPendingText("")
-	}
-
-	function commitPin() {
-		if (!pendingPin) return
-		const text = pendingText.trim()
-		if (text.length === 0) {
-			setPendingPin(null)
-			return
-		}
-		onPinsChange([
-			...pins,
-			{
-				x: pendingPin.x,
-				y: pendingPin.y,
-				text,
-				image_index: imageIndex,
-			},
-		])
-		setPendingPin(null)
-		setPendingText("")
-	}
-
-	function cancelPendingPin() {
-		setPendingPin(null)
-		setPendingText("")
-	}
-
-	function removePinAt(globalIdx: number) {
-		onPinsChange(pins.filter((_, i) => i !== globalIdx))
-	}
-
-	const pinsForThisImage = pins
-		.map((pin, i) => ({ pin, i }))
-		.filter(({ pin }) => pin.image_index === imageIndex)
-
-	return (
-		<>
-			<div
-				ref={wrapperRef}
-				className="relative rounded-lg overflow-hidden border border-stone-200 dark:border-stone-700"
-				onClick={handleClick}
+			<ArtifactAnnotator
+				artifactName={`reference image ${index + 1}`}
+				onSubmit={onSubmit}
 			>
 				<img
 					src={url}
-					alt={altText ?? "Question reference"}
-					className="w-full block pointer-events-none"
+					alt={`Reference ${index + 1} of ${total}`}
+					className="w-full h-auto bg-white"
 				/>
-				{pinsForThisImage.map(({ pin, i }, displayIdx) => (
-					<button
-						key={`${pin.x}-${pin.y}-${i}`}
-						type="button"
-						aria-label={`Pin ${displayIdx + 1}: ${pin.text}`}
-						title={pin.text}
-						onClick={(e) => {
-							e.stopPropagation()
-							removePinAt(i)
-						}}
-						style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-						className={`absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-teal-700 text-white text-xs font-bold flex items-center justify-center shadow-md hover:bg-red-600 ${focusRingClass}`}
-					>
-						{displayIdx + 1}
-					</button>
-				))}
-				{pendingPin && (
-					<div
-						style={{ left: `${pendingPin.x}%`, top: `${pendingPin.y}%` }}
-						className="absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center shadow-md ring-2 ring-amber-300 animate-pulse"
-					>
-						?
-					</div>
-				)}
-			</div>
-			{pendingPin && (
-				<div className="mt-3 p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800">
-					<label
-						htmlFor={`pending-pin-${imageIndex}`}
-						className="block text-sm font-medium text-stone-900 dark:text-stone-100 mb-2"
-					>
-						What about this spot?
-					</label>
-					<textarea
-						id={`pending-pin-${imageIndex}`}
-						className={`w-full p-2 border border-stone-300 dark:border-stone-600 rounded-md bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 resize-y text-sm ${focusRingClass}`}
-						rows={2}
-						value={pendingText}
-						onChange={(e) => setPendingText(e.target.value)}
-						placeholder="Describe what catches your eye here..."
-						autoFocus
-					/>
-					<div className="mt-2 flex gap-2">
-						<button
-							type="button"
-							onClick={commitPin}
-							disabled={pendingText.trim().length === 0}
-							className={`px-3 py-1 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded ${focusRingClass} disabled:bg-stone-300 disabled:text-stone-500 disabled:cursor-not-allowed`}
-						>
-							Add pin
-						</button>
-						<button
-							type="button"
-							onClick={cancelPendingPin}
-							className={`px-3 py-1 text-sm border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 rounded hover:bg-stone-100 dark:hover:bg-stone-700 ${focusRingClass}`}
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
-			)}
-			{pinsForThisImage.length > 0 && (
-				<p className="mt-2 text-xs text-stone-600 dark:text-stone-300">
-					{pinsForThisImage.length} pin
-					{pinsForThisImage.length === 1 ? "" : "s"} on this image — click a
-					pin to remove it.
-				</p>
-			)}
-		</>
+			</ArtifactAnnotator>
+		</div>
 	)
 }
 

@@ -18,14 +18,38 @@
 import { z } from "zod"
 import { PinSchema } from "./common.js"
 
-/** Annotation bundle attached to a direction selection — pin-style
- *  visual feedback on the chosen archetype's preview. Mirrors the
- *  review-side `ReviewAnnotations` shape minus the screenshot field
- *  (preview iframes can't be canvas-captured client-side without a
- *  third-party html2canvas dep). */
+/** Annotation pass captured against the chosen archetype's preview.
+ *  Mirrors ArtifactAnnotator's per-pass output — a comment plus a
+ *  screenshot of what the reviewer was drawing on. The MCP tool
+ *  unpacks the data URL into an MCP `image` content block so Claude
+ *  sees the actual rendered surface, not just an opaque blob. */
+export const DirectionScreenshotAnnotationSchema = z
+	.object({
+		comment: z
+			.string()
+			.max(10_000)
+			.describe("Reviewer's note on this annotation pass"),
+		screenshot_data_url: z
+			.string()
+			.max(1_500_000)
+			.describe(
+				"`data:image/png;base64,...` URL of the captured surface + composited strokes (1.5 MB cap)",
+			),
+	})
+	.describe("One reviewer annotation pass over the chosen preview")
+export type DirectionScreenshotAnnotation = z.infer<
+	typeof DirectionScreenshotAnnotationSchema
+>
+
+/** Annotation bundle attached to a direction selection. */
 export const DirectionAnnotationsSchema = z
 	.object({
 		pins: z.array(PinSchema).optional(),
+		/** Per-pass screenshot annotations from ArtifactAnnotator. */
+		screenshots: z
+			.array(DirectionScreenshotAnnotationSchema)
+			.max(20)
+			.optional(),
 	})
 	.describe("Annotations attached to a design-direction selection")
 export type DirectionAnnotations = z.infer<typeof DirectionAnnotationsSchema>

@@ -209,6 +209,11 @@ export interface QuestionAnswer {
 export interface QuestionAnnotations {
 	comments?: Array<{ selectedText: string; comment: string; paragraph: number }>
 	pins?: Array<{ x: number; y: number; text: string; image_index: number }>
+	screenshots?: Array<{
+		comment: string
+		screenshot_data_url: string
+		image_index: number
+	}>
 }
 
 export interface QuestionSession {
@@ -241,6 +246,10 @@ export type DirectionSelection =
 			comments?: string
 			annotations?: {
 				pins?: Array<{ x: number; y: number; text: string }>
+				screenshots?: Array<{
+					comment: string
+					screenshot_data_url: string
+				}>
 			}
 	  }
 	| {

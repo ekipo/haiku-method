@@ -564,6 +564,21 @@ export async function handleToolCall(
 			updatedQuestionSession.status === "answered" &&
 			updatedQuestionSession.answers
 		) {
+			// Build the structured-summary block (without screenshots —
+			// data URLs would balloon the JSON). Screenshots become
+			// dedicated MCP image content blocks below so Claude sees
+			// the actual surface, not an opaque data URL.
+			const annotationsForJson: Record<string, unknown> = {}
+			const ann = updatedQuestionSession.annotations
+			if (ann?.comments?.length) {
+				annotationsForJson.comments = ann.comments
+			}
+			if (ann?.pins?.length) {
+				annotationsForJson.pins = ann.pins
+			}
+			if (ann?.screenshots?.length) {
+				annotationsForJson.screenshot_count = ann.screenshots.length
+			}
 			const questionResult: Record<string, unknown> = {
 				status: "answered",
 				url: questionUrl,
@@ -572,17 +587,51 @@ export async function handleToolCall(
 			if (updatedQuestionSession.feedback) {
 				questionResult.feedback = updatedQuestionSession.feedback
 			}
-			if (updatedQuestionSession.annotations?.comments?.length) {
-				questionResult.annotations = updatedQuestionSession.annotations
+			if (Object.keys(annotationsForJson).length > 0) {
+				questionResult.annotations = annotationsForJson
 			}
-			return {
-				content: [
-					{
+
+			type ContentBlock =
+				| { type: "text"; text: string }
+				| { type: "image"; data: string; mimeType: string }
+			const content: ContentBlock[] = [
+				{
+					type: "text" as const,
+					text: JSON.stringify(questionResult, null, 2),
+				},
+			]
+
+			const screenshots = ann?.screenshots ?? []
+			if (screenshots.length > 0) {
+				content.push({
+					type: "text" as const,
+					text: `\n${screenshots.length} screenshot annotation${screenshots.length === 1 ? "" : "s"} attached below — each pair is the reviewer's note + the captured surface they were drawing on.`,
+				})
+				for (let i = 0; i < screenshots.length; i++) {
+					const s = screenshots[i]
+					content.push({
 						type: "text" as const,
-						text: JSON.stringify(questionResult, null, 2),
-					},
-				],
+						text: `\nAnnotation ${i + 1} (image ${s.image_index + 1}): ${s.comment}`,
+					})
+					const match = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(
+						s.screenshot_data_url,
+					)
+					if (match) {
+						content.push({
+							type: "image" as const,
+							mimeType: match[1],
+							data: match[2],
+						})
+					} else {
+						content.push({
+							type: "text" as const,
+							text: `(screenshot for annotation ${i + 1} could not be decoded)`,
+						})
+					}
+				}
 			}
+
+			return { content }
 		}
 
 		return {
@@ -735,7 +784,10 @@ export async function handleToolCall(
 				/* non-fatal — orchestrator flag may need manual set */
 			}
 
-			// Return conversational context only — no action directives
+			// Build a multi-part response. The first text block carries
+			// the structured selection summary; each annotation pass
+			// becomes a (text + image) pair so Claude actually SEES what
+			// the user was drawing on instead of getting an opaque data URL.
 			const parts: string[] = [
 				`The user selected the **${sel.archetype}** direction.`,
 			]
@@ -744,7 +796,7 @@ export async function handleToolCall(
 			}
 			if (sel.annotations?.pins?.length) {
 				parts.push(
-					`\nVisual annotations (${sel.annotations.pins.length} pins):`,
+					`\nPin annotations (${sel.annotations.pins.length}):`,
 				)
 				for (const pin of sel.annotations.pins) {
 					parts.push(
@@ -752,9 +804,47 @@ export async function handleToolCall(
 					)
 				}
 			}
-			return {
-				content: [{ type: "text" as const, text: parts.join("\n") }],
+
+			type ContentBlock =
+				| { type: "text"; text: string }
+				| { type: "image"; data: string; mimeType: string }
+			const content: ContentBlock[] = [
+				{ type: "text" as const, text: parts.join("\n") },
+			]
+
+			const screenshots = sel.annotations?.screenshots ?? []
+			if (screenshots.length > 0) {
+				content.push({
+					type: "text" as const,
+					text: `\n${screenshots.length} screenshot annotation${screenshots.length === 1 ? "" : "s"} attached below — each pair is the reviewer's note + the captured surface they were drawing on.`,
+				})
+				for (let i = 0; i < screenshots.length; i++) {
+					const s = screenshots[i]
+					content.push({
+						type: "text" as const,
+						text: `\nAnnotation ${i + 1}: ${s.comment}`,
+					})
+					// Strip the `data:image/png;base64,` prefix — MCP image
+					// content blocks carry raw base64 + mimeType separately.
+					const match = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(
+						s.screenshot_data_url,
+					)
+					if (match) {
+						content.push({
+							type: "image" as const,
+							mimeType: match[1],
+							data: match[2],
+						})
+					} else {
+						content.push({
+							type: "text" as const,
+							text: `(screenshot for annotation ${i + 1} could not be decoded)`,
+						})
+					}
+				}
 			}
+
+			return { content }
 		}
 
 		return {

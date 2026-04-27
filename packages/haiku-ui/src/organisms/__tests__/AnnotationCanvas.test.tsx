@@ -41,6 +41,17 @@ function dropPin(
 	wrapper: HTMLElement,
 	opts: { pctX: number; pctY: number; text: string },
 ) {
+	// Tool defaults to null — engage the Pin tool before clicking the
+	// canvas (idempotent; toggleTool is a noop once Pin is already
+	// active). Required since the canvas overlay is `pointer-events:
+	// none` when no tool is selected.
+	const pinToolBtn = Array.from(wrapper.querySelectorAll("button")).find(
+		(b) => b.textContent?.includes("Pin") && b.getAttribute("aria-pressed"),
+	)
+	if (pinToolBtn && pinToolBtn.getAttribute("aria-pressed") !== "true") {
+		fireEvent.click(pinToolBtn)
+	}
+
 	const canvas = wrapper.querySelector("canvas")
 	if (!canvas) throw new Error("canvas not found")
 

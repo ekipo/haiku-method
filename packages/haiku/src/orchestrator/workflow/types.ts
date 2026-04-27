@@ -1,20 +1,19 @@
-// FSM state-machine types.
+// Workflow-engine types.
 //
-// The `StateName` union enumerates every state the FSM can be in,
-// matching the action surface produced by runNext + the per-state
-// migrations in run-fsm-tick.ts. Keeping the union exhaustive lets
-// TypeScript catch missing cases when emitNativeAction or per-state
-// files dispatch on state name.
+// The `StateName` union enumerates every state the workflow engine
+// can be in, matching the action surface produced by the per-state
+// handlers in handlers/. Keeping the union exhaustive lets TypeScript
+// catch missing cases when dispatchHandler or per-state files
+// dispatch on state name.
 //
-// `FsmContext` is the runtime context xstate threads through every
-// state — populated by deriveCurrentState from disk + filled in
-// for each machine actor invocation.
+// `WorkflowContext` is the runtime context threaded through each
+// handler — populated by deriveCurrentState from disk on every tick.
 
-/** Runtime context the FSM threads through every state. The legacy
- *  runNext recomputes much of this on every tick by reading
- *  frontmatter + iteration files; the xstate port consolidates
- *  those reads via deriveCurrentState. */
-export interface FsmContext {
+/** Runtime context the workflow engine threads through every
+ *  handler. Each tick recomputes this from disk via
+ *  deriveCurrentState; there is no in-memory state preserved across
+ *  ticks. */
+export interface WorkflowContext {
 	readonly slug: string
 	readonly studio: string
 	readonly intentDirPath: string
@@ -25,11 +24,14 @@ export interface FsmContext {
 	readonly externalReviewUrl?: string
 }
 
-/** Discriminator across every concrete state. The string union
- *  mirrors the action types returned by the legacy switch —
- *  extracted from `runNext` and the per-action prompt builders.
- *  Keep this exhaustive so xstate's `assertEvent` and TS
- *  exhaustiveness checks catch missing cases. */
+/** Back-compat alias for the previous `FsmContext` name. New code
+ *  should use `WorkflowContext`. */
+export type FsmContext = WorkflowContext
+
+/** Discriminator across every concrete state derive-state can return
+ *  + every action shape per-state handlers can emit. Keep this
+ *  exhaustive so TS exhaustiveness checks catch missing cases when
+ *  adding a new handler. */
 export type StateName =
 	// setup
 	| "select_studio"

@@ -1,13 +1,11 @@
 #!/usr/bin/env npx tsx
-// End-to-end test for the xstate FSM integration. Verifies the full
-// loop: disk fixture → deriveCurrentState → optionally run the
-// machine → return a tick result.
+// End-to-end test for the workflow-engine tick. Verifies the full
+// loop: disk fixture → deriveCurrentState → pre-tick consistency
+// repair → tamper detection → registered handler → tick result.
 //
-// Tests both paths:
-//   - xstate-native states (terminal states migrated as PoC) emit
-//     a snapshot.
-//   - runNext-driven states (everything else for now) return without
-//     a snapshot and signal the legacy driver.
+// Every derive-state output has a registered handler; a "fallback"
+// driver value in WorkflowTickResult would indicate a registry gap
+// (currently unreachable).
 
 import assert from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -18,8 +16,8 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { runFsmTick, XSTATE_NATIVE_STATES, emitNativeAction } = await import(
-	"../src/orchestrator/fsm/run-fsm-tick.ts"
+const { runWorkflowTick, REGISTERED_STATES, dispatchAction } = await import(
+	"../src/orchestrator/workflow/run-tick.ts"
 )
 
 let passed = 0
@@ -71,7 +69,7 @@ function fixture(slug, frontmatter, stages = {}) {
 console.log("=== Driver routing ===")
 
 test("missing intent returns null", () => {
-	const result = runFsmTick("nonexistent", "/tmp/does-not-exist")
+	const result = runWorkflowTick("nonexistent", "/tmp/does-not-exist")
 	assert.strictEqual(result, null)
 })
 
@@ -80,24 +78,24 @@ test("composite intents route through xstate to composite_run_stage", () => {
 		studio: "software",
 		composite: [{ studio: "software", stages: ["design"] }],
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "composite_run_stage")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action)
 })
 
-test("complete state routes to xstate driver + emits action", () => {
+test("complete state routes to workflow driver + emits action", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "complete")
 	assert.strictEqual(
@@ -106,16 +104,16 @@ test("complete state routes to xstate driver + emits action", () => {
 	)
 })
 
-test("archived (flag) routes to xstate error with unarchive instructions", () => {
+test("archived (flag) routes to workflow error with unarchive instructions", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		archived: true,
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "error")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "error")
 	assert.ok(
 		result.action.message.includes("haiku_intent_unarchive"),
@@ -123,16 +121,16 @@ test("archived (flag) routes to xstate error with unarchive instructions", () =>
 	)
 })
 
-test("status=archived (legacy) routes to xstate error with repair instructions", () => {
+test("status=archived (legacy) routes to workflow error with repair instructions", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "archived",
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "error")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "error")
 	assert.ok(
 		result.action.message.includes("/haiku:repair"),
@@ -140,27 +138,26 @@ test("status=archived (legacy) routes to xstate error with repair instructions",
 	)
 })
 
-test("complete-without-studio still emits action (snapshot omitted)", () => {
+test("complete-without-studio still emits action", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		status: "completed",
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
-	// No studio = no snapshot side-effect, but emitNativeAction is
-	// studio-independent for `complete`. The action is still emitted.
-	assert.strictEqual(result.driver, "xstate")
+	// dispatchAction is studio-independent for `complete`; the
+	// action is emitted regardless of whether studio is set.
+	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "complete")
-	assert.strictEqual(result.snapshot, null)
 })
 
-console.log("\n=== xstate-native registry ===")
+console.log("\n=== Workflow handler registry ===")
 
 test("registry contains the migrated states", () => {
 	for (const name of ["complete", "select_studio", "error"]) {
 		assert.ok(
-			XSTATE_NATIVE_STATES.has(name),
+			REGISTERED_STATES.has(name),
 			`registry should include '${name}'`,
 		)
 	}
@@ -169,10 +166,10 @@ test("registry contains the migrated states", () => {
 test("registry does NOT contain terminal-emit-only states", () => {
 	// `escalate` and `blocked` are emission shapes returned by other
 	// state handlers — they're not derive-state outputs themselves
-	// and have no per-state file in native-emit/.
+	// and have no per-state file in handlers/.
 	for (const name of ["escalate", "blocked"]) {
 		assert.ok(
-			!XSTATE_NATIVE_STATES.has(name),
+			!REGISTERED_STATES.has(name),
 			`registry should NOT include emission-only '${name}'`,
 		)
 	}
@@ -180,38 +177,36 @@ test("registry does NOT contain terminal-emit-only states", () => {
 
 console.log("\n=== Tick result shape ===")
 
-test("snapshot field is always null after xstate runtime removal", () => {
+test("workflow tick result no longer carries an workflow snapshot", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
-	// xstate was ripped out; snapshot is permanently null. Field
-	// retained for back-compat with existing telemetry consumers
-	// until they're updated.
-	assert.strictEqual(result.snapshot, null)
+	// xstate was ripped out; the snapshot field no longer exists.
+	assert.strictEqual("snapshot" in result, false)
 })
 
-test("xstate driver carries context but skips runNext fallback", () => {
+test("workflow driver carries context", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		composite: [{ studio: "software", stages: ["design"] }],
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.context.currentStage, "")
 })
 
 console.log("\n=== Parity vs runNext (complete state) ===")
 
-test("emitNativeAction('complete') matches runNext's shape byte-for-byte", () => {
+test("dispatchAction('complete') matches runNext's shape byte-for-byte", () => {
 	// runNext emits this exact shape at orchestrator.ts:2200 when
-	// it sees status=completed. The xstate-native emitter must
+	// it sees status=completed. The workflow handler must
 	// match byte-for-byte or the migration is a regression.
 	const slug = "test-completion"
-	const action = emitNativeAction("complete", {
+	const action = dispatchAction("complete", {
 		slug,
 		studio: "software",
 		intentDirPath: `/dummy/${slug}`,
@@ -226,9 +221,9 @@ test("emitNativeAction('complete') matches runNext's shape byte-for-byte", () =>
 	})
 })
 
-test("emitNativeAction returns null for unmigrated states", () => {
+test("dispatchAction returns null for unmigrated states", () => {
 	for (const name of ["blocked", "escalate", "elaborate"]) {
-		const action = emitNativeAction(name, {
+		const action = dispatchAction(name, {
 			slug: "x",
 			studio: "software",
 			intentDirPath: "/dummy",
@@ -245,12 +240,12 @@ test("emitNativeAction returns null for unmigrated states", () => {
 	}
 })
 
-test("emitNativeAction('error') without recognized variant falls back to runNext (returns null)", () => {
+test("dispatchAction('error') without recognized variant falls back to runNext (returns null)", () => {
 	// 'error' is in the registry, but without intent.archived or
 	// status=archived the emitter doesn't know which variant to
 	// emit — so it returns null and the wrapper falls back to
 	// runNext. This guards against silently emitting wrong errors.
-	const action = emitNativeAction("error", {
+	const action = dispatchAction("error", {
 		slug: "x",
 		studio: "software",
 		intentDirPath: "/dummy",
@@ -262,8 +257,8 @@ test("emitNativeAction('error') without recognized variant falls back to runNext
 	assert.strictEqual(action, null)
 })
 
-test("emitNativeAction('error') for archived flag emits unarchive message", () => {
-	const action = emitNativeAction("error", {
+test("dispatchAction('error') for archived flag emits unarchive message", () => {
+	const action = dispatchAction("error", {
 		slug: "test-archived",
 		studio: "software",
 		intentDirPath: "/dummy",
@@ -277,9 +272,9 @@ test("emitNativeAction('error') for archived flag emits unarchive message", () =
 	assert.ok(action.message.includes("haiku_intent_unarchive"))
 })
 
-test("emitNativeAction('select_studio') produces studio list + correct message", () => {
+test("dispatchAction('select_studio') produces studio list + correct message", () => {
 	const slug = "test-no-studio"
-	const action = emitNativeAction("select_studio", {
+	const action = dispatchAction("select_studio", {
 		slug,
 		studio: "",
 		intentDirPath: `/dummy/${slug}`,
@@ -313,31 +308,31 @@ test("emitNativeAction('select_studio') produces studio list + correct message",
 	assert.ok("category" in first)
 })
 
-test("runFsmTick routes a no-studio intent through xstate to select_studio", () => {
+test("runWorkflowTick routes a no-studio intent through xstate to select_studio", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		title: "No studio yet",
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "select_studio")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "select_studio")
 })
 
-console.log("\n=== start_stage native-emit ===")
+console.log("\n=== start_stage handlers ===")
 
 test("composite intents bypass start_stage and route to composite_run_stage", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		composite: [{ studio: "software", stages: ["design"] }],
 	})
-	const result = runFsmTick("test", haikuRoot)
+	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "composite_run_stage")
-	assert.strictEqual(result.driver, "xstate")
+	assert.strictEqual(result.driver, "workflow")
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

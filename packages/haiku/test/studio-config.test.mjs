@@ -15,7 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
 const { buildStudioConfig } = await import(
-	"../src/orchestrator/fsm/build-studio-config.ts"
+	"../src/orchestrator/workflow/build-studio-config.ts"
 )
 
 let passed = 0

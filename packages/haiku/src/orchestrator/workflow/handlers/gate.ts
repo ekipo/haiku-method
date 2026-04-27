@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/gate.ts — Emit for the `gate_review`
+// orchestrator/workflow/handlers/gate.ts — Emit for the `gate_review`
 // state.
 //
 // Owns the gate-phase emission chain at orchestrator.ts:3414-4030.
@@ -69,7 +69,7 @@ import {
 } from "../../../state-tools.js"
 import { readHatDefs, studioSearchPaths } from "../../../studio-reader.js"
 import { emitTelemetry } from "../../../telemetry.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
 // Inline copy of resolveStageFixHats (private in orchestrator). The
 // fix-hats list is read directly from STAGE.md frontmatter so we
@@ -85,7 +85,7 @@ function resolveStageFixHatsInline(studio: string, stage: string): string[] {
 	return []
 }
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const intent = ctx.intent

@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/composite.ts — Emit for composite
+// orchestrator/workflow/handlers/composite.ts — Emit for composite
 // (multi-studio) intents.
 //
 // Composite intents declare a list of `composite: [{ studio, stages
@@ -18,9 +18,9 @@ import {
 	completeOrReviewIntent,
 	resolveStageHats,
 } from "../../../orchestrator.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const intent = ctx.intent
 	if (!intent.composite) return null

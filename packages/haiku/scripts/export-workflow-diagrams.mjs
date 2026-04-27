@@ -4,14 +4,14 @@
  *
  * Walks plugin/studios/<name>/STUDIO.md, builds a StudioConfig,
  * runs the Mermaid exporter, writes the result to
- * website/public/fsm-diagrams/<studio>.mmd. The website docs (and
- * eventually prototype-stage-flow.html) consume these.
+ * website/public/workflow-diagrams/<studio>.mmd. The website docs
+ * (and eventually prototype-stage-flow.html) consume these.
  *
  * This closes the architecture-prototype-sync rule from CLAUDE.md:
  * every studio change → re-run this script → diagrams regenerate.
  *
  * Usage:
- *   node packages/haiku/scripts/export-fsm-diagrams.mjs
+ *   node packages/haiku/scripts/export-workflow-diagrams.mjs
  *
  * The script is idempotent — it overwrites the diagram files in
  * place, so running it on a clean tree produces no diff.
@@ -25,16 +25,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "..", "..", "..")
 const pluginRoot = join(repoRoot, "plugin")
 const websiteRoot = join(repoRoot, "website")
-const outDir = join(websiteRoot, "public", "fsm-diagrams")
+const outDir = join(websiteRoot, "public", "workflow-diagrams")
 
 // Point the studio reader at the plugin's bundled studios.
 process.env.CLAUDE_PLUGIN_ROOT = pluginRoot
 
 const { buildStudioConfig } = await import(
-	"../src/orchestrator/fsm/build-studio-config.ts"
+	"../src/orchestrator/workflow/build-studio-config.ts"
 )
 const { exportStudioMermaid } = await import(
-	"../src/orchestrator/fsm/export-mermaid.ts"
+	"../src/orchestrator/workflow/export-mermaid.ts"
 )
 
 mkdirSync(outDir, { recursive: true })

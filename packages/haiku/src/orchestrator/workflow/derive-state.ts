@@ -1,24 +1,21 @@
-// orchestrator/fsm/derive-state.ts — Pure function: read disk →
-// return current FSM state name + minimal context.
+// orchestrator/workflow/derive-state.ts — Pure function: read disk →
+// return current workflow state name + minimal context.
 //
 // The function never writes; it only reads. Every call is a fresh
-// snapshot of the on-disk state. Callers (xstate machine
-// instantiation, visualization, debugging) consume the result without
-// affecting future calls.
+// snapshot of the on-disk state. Callers (workflow tick dispatch,
+// visualization, debugging) consume the result without affecting
+// future calls.
 //
-// State derivation mirrors the top-level branching in the legacy
-// runNext switch. Where runNext does deep computation (DAG topo,
-// pending-feedback scans, etc.) to decide which sub-state to enter,
-// derivation here returns the COARSE state name and lets the per-
-// state file's `decide` (or its xstate equivalent) handle the
-// finer-grained branching at runtime. This is the contract:
+// Derivation returns the COARSE state name and lets the per-state
+// handler in handlers/ do the finer-grained branching at runtime
+// (DAG topology, pending-feedback scans, fix-chain reconciliation,
+// etc.). This is the contract:
 //   - Derivation answers: "which state node am I conceptually in?"
-//   - The state node answers: "given my current context, which
-//     transition fires next?"
+//   - The handler answers: "given my current context, what action
+//     should the orchestrator emit?"
 //
 // The split keeps derivation testable in isolation — fixtures only
-// need to set the fields derivation reads, not the full disk state
-// runNext requires.
+// need to set the fields derivation reads.
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -37,7 +34,7 @@ export interface DerivedContext {
 	/** Full intent.md frontmatter — readers may pull additional
 	 *  fields beyond what derivation already extracted. */
 	readonly intent: Record<string, unknown>
-	/** Active stage when the FSM is mid-stage. Empty string for
+	/** Active stage when the workflow is mid-stage. Empty string for
 	 *  pre-stage states (select_studio, start_stage with no active
 	 *  stage yet) and post-final states. */
 	readonly currentStage: string
@@ -54,7 +51,7 @@ export interface DerivedState {
 	readonly context: DerivedContext
 }
 
-/** Derive the FSM state for an intent from disk. Pure read; the
+/** Derive the workflow state for an intent from disk. Pure read; the
  *  function never mutates. Returns null when the intent doesn't
  *  exist. */
 export function deriveCurrentState(
@@ -123,7 +120,7 @@ export function deriveCurrentState(
 
 	// Composite intents — multi-studio with declared per-studio stage
 	// progressions and cross-studio sync barriers. Routed to its own
-	// native-emit handler that walks the composite + sync rules.
+	// workflow handler that walks the composite + sync rules.
 	if (intent.composite) {
 		return {
 			state: "composite_run_stage",
@@ -142,7 +139,7 @@ export function deriveCurrentState(
 	}
 	// Production writes `awaiting_completion_review` via fsmEnterIntentCompletionReview;
 	// `intent_completion` is reserved for callers that want the same routing under
-	// the more descriptive name. Both surface to the same native-emit handler.
+	// the more descriptive name. Both surface to the same workflow handler.
 	if (phase === "intent_completion" || phase === "awaiting_completion_review") {
 		const dispatched = intent.completion_review_dispatched === true
 		if (!dispatched) {
@@ -164,7 +161,7 @@ export function deriveCurrentState(
 	// Stage-driven phases. Read active_stage and its state.json.
 	const activeStage = (intent.active_stage as string) || ""
 	if (!activeStage) {
-		// No active stage — FSM is about to enter the first
+		// No active stage — workflow is about to enter the first
 		// (or next) stage.
 		return {
 			state: "start_stage",

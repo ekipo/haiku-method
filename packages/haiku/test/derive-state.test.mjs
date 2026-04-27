@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { deriveCurrentState } from "../src/orchestrator/fsm/derive-state.ts"
+import { deriveCurrentState } from "../src/orchestrator/workflow/derive-state.ts"
 
 let passed = 0
 let failed = 0

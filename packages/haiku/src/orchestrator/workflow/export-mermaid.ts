@@ -1,4 +1,4 @@
-// orchestrator/fsm/export-mermaid.ts — Render a StudioConfig as a
+// orchestrator/workflow/export-mermaid.ts — Render a StudioConfig as a
 // Mermaid stateDiagram-v2 source string.
 //
 // Why Mermaid? Two reasons:
@@ -22,7 +22,7 @@
 //
 // What's elided to keep the diagram readable:
 // - Action names on transitions (would clutter — the per-state
-//   handler files in native-emit/ document them)
+//   handler files in handlers/ document them)
 // - Meta fields (gate type, hat lists — visible via the per-state
 //   handler comments)
 

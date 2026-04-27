@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/error.ts — Emit for the `error`
+// orchestrator/workflow/handlers/error.ts — Emit for the `error`
 // terminal state.
 //
 // VARIANTS HANDLED:
@@ -8,13 +8,13 @@
 //     via `haiku_intent_unarchive`.
 //
 // Returns null for other error sites (frontmatter parse failures,
-// integrity-tamper messages, FSM internal errors) — those still emit
+// integrity-tamper messages, workflow internal errors) — those still emit
 // from runNext until their per-case paths port. The wrapper falls
 // back to runNext on null.
 
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const status = (ctx.intent.status as string) || ""
 	if (status === "archived") {
 		return {

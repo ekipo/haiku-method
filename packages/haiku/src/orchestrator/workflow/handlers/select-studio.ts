@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/select-studio.ts — Emit for the
+// orchestrator/workflow/handlers/select-studio.ts — Emit for the
 // `select_studio` state.
 //
 // FIRES WHEN: derive-state sees no studio set on intent.md.
@@ -7,9 +7,9 @@
 // the byte-identical shape.
 
 import { listStudios } from "../../../studio-reader.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const available = listStudios().map((s) => ({
 		name: s.name,
 		slug: s.slug,

@@ -1,4 +1,4 @@
-// orchestrator/fsm/build-studio-config.ts — Build the in-memory
+// orchestrator/workflow/build-studio-config.ts — Build the in-memory
 // StudioConfig from the existing studio-reader output.
 //
 // Responsibilities:

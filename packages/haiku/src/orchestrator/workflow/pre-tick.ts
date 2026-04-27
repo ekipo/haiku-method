@@ -1,4 +1,4 @@
-// orchestrator/fsm/pre-tick.ts — Cross-cutting consistency check
+// orchestrator/workflow/pre-tick.ts — Cross-cutting consistency check
 // that runs BEFORE deriveCurrentState on every tick.
 //
 // The original runNext interleaved this check with phase routing —
@@ -8,11 +8,11 @@
 // incomplete prior. Each of those mutations changes what the next
 // derive-state call would return.
 //
-// To preserve that semantics under the per-state native-emit dispatch
+// To preserve that semantics under the per-state workflow handler dispatch
 // (which routes by phase, not by "consistency check first"), the
 // check lives here and runs as a pre-pass. If it produces a
 // safe_intent_repair action, the tick short-circuits with that
-// action. Otherwise the mutations land on disk and runFsmTick
+// action. Otherwise the mutations land on disk and runWorkflowTick
 // continues into derive-state on the now-consistent intent.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"

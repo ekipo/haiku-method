@@ -49,7 +49,7 @@ import {
 	runNext,
 	writeReviewFeedbackFiles,
 } from "../../orchestrator.js"
-import { runFsmTick } from "../../orchestrator/fsm/run-fsm-tick.js"
+import { runWorkflowTick } from "../../orchestrator/workflow/run-tick.js"
 import { reportError } from "../../sentry.js"
 import { logSessionEvent } from "../../session-metadata.js"
 import { sealIntentState } from "../../state-integrity.js"
@@ -187,16 +187,14 @@ export default defineTool({
 			}
 		}
 
-		// xstate-native check: if the FSM's current state has been
-		// fully migrated, runFsmTick emits the OrchestratorAction
-		// directly. Otherwise we fall back to runNext below. The
-		// migration registry lives in orchestrator/fsm/run-fsm-tick.ts;
-		// states added to XSTATE_NATIVE_STATES skip runNext.
-		const tick = runFsmTick(slug)
+		// Workflow-engine dispatch: read disk → derive state → run
+		// per-state handler. The handler registry lives in
+		// orchestrator/workflow/handlers/. runNext is the structural
+		// fallback for the (currently unreachable) case where no
+		// handler returned an action.
+		const tick = runWorkflowTick(slug)
 		const result =
-			tick && tick.driver === "xstate" && tick.action
-				? tick.action
-				: runNext(slug)
+			tick && tick.action ? tick.action : runNext(slug)
 		emitTelemetry("haiku.orchestrator.action", {
 			intent: slug,
 			action: result.action,

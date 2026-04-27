@@ -1,5 +1,5 @@
-// app/lifecycles/[studio]/page.tsx — Per-studio FSM diagram detail
-// page. Reads the auto-generated .mmd file at build time and
+// app/lifecycles/[studio]/page.tsx — Per-studio workflow diagram
+// detail page. Reads the auto-generated .mmd file at build time and
 // renders it via the existing client-side Mermaid component.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs"
@@ -14,12 +14,12 @@ interface Props {
 }
 
 function diagramPath(studio: string): string {
-	return join(process.cwd(), "public", "fsm-diagrams", `${studio}.mmd`)
+	return join(process.cwd(), "public", "workflow-diagrams", `${studio}.mmd`)
 }
 
 export async function generateStaticParams() {
 	try {
-		const dir = join(process.cwd(), "public", "fsm-diagrams")
+		const dir = join(process.cwd(), "public", "workflow-diagrams")
 		return readdirSync(dir)
 			.filter((f) => f.endsWith(".mmd"))
 			.map((f) => ({ studio: f.replace(/\.mmd$/, "") }))
@@ -59,9 +59,9 @@ export default async function StudioLifecyclePage({ params }: Props) {
 				{studio}
 			</h1>
 			<p className="mb-8 text-sm text-stone-500 dark:text-stone-400">
-				Auto-generated from the xstate machine. Re-run{" "}
+				Auto-generated from the StudioConfig. Re-run{" "}
 				<code className="rounded bg-stone-100 px-1 dark:bg-stone-800">
-					bun run --cwd packages/haiku export:fsm-diagrams
+					bun run --cwd packages/haiku export:workflow-diagrams
 				</code>{" "}
 				to regenerate after a studio change.
 			</p>

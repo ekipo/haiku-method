@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/elaborate.ts — Emit for the
+// orchestrator/workflow/handlers/elaborate.ts — Emit for the
 // `elaborate` state.
 //
 // Owns the entire elaborate-phase emission chain that runNext
@@ -68,14 +68,14 @@ import {
 } from "../../../studio-reader.js"
 import { isStagePreExecute, listUnits } from "../../../orchestrator.js"
 import { emitTelemetry } from "../../../telemetry.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
 function readFrontmatter(filePath: string): Record<string, unknown> {
 	const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
 	return data
 }
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const intent = ctx.intent

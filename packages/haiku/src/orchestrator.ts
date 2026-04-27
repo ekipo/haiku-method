@@ -46,7 +46,7 @@ import {
 	prepareRevisitBranch,
 	writeOnIntentMain,
 } from "./git-worktree.js"
-import { runFsmTick } from "./orchestrator/fsm/run-fsm-tick.js"
+import { runWorkflowTick } from "./orchestrator/workflow/run-tick.js"
 import { actionPromptBuilders } from "./orchestrator/prompts/index.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
 import { sealIntentState, verifyIntentState } from "./state-integrity.js"
@@ -1806,8 +1806,8 @@ export function fsmIntentComplete(slug: string): void {
 
 // ── Main orchestration function ────────────────────────────────────────────
 
-/** Top-level orchestrator dispatch. The xstate machine + per-state
- *  native-emit handlers in `orchestrator/fsm/native-emit/` own every
+/** Top-level orchestrator dispatch. The workflow engine + per-state
+ *  workflow handlers in `orchestrator/workflow/handlers/` own every
  *  derive-state output, including composite intents. This shim only
  *  needs to:
  *
@@ -1815,9 +1815,9 @@ export function fsmIntentComplete(slug: string): void {
  *       returns null for missing intents; tests rely on a concrete
  *       error action).
  *    2. Run the FSM tick. Tamper detection + cross-cutting consistency
- *       repair + per-state emission all live inside runFsmTick.
+ *       repair + per-state emission all live inside runWorkflowTick.
  *    3. Surface a structural error if the tick produces no action —
- *       indicates a derive-state or native-emit registration gap.
+ *       indicates a derive-state or workflow registration gap.
  */
 export function runNext(slug: string): OrchestratorAction {
 	const root = findHaikuRoot()
@@ -1827,14 +1827,14 @@ export function runNext(slug: string): OrchestratorAction {
 		return { action: "error", message: `Intent '${slug}' not found` }
 	}
 
-	const tick = runFsmTick(slug)
+	const tick = runWorkflowTick(slug)
 	if (tick && tick.action) {
 		return tick.action
 	}
 
 	return {
 		action: "error",
-		message: `runFsmTick produced no action for intent '${slug}' (state: ${tick?.state ?? "unknown"}). Indicates a derive-state output without a native-emit handler — check orchestrator/fsm/native-emit/index.ts.`,
+		message: `runWorkflowTick produced no action for intent '${slug}' (state: ${tick?.state ?? "unknown"}). Indicates a derive-state output without a workflow handler — check orchestrator/workflow/handlers/index.ts.`,
 	}
 }
 

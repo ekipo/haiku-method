@@ -1,4 +1,4 @@
-// orchestrator/fsm/run-fsm-tick.ts — Workflow-engine tick. Read disk
+// orchestrator/workflow/run-tick.ts — Workflow-engine tick. Read disk
 // → derive current state → run pre-tick consistency repair → dispatch
 // the per-state handler → return the action.
 //
@@ -9,9 +9,9 @@
 // long-lived actor — the durability + replayability comes from the
 // fact that every tick reads its own truth.
 //
-// Per-state handlers live in `native-emit/{state}.ts`. The registry
-// in `native-emit/index.ts` maps state names to handlers. Adding a
-// new state name = adding the entry to the registry + the file.
+// Per-state handlers live in `handlers/{state}.ts`. The registry in
+// `handlers/index.ts` maps state names to handlers. Adding a new
+// state name = adding the entry to the registry + the file.
 
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
@@ -20,33 +20,32 @@ import {
 	deriveCurrentState,
 } from "./derive-state.js"
 import {
-	emitNativeAction as registryEmit,
-	XSTATE_NATIVE_STATES as REGISTRY_KEYS,
-} from "./native-emit/index.js"
+	dispatchHandler,
+	WORKFLOW_STATES,
+} from "./handlers/index.js"
 import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 
 /** Set of state names with a registered handler. Currently every
- *  derive-state output has one. Kept as a public re-export for
- *  back-compat with tests that probed registry membership during the
- *  migration. */
-export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = REGISTRY_KEYS
+ *  derive-state output has one. Re-exported for tests that probe
+ *  registry membership. */
+export const REGISTERED_STATES: ReadonlySet<StateName> = WORKFLOW_STATES
 
 /** The dispatch function. Look up a state's handler in the registry
  *  and run it. Re-exported so callers can invoke a handler directly
  *  (mostly used by tests verifying handler-level behavior). */
-export const emitNativeAction = registryEmit
+export const dispatchAction = dispatchHandler
 
 /** Result of a single workflow tick. The `action` field is the
- *  OrchestratorAction the agent should follow. `driver` is always
- *  "xstate" today (back-compat field name; the runtime is our own
- *  dispatch loop, not xstate — see CLAUDE.md notes on the rip). */
-export interface FsmTickResult {
+ *  OrchestratorAction the agent should follow. `driver` is "workflow"
+ *  when a registered handler produced an action, "fallback" when
+ *  none did (currently unreachable — every derive-state output has a
+ *  handler). */
+export interface WorkflowTickResult {
 	readonly state: StateName
 	readonly context: DerivedState["context"]
-	readonly driver: "xstate" | "runNext"
+	readonly driver: "workflow" | "fallback"
 	readonly action: OrchestratorAction | null
-	readonly snapshot: null
 }
 
 /** Run one workflow tick for an intent. Steps:
@@ -59,10 +58,10 @@ export interface FsmTickResult {
  *   4. Look up the handler for the derived state and run it.
  *
  *  Returns null only when the intent doesn't exist on disk. */
-export function runFsmTick(
+export function runWorkflowTick(
 	slug: string,
 	root?: string,
-): FsmTickResult | null {
+): WorkflowTickResult | null {
 	const repair = preTickConsistency(slug, root)
 
 	const derived = deriveCurrentState(slug, root)
@@ -72,9 +71,8 @@ export function runFsmTick(
 		return {
 			state: "error",
 			context: derived.context,
-			driver: "xstate",
+			driver: "workflow",
 			action: repair,
-			snapshot: null,
 		}
 	}
 
@@ -83,19 +81,17 @@ export function runFsmTick(
 		return {
 			state: "error",
 			context: derived.context,
-			driver: "xstate",
+			driver: "workflow",
 			action: { action: "error", message: tamperError },
-			snapshot: null,
 		}
 	}
 
-	const action = emitNativeAction(derived.state, derived.context, root)
+	const action = dispatchAction(derived.state, derived.context, root)
 
 	return {
 		state: derived.state,
 		context: derived.context,
-		driver: action ? "xstate" : "runNext",
+		driver: action ? "workflow" : "fallback",
 		action,
-		snapshot: null,
 	}
 }

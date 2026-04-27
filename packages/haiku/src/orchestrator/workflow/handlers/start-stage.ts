@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/start-stage.ts — Emit for the
+// orchestrator/workflow/handlers/start-stage.ts — Emit for the
 // `start_stage` state.
 //
 // This handler owns the entire pre-stage routing chain that runNext
@@ -22,7 +22,7 @@
 //      effective stages set (intent.stages allow-list /
 //      intent.skip_stages deny-list). May terminate the intent if
 //      no included stage remains.
-//   5. start_stage emission with FSM side effect (fsmStartStage),
+//   5. start_stage emission with workflow side effect (fsmStartStage),
 //      surfacing parent knowledge for follow-up intents.
 //
 // derive-state.ts returns "start_stage" both for the empty-active
@@ -55,7 +55,7 @@ import {
 	writeJson,
 } from "../../../state-tools.js"
 import { emitTelemetry } from "../../../telemetry.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 import { readFileSync } from "node:fs"
 
 function readFrontmatter(filePath: string): Record<string, unknown> {
@@ -64,7 +64,7 @@ function readFrontmatter(filePath: string): Record<string, unknown> {
 	return data
 }
 
-const emit: NativeEmitter = (ctx, rootArg) => {
+const emit: WorkflowHandler = (ctx, rootArg) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const intent = ctx.intent

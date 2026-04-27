@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/intent-completion.ts — Emit for the
+// orchestrator/workflow/handlers/intent-completion.ts — Emit for the
 // `intent_completion_review` and `intent_completion_fix` states.
 //
 // derive-state routes intent.phase === "intent_completion" into two
@@ -54,9 +54,9 @@ import {
 	readStudioReviewAgentPaths,
 } from "../../../studio-reader.js"
 import { emitTelemetry } from "../../../telemetry.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const intent = ctx.intent

@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/execute.ts — Emit for the
+// orchestrator/workflow/handlers/execute.ts — Emit for the
 // `execute` state.
 //
 // Owns the execute-phase emission chain at orchestrator.ts:3184-3340.
@@ -31,9 +31,9 @@ import {
 	validateUnitNaming,
 } from "../../../orchestrator.js"
 import { createUnitWorktree } from "../../../git-worktree.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const currentStage = ctx.currentStage

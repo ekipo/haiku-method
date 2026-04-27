@@ -1,4 +1,4 @@
-// orchestrator/fsm/native-emit/review.ts — Emit for the `review` state.
+// orchestrator/workflow/handlers/review.ts — Emit for the `review` state.
 //
 // Owns the review-phase emission chain at orchestrator.ts:3343-3379.
 // Sub-cases handled:
@@ -15,9 +15,9 @@ import {
 	runQualityGates,
 	validateStageOutputs,
 } from "../../../orchestrator.js"
-import type { NativeEmitter } from "./_types.js"
+import type { WorkflowHandler } from "./_types.js"
 
-const emit: NativeEmitter = (ctx) => {
+const emit: WorkflowHandler = (ctx) => {
 	const slug = ctx.slug
 	const studio = ctx.studio
 	const currentStage = ctx.currentStage

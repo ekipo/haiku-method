@@ -1,5 +1,5 @@
-// orchestrator/fsm/studio-config.ts — In-memory shape of a studio's
-// FSM-relevant configuration.
+// orchestrator/workflow/studio-config.ts — In-memory shape of a studio's
+// workflow-relevant configuration.
 //
 // Built once at server boot from the existing studio-reader output
 // (STUDIO.md, stages/*/STAGE.md, hats/*.md, review-agents/*.md,
@@ -7,11 +7,10 @@
 // No new disk format — this is a normalization step on top of files
 // already on disk.
 //
-// The `createMachineForStudio()` factory consumes this shape to
-// generate a fully-elaborated, fully-static xstate machine. The
-// machine is regenerated whenever the StudioConfig changes; the
-// config itself is regenerated whenever the underlying disk files
-// change (cleared via clearStudioCache()).
+// `exportStudioMermaid()` consumes this shape to render a Mermaid
+// stateDiagram-v2 source for the studio's workflow. The config
+// itself is regenerated whenever the underlying disk files change
+// (cleared via clearStudioCache()).
 //
 // Shape choices:
 // - Stage names are duplicated (top-level `defaultStages` array AND

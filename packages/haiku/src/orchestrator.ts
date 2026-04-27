@@ -1,94 +1,31 @@
-// orchestrator.ts — H·AI·K·U stage loop orchestration
+// orchestrator.ts — H·AI·K·U workflow-engine entry point + back-compat
+// re-export surface.
 //
-// Deterministic workflow driver. `runNext()` reads state, determines the next
-// action, performs the state mutation as a side effect, and returns the action
-// to the agent. The agent only calls `haiku_run_next` to advance — it never
-// mutates stage/intent state directly.
+// The orchestrator's logic lives in focused modules under
+// `orchestrator/`:
 //
-// Primary tool: haiku_run_next { intent }
-// Returns an action object the agent follows.
+//   - workflow/run-tick.ts  → tick loop + dispatcher
+//   - workflow/handlers/    → per-state handlers
+//   - workflow/side-effects → state mutators (workflowStartStage etc.)
+//   - actions.ts            → OrchestratorAction helpers (summarize,
+//                             escalate, elaborator instruction, etc.)
+//   - studio.ts             → studio / stage / hat resolution
+//   - units.ts              → unit listing + DAG wave computation
+//   - validators.ts         → output / discovery / naming / inputs /
+//                             quality-gate validators
+//   - external-review.ts    → gh/glab CLI probing + changes_requested
+//   - revisit.ts            → stage / phase regression
+//   - preview.ts            → tell_user / next_step enrichment
+//
+// This file just re-exports the public surface for back-compat with
+// callers (and tests) that still import from "./orchestrator.js",
+// plus the MCP tool handler dispatch.
 
-import { execFileSync, execSync } from "node:child_process"
-import {
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs"
-import { join, resolve } from "node:path"
-import matter from "gray-matter"
-import { resolvePluginRoot } from "./config.js"
-import { computeWaves, topologicalSort } from "./dag.js"
-import {
-	branchExists,
-	cleanupFixChainWorktree,
-	cleanupIntentWorktrees,
-	cleanupOrphanedStageBranches,
-	createFixChainWorktree,
-	createIntentBranch,
-	createStageBranch,
-	createUnitWorktree,
-	deleteStageBranch,
-	discoveryBranchName,
-	discoveryWorktreePath,
-	ensureOnStageBranch,
-	finalizeIntentBranches,
-	fixChainBranchName,
-	fixChainWorktreePath,
-	isBranchMerged,
-	isOnStageBranch,
-	mergeDiscoveryWorktree,
-	mergeFixChainWorktree,
-	mergeStageBranchForward,
-	mergeStageBranchIntoMain,
-	prepareRevisitBranch,
-	writeOnIntentMain,
-} from "./git-worktree.js"
 import { dispatchOrchestratorAction } from "./orchestrator/workflow/run-tick.js"
 import { actionPromptBuilders } from "./orchestrator/prompts/index.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
-import { sealIntentState, verifyIntentState } from "./state-integrity.js"
-import {
-	appendStageIteration,
-	closeCurrentStageIteration,
-	countPendingFeedback,
-	type FeedbackItem,
-	findFeedbackFile,
-	findHaikuRoot,
-	getStageIterationCount,
-	gitCommitState,
-	incrementFeedbackBolt,
-	intentDir,
-	isGitRepo,
-	MAX_FIX_LOOP_BOLTS,
-	MAX_INTEGRATOR_ATTEMPTS,
-	MAX_STAGE_ITERATIONS,
-	parseFrontmatter,
-	readFeedbackFiles,
-	readJson,
-	setFrontmatterField,
-	stageStatePath,
-	timestamp,
-	validateSlugArgs,
-	writeFeedbackFile,
-	writeJson,
-} from "./state-tools.js"
-import {
-	filterReviewAgentsByScope,
-	listStudios,
-	readHatDefs,
-	readReviewAgentPaths,
-	readStageArtifactDefs,
-	readStudioFixHatPaths,
-	readStudioReviewAgentPaths,
-	resolveStudio,
-	studioSearchPaths,
-} from "./studio-reader.js"
-import { emitTelemetry } from "./telemetry.js"
+import { validateSlugArgs } from "./state-tools.js"
 import { orchestratorToolHandlers } from "./tools/orchestrator/index.js"
-import type { DAGGraph } from "./types.js"
 
 export { orchestratorToolDefs }
 

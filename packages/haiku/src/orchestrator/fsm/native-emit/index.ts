@@ -18,6 +18,7 @@ import elaborate from "./elaborate.js"
 import error from "./error.js"
 import execute from "./execute.js"
 import gate from "./gate.js"
+import intentCompletion from "./intent-completion.js"
 import review from "./review.js"
 import selectStudio from "./select-studio.js"
 import startStage from "./start-stage.js"
@@ -36,6 +37,8 @@ const REGISTRY: Partial<Record<StateName, NativeEmitter>> = {
 	execute,
 	review,
 	gate_review: gate,
+	intent_completion_review: intentCompletion,
+	intent_completion_fix: intentCompletion,
 }
 
 /** Set of state names that have a registered emitter. Equivalent to

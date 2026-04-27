@@ -14,9 +14,11 @@
 
 import {
 	buildMultiBranchReport,
+	repairAllBranches,
+} from "../../state/repair-branches.js"
+import {
 	buildRepairReport,
 	type RepairCwdResult,
-	repairAllBranches,
 	repairCwd,
 } from "../../state/repair.js"
 import { findHaikuRoot, isGitRepo } from "../../state/shared.js"

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.105.14] - 2026-04-27
+
+### Changed
+- Aligned session UIs (direction and question pages) to the review interface's annotation pattern for consistent feedback display and decision tracking across all workflow stages.
+
 ## [1.105.13] - 2026-04-27
 
 ```markdown

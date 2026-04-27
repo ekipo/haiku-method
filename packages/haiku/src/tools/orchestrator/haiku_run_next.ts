@@ -46,10 +46,24 @@ import {
 	listUnits,
 	type OrchestratorAction,
 	resetFixLoopBolts,
-	runNext,
 	writeReviewFeedbackFiles,
 } from "../../orchestrator.js"
 import { runWorkflowTick } from "../../orchestrator/workflow/run-tick.js"
+import type { OrchestratorAction as OrchestratorActionType } from "../../orchestrator.js"
+
+/** Single-source dispatch: one workflow tick → one action. Handles
+ *  the intent-not-found and registry-gap cases inline. */
+function dispatchOrchestratorAction(slug: string): OrchestratorActionType {
+	const tick = runWorkflowTick(slug)
+	if (tick?.action) return tick.action
+	if (!tick) {
+		return { action: "error", message: `Intent '${slug}' not found` }
+	}
+	return {
+		action: "error",
+		message: `runWorkflowTick produced no action for intent '${slug}' (state: ${tick.state}). Indicates a derive-state output without a registered handler.`,
+	}
+}
 import { reportError } from "../../sentry.js"
 import { logSessionEvent } from "../../session-metadata.js"
 import { sealIntentState } from "../../state-integrity.js"
@@ -189,12 +203,8 @@ export default defineTool({
 
 		// Workflow-engine dispatch: read disk → derive state → run
 		// per-state handler. The handler registry lives in
-		// orchestrator/workflow/handlers/. runNext is the structural
-		// fallback for the (currently unreachable) case where no
-		// handler returned an action.
-		const tick = runWorkflowTick(slug)
-		const result =
-			tick && tick.action ? tick.action : runNext(slug)
+		// orchestrator/workflow/handlers/.
+		const result = dispatchOrchestratorAction(slug)
 		emitTelemetry("haiku.orchestrator.action", {
 			intent: slug,
 			action: result.action,
@@ -828,7 +838,7 @@ export default defineTool({
 				if (repairResult.success && !repairResult.fallbackUsed) {
 					// Repair agent succeeded — run the workflow again to get the real
 					// next action.
-					const postRepairResult = runNext(slug)
+					const postRepairResult = dispatchOrchestratorAction(slug)
 
 					// Guard: if repair didn't actually fix things, don't loop.
 					if (postRepairResult.action === "safe_intent_repair") {

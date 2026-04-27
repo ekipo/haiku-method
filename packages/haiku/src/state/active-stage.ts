@@ -21,27 +21,6 @@ import {
 	unitPath,
 } from "./shared.js"
 
-// ── runNext handler registration ──────────────────────────────────────────
-//
-// Registered by orchestrator at startup to avoid circular imports between
-// state-tools and orchestrator. Used by advance_hat to internally progress
-// the workflow after unit completion.
-
-export type RunNextHandler = (slug: string) => {
-	action: string
-	[key: string]: unknown
-}
-
-let _runNext: RunNextHandler | null = null
-
-export function setRunNextHandler(handler: RunNextHandler | null): void {
-	_runNext = handler
-}
-
-export function getRunNextHandler(): RunNextHandler | null {
-	return _runNext
-}
-
 // ── Active-stage resolution ───────────────────────────────────────────────
 
 /** Resolve the active stage for an intent from its frontmatter. */

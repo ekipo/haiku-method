@@ -26,12 +26,27 @@ import {
 	enforceStageBranch,
 	FEEDBACK_ASSESSOR_HAT,
 	findUnitFile,
-	getRunNextHandler,
 	resolveActiveStage,
-	resolveStageScope,
 	resolveUnitHats,
 	syncSessionMetadata,
 } from "../../state/active-stage.js"
+import { runWorkflowTick } from "../../orchestrator/workflow/run-tick.js"
+
+/** Run a workflow tick and return the OrchestratorAction-shaped
+ *  result for caller convenience. Used by advance_hat to internally
+ *  progress the workflow after unit completion or hat transition. */
+function tickWorkflow(slug: string): {
+	action: string
+	[key: string]: unknown
+} {
+	const tick = runWorkflowTick(slug)
+	if (tick?.action) return tick.action as { action: string; [k: string]: unknown }
+	if (!tick) return { action: "error", message: `Intent '${slug}' not found` }
+	return {
+		action: "error",
+		message: `runWorkflowTick produced no action for intent '${slug}' (state: ${tick.state}).`,
+	}
+}
 import {
 	findFeedbackFile,
 	updateFeedbackFile,
@@ -549,38 +564,31 @@ export default defineTool({
 			// Phase/stage transitions (advance_phase, advance_stage, review,
 			// intent_complete) are returned so the last caller can propagate
 			// the signal back to the parent via its final message.
-			const _runNext = getRunNextHandler()
-			if (_runNext) {
-				const next = _runNext(args.intent as string)
-				const subagentLocalActions = new Set([
-					"continue_unit",
-					"continue_units",
-					"blocked",
-					"start_units",
-					"start_unit",
-				])
-				if (subagentLocalActions.has(next.action as string)) {
-					return text(
-						`Unit ${args.unit} completed (last hat)${mergeNote}. Next action (${next.action}) is for the parent orchestrator — this subagent's job ends here. The parent will call haiku_run_next when all wave subagents return.${pushWarning(completeGit)}`,
-					)
-				}
-				const payload = injectPushWarning(
-					{ ...next, _unit_completed: args.unit, _merge: mergeNote },
-					completeGit,
-				)
-				const resultPath = resultPathFor({
-					unit: args.unit as string,
-					hat: currentHat,
-					bolt: (unitFm.bolt as number) || 1,
-				})
-				writeResultFile(resultPath, payload)
+			const next = tickWorkflow(args.intent as string)
+			const subagentLocalActions = new Set([
+				"continue_unit",
+				"continue_units",
+				"blocked",
+				"start_units",
+				"start_unit",
+			])
+			if (subagentLocalActions.has(next.action as string)) {
 				return text(
-					`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action (phase/stage/intent transition).`,
+					`Unit ${args.unit} completed (last hat)${mergeNote}. Next action (${next.action}) is for the parent orchestrator — this subagent's job ends here. The parent will call haiku_run_next when all wave subagents return.${pushWarning(completeGit)}`,
 				)
 			}
-
+			const payload = injectPushWarning(
+				{ ...next, _unit_completed: args.unit, _merge: mergeNote },
+				completeGit,
+			)
+			const resultPath = resultPathFor({
+				unit: args.unit as string,
+				hat: currentHat,
+				bolt: (unitFm.bolt as number) || 1,
+			})
+			writeResultFile(resultPath, payload)
 			return text(
-				`completed (last hat)${mergeNote}${pushWarning(completeGit)}`,
+				`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action (phase/stage/intent transition).`,
 			)
 		}
 
@@ -687,29 +695,19 @@ export default defineTool({
 			args.intent as string,
 			args.state_file as string | undefined,
 		)
-		const _runNext = getRunNextHandler()
-		if (_runNext) {
-			const next = _runNext(args.intent as string)
-			const payload = injectPushWarning(
-				{ ...next, _hat_advanced: nextHat },
-				advGit,
-			)
-			const resultPath = resultPathFor({
-				unit: args.unit as string,
-				hat: currentHat,
-				bolt: (unitFm.bolt as number) || 1,
-			})
-			writeResultFile(resultPath, payload)
-			return text(
-				`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action.`,
-			)
-		}
-
-		const hatScope = resolveStageScope(args.intent as string, advStage)
+		const next = tickWorkflow(args.intent as string)
+		const payload = injectPushWarning(
+			{ ...next, _hat_advanced: nextHat },
+			advGit,
+		)
+		const resultPath = resultPathFor({
+			unit: args.unit as string,
+			hat: currentHat,
+			bolt: (unitFm.bolt as number) || 1,
+		})
+		writeResultFile(resultPath, payload)
 		return text(
-			(hatScope
-				? `advanced to ${nextHat}\n\n${hatScope}`
-				: `advanced to ${nextHat}`) + pushWarning(advGit),
+			`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action.`,
 		)
 	},
 })

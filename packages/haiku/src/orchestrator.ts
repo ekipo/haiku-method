@@ -46,7 +46,7 @@ import {
 	prepareRevisitBranch,
 	writeOnIntentMain,
 } from "./git-worktree.js"
-import { runWorkflowTick } from "./orchestrator/workflow/run-tick.js"
+import { dispatchOrchestratorAction } from "./orchestrator/workflow/run-tick.js"
 import { actionPromptBuilders } from "./orchestrator/prompts/index.js"
 import { orchestratorToolDefs } from "./orchestrator/tool-defs.js"
 import { sealIntentState, verifyIntentState } from "./state-integrity.js"
@@ -69,7 +69,6 @@ import {
 	readFeedbackFiles,
 	readJson,
 	setFrontmatterField,
-	setRunNextHandler,
 	stageStatePath,
 	timestamp,
 	validateSlugArgs,
@@ -92,6 +91,12 @@ import { orchestratorToolHandlers } from "./tools/orchestrator/index.js"
 import type { DAGGraph } from "./types.js"
 
 export { orchestratorToolDefs }
+
+/** Back-compat re-export of the workflow dispatcher. Older callers
+ *  (and tests) imported this as `runNext` from orchestrator.ts; new
+ *  code should prefer `dispatchOrchestratorAction` directly from
+ *  `orchestrator/workflow/run-tick.js`. */
+export const runNext = dispatchOrchestratorAction
 
 // ── Path helpers ───────────────────────────────────────────────────────────
 
@@ -1806,39 +1811,6 @@ export function workflowIntentComplete(slug: string): void {
 
 // ── Main orchestration function ────────────────────────────────────────────
 
-/** Top-level orchestrator dispatch. The workflow engine + per-state
- *  workflow handlers in `orchestrator/workflow/handlers/` own every
- *  derive-state output, including composite intents. This shim only
- *  needs to:
- *
- *    1. Surface intent_not_found before the workflow tick (derive-state
- *       returns null for missing intents; tests rely on a concrete
- *       error action).
- *    2. Run the workflow tick. Tamper detection + cross-cutting consistency
- *       repair + per-state emission all live inside runWorkflowTick.
- *    3. Surface a structural error if the tick produces no action —
- *       indicates a derive-state or workflow registration gap.
- */
-export function runNext(slug: string): OrchestratorAction {
-	const root = findHaikuRoot()
-	const intentFile = join(root, "intents", slug, "intent.md")
-
-	if (!existsSync(intentFile)) {
-		return { action: "error", message: `Intent '${slug}' not found` }
-	}
-
-	const tick = runWorkflowTick(slug)
-	if (tick && tick.action) {
-		return tick.action
-	}
-
-	return {
-		action: "error",
-		message: `runWorkflowTick produced no action for intent '${slug}' (state: ${tick?.state ?? "unknown"}). Indicates a derive-state output without a workflow handler — check orchestrator/workflow/handlers/index.ts.`,
-	}
-}
-
-
 // ── Unit listing with dependency resolution ────────────────────────────────
 
 export interface UnitInfo {
@@ -2553,9 +2525,6 @@ function revisitEarlierStage(
 		message: `Revisiting stage '${targetStage}' — stage reset to elaborate, all units re-queued`,
 	}
 }
-
-// Register runNext callback so state-tools can call it without circular imports
-setRunNextHandler(runNext)
 
 // ── Action preview enrichment ─────────────────────────────────────────────
 //

@@ -7,12 +7,10 @@ import {
 	enforceStageBranch,
 	FEEDBACK_ASSESSOR_HAT,
 	findUnitFile,
-	type RunNextHandler,
 	resolveActiveStage,
 	resolveStageHats,
 	resolveStageScope,
 	resolveUnitHats,
-	setRunNextHandler,
 	syncSessionMetadata,
 } from "./state/active-stage.js"
 import {
@@ -162,7 +160,6 @@ export {
 	pushWarning,
 	type RepairCwdResult,
 	type RepairIssue,
-	type RunNextHandler,
 	readFeedbackFiles,
 	readJson,
 	resolveActiveStage,
@@ -173,7 +170,6 @@ export {
 	type StageIterationResult,
 	type StageIterationTrigger,
 	setFrontmatterField,
-	setRunNextHandler,
 	setUnitFrontmatterField,
 	slugifyTitle,
 	stageDir,

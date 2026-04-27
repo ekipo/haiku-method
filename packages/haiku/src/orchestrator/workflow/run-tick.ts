@@ -48,6 +48,26 @@ export interface WorkflowTickResult {
 	readonly action: OrchestratorAction | null
 }
 
+/** Convenience: drive one workflow tick and unwrap to an
+ *  OrchestratorAction. Surfaces intent-not-found and registry-gap
+ *  cases as concrete error actions so callers don't have to handle
+ *  null tick results. Used by haiku_run_next, haiku_unit_advance_hat,
+ *  and tests that drive the workflow end-to-end. */
+export function dispatchOrchestratorAction(
+	slug: string,
+	root?: string,
+): OrchestratorAction {
+	const tick = runWorkflowTick(slug, root)
+	if (tick?.action) return tick.action
+	if (!tick) {
+		return { action: "error", message: `Intent '${slug}' not found` }
+	}
+	return {
+		action: "error",
+		message: `runWorkflowTick produced no action for intent '${slug}' (state: ${tick.state}). Indicates a derive-state output without a registered handler.`,
+	}
+}
+
 /** Run one workflow tick for an intent. Steps:
  *
  *   1. Pre-tick consistency repair (may mutate disk, may short-circuit

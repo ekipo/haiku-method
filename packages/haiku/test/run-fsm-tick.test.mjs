@@ -47,8 +47,10 @@ function fixture(slug, frontmatter, stages = {}) {
 	for (const [k, v] of Object.entries(frontmatter)) {
 		if (v == null) continue
 		if (typeof v === "boolean") fmLines.push(`${k}: ${v}`)
-		else if (Array.isArray(v))
+		else if (Array.isArray(v) && v.every((x) => typeof x === "string"))
 			fmLines.push(`${k}: [${v.map((x) => `"${x}"`).join(", ")}]`)
+		else if (Array.isArray(v) || (typeof v === "object" && v !== null))
+			fmLines.push(`${k}: ${JSON.stringify(v)}`)
 		else fmLines.push(`${k}: "${v}"`)
 	}
 	fmLines.push("---", "", "# Intent body")
@@ -73,20 +75,17 @@ test("missing intent returns null", () => {
 	assert.strictEqual(result, null)
 })
 
-test("non-xstate-native state routes to runNext driver (composite intent)", () => {
-	// Composite intents are still on runNext via runNextComposite;
-	// derive-state returns "start_stage" for them and our start_stage
-	// emitter defers (returns null) for the composite case, falling
-	// back to runNext.
+test("composite intents route through xstate to composite_run_stage", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
-		composite: true,
+		composite: [{ studio: "software", stages: ["design"] }],
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "start_stage")
-	assert.strictEqual(result.driver, "runNext")
+	assert.strictEqual(result.state, "composite_run_stage")
+	assert.strictEqual(result.driver, "xstate")
+	assert.ok(result.action)
 })
 
 test("complete state routes to xstate driver + emits action", () => {
@@ -196,18 +195,14 @@ test("xstate snapshot reports the initial machine state", () => {
 	assert.strictEqual(snapshot.value, "select_studio")
 })
 
-test("runNext-driven results carry context but no snapshot", () => {
-	// Composite intents fall back to runNext (start-stage emitter
-	// returns null on composite). The snapshot is still produced for
-	// telemetry (studio is set), but action is null and driver is
-	// runNext.
+test("xstate driver carries context but skips runNext fallback", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
-		composite: true,
+		composite: [{ studio: "software", stages: ["design"] }],
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
-	assert.strictEqual(result.driver, "runNext")
+	assert.strictEqual(result.driver, "xstate")
 	assert.strictEqual(result.context.currentStage, "")
 })
 
@@ -335,19 +330,16 @@ test("runFsmTick routes a no-studio intent through xstate to select_studio", () 
 
 console.log("\n=== start_stage native-emit ===")
 
-test("composite intent defers start_stage to runNext (returns null)", () => {
+test("composite intents bypass start_stage and route to composite_run_stage", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
-		composite: true,
+		composite: [{ studio: "software", stages: ["design"] }],
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "start_stage")
-	// Composite intents have their own multi-stage delegate not yet
-	// ported — start-stage emitter returns null, wrapper falls back
-	// to runNext.
-	assert.strictEqual(result.driver, "runNext")
+	assert.strictEqual(result.state, "composite_run_stage")
+	assert.strictEqual(result.driver, "xstate")
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -1808,122 +1808,36 @@ export function fsmIntentComplete(slug: string): void {
 
 /** Top-level orchestrator dispatch. The xstate machine + per-state
  *  native-emit handlers in `orchestrator/fsm/native-emit/` own every
- *  derive-state output. This shim only needs to:
+ *  derive-state output, including composite intents. This shim only
+ *  needs to:
  *
  *    1. Surface intent_not_found before the FSM tick (derive-state
  *       returns null for missing intents; tests rely on a concrete
  *       error action).
- *    2. Run the FSM tick. Tamper detection lives inside runFsmTick
- *       so it covers every path uniformly.
- *    3. Fall back to runNextComposite for composite intents — the
- *       multi-stage delegate hasn't ported to native-emit yet.
- *    4. Surface a structural error if anything else falls through —
+ *    2. Run the FSM tick. Tamper detection + cross-cutting consistency
+ *       repair + per-state emission all live inside runFsmTick.
+ *    3. Surface a structural error if the tick produces no action —
  *       indicates a derive-state or native-emit registration gap.
  */
 export function runNext(slug: string): OrchestratorAction {
 	const root = findHaikuRoot()
-	const iDir = join(root, "intents", slug)
-	const intentFile = join(iDir, "intent.md")
+	const intentFile = join(root, "intents", slug, "intent.md")
 
 	if (!existsSync(intentFile)) {
 		return { action: "error", message: `Intent '${slug}' not found` }
 	}
 
 	const tick = runFsmTick(slug)
-	if (tick && tick.driver === "xstate" && tick.action) {
+	if (tick && tick.action) {
 		return tick.action
-	}
-
-	const intent = readFrontmatter(intentFile)
-	if (intent.composite) {
-		return runNextComposite(slug, intent, iDir)
 	}
 
 	return {
 		action: "error",
-		message: `runNext fallback reached for non-composite intent '${slug}' (state: ${tick?.state ?? "unknown"}). Indicates a derive-state output that has no native-emit handler — check orchestrator/fsm/native-emit/index.ts registry.`,
+		message: `runFsmTick produced no action for intent '${slug}' (state: ${tick?.state ?? "unknown"}). Indicates a derive-state output without a native-emit handler — check orchestrator/fsm/native-emit/index.ts.`,
 	}
 }
 
-// ── Composite orchestration ────────────────────────────────────────────────
-
-function runNextComposite(
-	slug: string,
-	intent: Record<string, unknown>,
-	_intentDirPath: string,
-): OrchestratorAction {
-	const composite = intent.composite as Array<{
-		studio: string
-		stages: string[]
-	}>
-	const compositeState = (intent.composite_state || {}) as Record<
-		string,
-		string
-	>
-	const syncRules = (intent.sync || []) as Array<{
-		wait: string[]
-		then: string[]
-	}>
-
-	// Find the first runnable studio:stage
-	for (const entry of composite) {
-		const current = compositeState[entry.studio] || entry.stages[0]
-		if (current === "complete") continue
-		if (!entry.stages.includes(current)) continue
-
-		// Check sync points
-		let blocked = false
-		for (const rule of syncRules) {
-			for (const thenStage of rule.then) {
-				if (thenStage === `${entry.studio}:${current}`) {
-					for (const waitStage of rule.wait) {
-						const [ws, wst] = waitStage.split(":")
-						const wsState = compositeState[ws] || ""
-						const wsStages =
-							composite.find((c) => c.studio === ws)?.stages || []
-						const wsIdx = wsStages.indexOf(wst)
-						const currentIdx = wsStages.indexOf(wsState)
-						if (currentIdx <= wsIdx) {
-							blocked = true
-							break
-						}
-					}
-					if (blocked) break
-				}
-			}
-			if (blocked) break
-		}
-
-		if (!blocked) {
-			return {
-				action: "composite_run_stage",
-				intent: slug,
-				studio: entry.studio,
-				stage: current,
-				hats: resolveStageHats(entry.studio, current),
-				message: `Composite: run '${entry.studio}:${current}'`,
-			}
-		}
-	}
-
-	// Check if all complete
-	const allComplete = composite.every(
-		(e) => compositeState[e.studio] === "complete",
-	)
-	if (allComplete) {
-		return completeOrReviewIntent(
-			slug,
-			"composite",
-			`All composite studios complete for '${slug}'.`,
-		)
-	}
-
-	return {
-		action: "blocked",
-		intent: slug,
-		message: "All runnable stages are sync-blocked — waiting for dependencies",
-	}
-}
 
 // ── Unit listing with dependency resolution ────────────────────────────────
 

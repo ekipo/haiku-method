@@ -14,6 +14,7 @@ import type { OrchestratorAction } from "../../../orchestrator.js"
 import type { DerivedContext } from "../derive-state.js"
 import type { StateName } from "../types.js"
 import complete from "./complete.js"
+import composite from "./composite.js"
 import elaborate from "./elaborate.js"
 import error from "./error.js"
 import execute from "./execute.js"
@@ -39,6 +40,7 @@ const REGISTRY: Partial<Record<StateName, NativeEmitter>> = {
 	gate_review: gate,
 	intent_completion_review: intentCompletion,
 	intent_completion_fix: intentCompletion,
+	composite_run_stage: composite,
 }
 
 /** Set of state names that have a registered emitter. Equivalent to

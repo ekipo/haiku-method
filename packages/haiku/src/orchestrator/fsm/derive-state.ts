@@ -121,6 +121,16 @@ export function deriveCurrentState(
 		}
 	}
 
+	// Composite intents — multi-studio with declared per-studio stage
+	// progressions and cross-studio sync barriers. Routed to its own
+	// native-emit handler that walks the composite + sync rules.
+	if (intent.composite) {
+		return {
+			state: "composite_run_stage",
+			context: baseContext("", "", {}),
+		}
+	}
+
 	// Intent-level phases (intent_review and intent_completion) are
 	// driven by intent.phase, not stage state. They short-circuit
 	// stage processing.

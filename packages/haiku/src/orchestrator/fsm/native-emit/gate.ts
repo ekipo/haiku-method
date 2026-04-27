@@ -67,7 +67,7 @@ import {
 	stageStatePath,
 	writeJson,
 } from "../../../state-tools.js"
-import { readHatDefs } from "../../../studio-reader.js"
+import { readHatDefs, studioSearchPaths } from "../../../studio-reader.js"
 import { emitTelemetry } from "../../../telemetry.js"
 import type { NativeEmitter } from "./_types.js"
 
@@ -75,11 +75,6 @@ import type { NativeEmitter } from "./_types.js"
 // fix-hats list is read directly from STAGE.md frontmatter so we
 // avoid a circular export. Mirrors orchestrator.ts:491.
 function resolveStageFixHatsInline(studio: string, stage: string): string[] {
-	// Use the same studio search paths as resolveStageHats. Re-import
-	// lazily through a local helper to keep the import surface small.
-	const { studioSearchPaths } = require("../../../studio-reader.js") as {
-		studioSearchPaths: () => string[]
-	}
 	for (const base of studioSearchPaths()) {
 		const stageFile = join(base, studio, "stages", stage, "STAGE.md")
 		if (!existsSync(stageFile)) continue

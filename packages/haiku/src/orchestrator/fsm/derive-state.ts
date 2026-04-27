@@ -130,7 +130,10 @@ export function deriveCurrentState(
 			context: baseContext("", "", {}),
 		}
 	}
-	if (phase === "intent_completion") {
+	// Production writes `awaiting_completion_review` via fsmEnterIntentCompletionReview;
+	// `intent_completion` is reserved for callers that want the same routing under
+	// the more descriptive name. Both surface to the same native-emit handler.
+	if (phase === "intent_completion" || phase === "awaiting_completion_review") {
 		const dispatched = intent.completion_review_dispatched === true
 		if (!dispatched) {
 			return {

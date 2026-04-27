@@ -16,6 +16,7 @@
 
 import { createActor, type AnyActorRef } from "xstate"
 import type { OrchestratorAction } from "../../orchestrator.js"
+import { verifyIntentState } from "../../state-integrity.js"
 import { buildStudioConfig } from "./build-studio-config.js"
 import { createMachineForStudio } from "./create-machine-for-studio.js"
 import {
@@ -26,6 +27,7 @@ import {
 	emitNativeAction as registryEmit,
 	XSTATE_NATIVE_STATES as REGISTRY_KEYS,
 } from "./native-emit/index.js"
+import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 
 /** Re-export of the per-state registry's key set for callers that
@@ -58,8 +60,42 @@ export function runFsmTick(
 	slug: string,
 	root?: string,
 ): FsmTickResult | null {
+	// Cross-cutting consistency pre-pass: synthesize completion records
+	// for empty prior stages, regress phase when units lack inputs,
+	// reset active_stage backwards if the active stage is empty. May
+	// short-circuit the tick with a safe_intent_repair action; otherwise
+	// mutations land on disk and derive-state sees the consistent
+	// intent on the read below.
+	const repair = preTickConsistency(slug, root)
+
 	const derived = deriveCurrentState(slug, root)
 	if (!derived) return null
+
+	if (repair) {
+		return {
+			state: "error",
+			context: derived.context,
+			driver: "xstate",
+			action: repair,
+			snapshot: null,
+		}
+	}
+
+	// Tamper detection: verify FSM state wasn't modified via direct file
+	// writes. Only active for hookless harnesses (Claude Code/Kiro have
+	// a guard hook). Must run BEFORE native-emit dispatches so the
+	// integrity contract holds for every path, not just the runNext
+	// fallback.
+	const tamperError = verifyIntentState(slug)
+	if (tamperError) {
+		return {
+			state: "error",
+			context: derived.context,
+			driver: "xstate",
+			action: { action: "error", message: tamperError },
+			snapshot: null,
+		}
+	}
 
 	if (!XSTATE_NATIVE_STATES.has(derived.state)) {
 		return {

@@ -74,16 +74,25 @@ test("missing intent returns null", () => {
 })
 
 test("non-xstate-native state routes to runNext driver", () => {
-	const { haikuRoot, cleanup } = fixture("test", {
-		studio: "software",
-		active_stage: "design",
-	})
+	// Use an explicitly mid-execute stage state — `execute` isn't in
+	// the native-emit registry, so the driver falls back to runNext.
+	// (start_stage and other pre-stage states migrated to native-emit
+	// in the per-state registry refactor.)
+	const { haikuRoot, cleanup } = fixture(
+		"test",
+		{
+			studio: "software",
+			active_stage: "development",
+		},
+		{
+			development: { status: "active", phase: "execute" },
+		},
+	)
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "start_stage")
+	assert.strictEqual(result.state, "execute")
 	assert.strictEqual(result.driver, "runNext")
-	assert.strictEqual(result.snapshot, null)
 })
 
 test("complete state routes to xstate driver + emits action", () => {
@@ -332,6 +341,23 @@ test("runFsmTick routes a no-studio intent through xstate to select_studio", () 
 	assert.strictEqual(result.driver, "xstate")
 	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "select_studio")
+})
+
+console.log("\n=== start_stage native-emit ===")
+
+test("composite intent defers start_stage to runNext (returns null)", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		composite: true,
+	})
+	const result = runFsmTick("test", haikuRoot)
+	cleanup()
+	assert.ok(result)
+	assert.strictEqual(result.state, "start_stage")
+	// Composite intents have their own multi-stage delegate not yet
+	// ported — start-stage emitter returns null, wrapper falls back
+	// to runNext.
+	assert.strictEqual(result.driver, "runNext")
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

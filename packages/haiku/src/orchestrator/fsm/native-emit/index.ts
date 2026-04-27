@@ -16,16 +16,18 @@ import type { StateName } from "../types.js"
 import complete from "./complete.js"
 import error from "./error.js"
 import selectStudio from "./select-studio.js"
+import startStage from "./start-stage.js"
 import type { NativeEmitter } from "./_types.js"
 
 /** Per-state emitter registry. Key = state name returned by
  *  derive-state. Value = the emitter for that state. Each emitter
- *  may return null to defer to runNext (see error.ts for the
- *  variant-not-handled-yet case). */
+ *  may return null to defer to runNext (see error.ts and
+ *  start-stage.ts for variant-not-handled-yet cases). */
 const REGISTRY: Partial<Record<StateName, NativeEmitter>> = {
 	complete,
 	select_studio: selectStudio,
 	error,
+	start_stage: startStage,
 }
 
 /** Set of state names that have a registered emitter. Equivalent to
@@ -37,12 +39,15 @@ export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = new Set(
 
 /** Look up a state's emitter and run it. Returns null when the state
  *  isn't registered OR when the emitter returns null (sub-case
- *  deferral to runNext). */
+ *  deferral to runNext). `root` flows from runFsmTick test fixtures;
+ *  production callers omit it and emitters fall back to
+ *  findHaikuRoot. */
 export function emitNativeAction(
 	state: StateName,
 	context: DerivedContext,
+	root?: string,
 ): OrchestratorAction | null {
 	const emitter = REGISTRY[state]
 	if (!emitter) return null
-	return emitter(context)
+	return emitter(context, root)
 }

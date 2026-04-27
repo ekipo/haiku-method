@@ -71,7 +71,7 @@ export function runFsmTick(
 		}
 	}
 
-	const action = emitNativeAction(derived.state, derived.context)
+	const action = emitNativeAction(derived.state, derived.context, root)
 
 	const studio = derived.context.studio
 	let snapshot: ReturnType<AnyActorRef["getSnapshot"]> | null = null

@@ -7,7 +7,7 @@
 // state has a per-state emitter that returns non-null, the result
 // flows back as the xstate-driver action. If the emitter returns
 // null (a sub-case it doesn't handle), the wrapper falls back to
-// runNext until that sub-case ports too.
+// runNext until that sub-case ports.
 //
 // This pattern is the single source of truth for emission as states
 // migrate. Adding a state = adding a file + registering it. Deleting
@@ -19,7 +19,12 @@ import type { DerivedContext } from "../derive-state.js"
 /** Emit an OrchestratorAction for a derived state. May perform side
  *  effects (FSM writes, git operations) — the runNext counterpart
  *  does. Return null to defer to runNext when this emitter doesn't
- *  yet handle the input's sub-case. */
+ *  yet handle the input's sub-case.
+ *
+ *  `root` is the absolute path to the .haiku directory (passed by
+ *  test fixtures), or undefined to fall back to `findHaikuRoot()` for
+ *  production callers. */
 export type NativeEmitter = (
 	context: DerivedContext,
+	root?: string,
 ) => OrchestratorAction | null

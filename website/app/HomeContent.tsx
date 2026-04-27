@@ -860,9 +860,10 @@ export default function HomeContent({
 							<p className="text-xs text-gray-600 dark:text-gray-300">
 								<strong className="text-violet-500">New projects only:</strong>{" "}
 								A visual design direction picker guides you through choosing an
-								aesthetic -- Brutalist, Editorial, Dense, or Playful -- with
-								tunable parameters. The selection produces a design blueprint
-								that shapes every wireframe and UI component downstream.
+								aesthetic -- Brutalist, Editorial, Dense, or Playful. Pick one
+								as the final direction or ask the AI for more variants. The
+								selection produces a design blueprint that shapes every
+								wireframe and UI component downstream.
 							</p>
 						</motion.div>
 
@@ -907,8 +908,10 @@ export default function HomeContent({
 								))}
 							</div>
 							<p className="text-xs text-gray-500 dark:text-gray-400">
-								You can also tune parameters like density, expressiveness, shape
-								language, and color mood. The result is a{" "}
+								If none of the previews land, ask the AI for more variants --
+								keep the ones you like and steer the next batch with comments.
+								You can also drop pinned annotations directly on the chosen
+								preview for pointed feedback. The result is a{" "}
 								<strong>design blueprint</strong> that feeds into wireframe
 								generation and hat context -- so your wireframes carry the
 								chosen aesthetic instead of generic gray boxes.

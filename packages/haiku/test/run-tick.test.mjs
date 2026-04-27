@@ -327,5 +327,72 @@ test("composite intents bypass start_stage and route to composite_run_stage", ()
 	assert.strictEqual(result.state, "composite_run_stage")
 })
 
+console.log("\n=== Test isolation against side-effecting handlers ===")
+
+// Two pollution incidents during the runNext → workflow-handlers
+// migration this session: tests with active_stage="design" or
+// phase="gate" triggered start-stage / gate handlers, which called
+// workflowStartStage / workflowGateAsk, which created
+// haiku/test/* branches and .haiku/intents/test/ artifacts in
+// the parent repo. setHaikuRootForTests + setIsGitRepoForTests
+// together pin the handler to the tmpdir + tell it git is unavailable,
+// so every git op short-circuits but the state.json writes still
+// land in the tmpdir.
+const { setHaikuRootForTests, setIsGitRepoForTests } = await import(
+	"../src/state/shared.ts"
+)
+const { existsSync, readFileSync } = await import("node:fs")
+const { execSync } = await import("node:child_process")
+
+test("side-effecting handler against isolated fixture does not pollute parent repo", () => {
+	// Snapshot parent-repo branch list to detect any haiku/* branch
+	// created during the test.
+	const branchesBefore = execSync("git branch", { encoding: "utf8" })
+		.split("\n")
+		.filter((b) => b.includes("haiku/"))
+		.sort()
+
+	const { haikuRoot, cleanup } = fixture("isolation-canary", {
+		studio: "software",
+		// active_stage empty → derive-state returns start_stage with
+		// currentStage = first software stage. The handler runs through
+		// to workflowStartStage, which does git ops. With
+		// setIsGitRepoForTests(false), those ops short-circuit.
+	})
+	setHaikuRootForTests(haikuRoot)
+	setIsGitRepoForTests(false)
+	try {
+		const result = runWorkflowTick("isolation-canary", haikuRoot)
+		assert.ok(result, "handler should produce a tick")
+		assert.strictEqual(result.state, "start_stage")
+		assert.ok(result.action, "handler should emit an action")
+		assert.strictEqual(result.action.action, "start_stage")
+		// state.json should land in the tmpdir, NOT in the parent repo.
+		const tmpStatePath = `${haikuRoot}/intents/isolation-canary/stages/inception/state.json`
+		assert.ok(
+			existsSync(tmpStatePath),
+			`expected state.json in tmpdir at ${tmpStatePath}`,
+		)
+		const stateData = JSON.parse(readFileSync(tmpStatePath, "utf8"))
+		assert.strictEqual(stateData.status, "active")
+		assert.strictEqual(stateData.phase, "elaborate")
+	} finally {
+		setHaikuRootForTests(null)
+		setIsGitRepoForTests(null)
+		cleanup()
+	}
+
+	const branchesAfter = execSync("git branch", { encoding: "utf8" })
+		.split("\n")
+		.filter((b) => b.includes("haiku/"))
+		.sort()
+
+	assert.deepStrictEqual(
+		branchesAfter,
+		branchesBefore,
+		"side-effecting handler must not create branches in the parent repo when isolated via setHaikuRootForTests + setIsGitRepoForTests",
+	)
+})
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

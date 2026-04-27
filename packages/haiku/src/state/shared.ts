@@ -47,6 +47,15 @@ export function _resetIsGitRepoForTests(): void {
 	_isGitRepo = null
 }
 
+/** Pin isGitRepo to a specific value. Combined with setHaikuRootForTests,
+ *  this gives tests full isolation when exercising side-effecting workflow
+ *  handlers (workflowStartStage, workflowGateAsk, etc.) against a tmpdir
+ *  fixture: the handler thinks there's no git, skips every branch/merge
+ *  operation, but still writes state.json + emits the action. */
+export function setIsGitRepoForTests(value: boolean | null): void {
+	_isGitRepo = value
+}
+
 // ── Path resolution ────────────────────────────────────────────────────────
 
 /** Test-only override for findHaikuRoot. Set via setHaikuRootForTests

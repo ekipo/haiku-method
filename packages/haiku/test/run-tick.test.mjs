@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { runWorkflowTick, REGISTERED_STATES, dispatchAction } = await import(
+const { runWorkflowTick, WORKFLOW_STATES, dispatchHandler } = await import(
 	"../src/orchestrator/workflow/run-tick.ts"
 )
 
@@ -82,11 +82,10 @@ test("composite intents route through xstate to composite_run_stage", () => {
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "composite_run_stage")
-	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action)
 })
 
-test("complete state routes to workflow driver + emits action", () => {
+test("complete state emits action", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
@@ -95,7 +94,6 @@ test("complete state routes to workflow driver + emits action", () => {
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
-	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "complete")
 	assert.strictEqual(
@@ -104,7 +102,7 @@ test("complete state routes to workflow driver + emits action", () => {
 	)
 })
 
-test("archived (flag) routes to workflow error with unarchive instructions", () => {
+test("archived (flag) emits an error action with unarchive instructions", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		archived: true,
@@ -113,7 +111,6 @@ test("archived (flag) routes to workflow error with unarchive instructions", () 
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "error")
-	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "error")
 	assert.ok(
 		result.action.message.includes("haiku_intent_unarchive"),
@@ -121,7 +118,7 @@ test("archived (flag) routes to workflow error with unarchive instructions", () 
 	)
 })
 
-test("status=archived (legacy) routes to workflow error with repair instructions", () => {
+test("status=archived (legacy) emits an error action with repair instructions", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "archived",
@@ -130,7 +127,6 @@ test("status=archived (legacy) routes to workflow error with repair instructions
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "error")
-	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "error")
 	assert.ok(
 		result.action.message.includes("/haiku:repair"),
@@ -146,9 +142,8 @@ test("complete-without-studio still emits action", () => {
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
-	// dispatchAction is studio-independent for `complete`; the
+	// dispatchHandler is studio-independent for `complete`; the
 	// action is emitted regardless of whether studio is set.
-	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.action.action, "complete")
 })
 
@@ -157,7 +152,7 @@ console.log("\n=== Workflow handler registry ===")
 test("registry contains the migrated states", () => {
 	for (const name of ["complete", "select_studio", "error"]) {
 		assert.ok(
-			REGISTERED_STATES.has(name),
+			WORKFLOW_STATES.has(name),
 			`registry should include '${name}'`,
 		)
 	}
@@ -169,7 +164,7 @@ test("registry does NOT contain terminal-emit-only states", () => {
 	// and have no per-state file in handlers/.
 	for (const name of ["escalate", "blocked"]) {
 		assert.ok(
-			!REGISTERED_STATES.has(name),
+			!WORKFLOW_STATES.has(name),
 			`registry should NOT include emission-only '${name}'`,
 		)
 	}
@@ -177,7 +172,7 @@ test("registry does NOT contain terminal-emit-only states", () => {
 
 console.log("\n=== Tick result shape ===")
 
-test("workflow tick result no longer carries an workflow snapshot", () => {
+test("workflow tick result has no snapshot field", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
@@ -188,25 +183,24 @@ test("workflow tick result no longer carries an workflow snapshot", () => {
 	assert.strictEqual("snapshot" in result, false)
 })
 
-test("workflow driver carries context", () => {
+test("context flows through to result", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		composite: [{ studio: "software", stages: ["design"] }],
 	})
 	const result = runWorkflowTick("test", haikuRoot)
 	cleanup()
-	assert.strictEqual(result.driver, "workflow")
 	assert.strictEqual(result.context.currentStage, "")
 })
 
 console.log("\n=== Parity vs runNext (complete state) ===")
 
-test("dispatchAction('complete') matches runNext's shape byte-for-byte", () => {
+test("dispatchHandler('complete') matches runNext's shape byte-for-byte", () => {
 	// runNext emits this exact shape at orchestrator.ts:2200 when
 	// it sees status=completed. The workflow handler must
 	// match byte-for-byte or the migration is a regression.
 	const slug = "test-completion"
-	const action = dispatchAction("complete", {
+	const action = dispatchHandler("complete", {
 		slug,
 		studio: "software",
 		intentDirPath: `/dummy/${slug}`,
@@ -221,9 +215,9 @@ test("dispatchAction('complete') matches runNext's shape byte-for-byte", () => {
 	})
 })
 
-test("dispatchAction returns null for unmigrated states", () => {
+test("dispatchHandler returns null for unmigrated states", () => {
 	for (const name of ["blocked", "escalate", "elaborate"]) {
-		const action = dispatchAction(name, {
+		const action = dispatchHandler(name, {
 			slug: "x",
 			studio: "software",
 			intentDirPath: "/dummy",
@@ -240,12 +234,12 @@ test("dispatchAction returns null for unmigrated states", () => {
 	}
 })
 
-test("dispatchAction('error') without recognized variant falls back to runNext (returns null)", () => {
+test("dispatchHandler('error') without recognized variant falls back to runNext (returns null)", () => {
 	// 'error' is in the registry, but without intent.archived or
 	// status=archived the emitter doesn't know which variant to
 	// emit — so it returns null and the wrapper falls back to
 	// runNext. This guards against silently emitting wrong errors.
-	const action = dispatchAction("error", {
+	const action = dispatchHandler("error", {
 		slug: "x",
 		studio: "software",
 		intentDirPath: "/dummy",
@@ -257,8 +251,8 @@ test("dispatchAction('error') without recognized variant falls back to runNext (
 	assert.strictEqual(action, null)
 })
 
-test("dispatchAction('error') for archived flag emits unarchive message", () => {
-	const action = dispatchAction("error", {
+test("dispatchHandler('error') for archived flag emits unarchive message", () => {
+	const action = dispatchHandler("error", {
 		slug: "test-archived",
 		studio: "software",
 		intentDirPath: "/dummy",
@@ -272,9 +266,9 @@ test("dispatchAction('error') for archived flag emits unarchive message", () => 
 	assert.ok(action.message.includes("haiku_intent_unarchive"))
 })
 
-test("dispatchAction('select_studio') produces studio list + correct message", () => {
+test("dispatchHandler('select_studio') produces studio list + correct message", () => {
 	const slug = "test-no-studio"
-	const action = dispatchAction("select_studio", {
+	const action = dispatchHandler("select_studio", {
 		slug,
 		studio: "",
 		intentDirPath: `/dummy/${slug}`,
@@ -316,7 +310,6 @@ test("runWorkflowTick routes a no-studio intent through xstate to select_studio"
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "select_studio")
-	assert.strictEqual(result.driver, "workflow")
 	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "select_studio")
 })
@@ -332,7 +325,6 @@ test("composite intents bypass start_stage and route to composite_run_stage", ()
 	cleanup()
 	assert.ok(result)
 	assert.strictEqual(result.state, "composite_run_stage")
-	assert.strictEqual(result.driver, "workflow")
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

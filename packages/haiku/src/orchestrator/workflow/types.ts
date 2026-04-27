@@ -24,10 +24,6 @@ export interface WorkflowContext {
 	readonly externalReviewUrl?: string
 }
 
-/** Back-compat alias for the previous `FsmContext` name. New code
- *  should use `WorkflowContext`. */
-export type FsmContext = WorkflowContext
-
 /** Discriminator across every concrete state derive-state can return
  *  + every action shape per-state handlers can emit. Keep this
  *  exhaustive so TS exhaustiveness checks catch missing cases when

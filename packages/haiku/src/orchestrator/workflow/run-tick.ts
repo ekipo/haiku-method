@@ -26,25 +26,14 @@ import {
 import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 
-/** Set of state names with a registered handler. Currently every
- *  derive-state output has one. Re-exported for tests that probe
- *  registry membership. */
-export const REGISTERED_STATES: ReadonlySet<StateName> = WORKFLOW_STATES
+/** Re-export of the registry's key set + dispatch function so
+ *  callers don't have to reach into handlers/index.js for them. */
+export { dispatchHandler, WORKFLOW_STATES }
 
-/** The dispatch function. Look up a state's handler in the registry
- *  and run it. Re-exported so callers can invoke a handler directly
- *  (mostly used by tests verifying handler-level behavior). */
-export const dispatchAction = dispatchHandler
-
-/** Result of a single workflow tick. The `action` field is the
- *  OrchestratorAction the agent should follow. `driver` is "workflow"
- *  when a registered handler produced an action, "fallback" when
- *  none did (currently unreachable — every derive-state output has a
- *  handler). */
+/** Result of a single workflow tick. */
 export interface WorkflowTickResult {
 	readonly state: StateName
 	readonly context: DerivedState["context"]
-	readonly driver: "workflow" | "fallback"
 	readonly action: OrchestratorAction | null
 }
 
@@ -91,7 +80,6 @@ export function runWorkflowTick(
 		return {
 			state: "error",
 			context: derived.context,
-			driver: "workflow",
 			action: repair,
 		}
 	}
@@ -101,17 +89,15 @@ export function runWorkflowTick(
 		return {
 			state: "error",
 			context: derived.context,
-			driver: "workflow",
 			action: { action: "error", message: tamperError },
 		}
 	}
 
-	const action = dispatchAction(derived.state, derived.context, root)
+	const action = dispatchHandler(derived.state, derived.context, root)
 
 	return {
 		state: derived.state,
 		context: derived.context,
-		driver: action ? "workflow" : "fallback",
 		action,
 	}
 }

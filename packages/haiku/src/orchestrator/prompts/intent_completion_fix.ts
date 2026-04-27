@@ -13,11 +13,11 @@ import {
 	batchDispatchDirective,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
-	FSM_CONTRACTS_FIX_LOOP_BLOCK,
 	inlineFile,
 	readInterpretation,
 	resolveReviewAgentModel,
 } from "./_helpers.js"
+import { WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK } from "./WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK.js"
 import { definePromptBuilder } from "./define.js"
 
 interface FixItem {
@@ -39,7 +39,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 	const fixHatPaths = readStudioFixHatPaths(studio)
 
 	const sections: string[] = []
-	sections.push(FSM_CONTRACTS_FIX_LOOP_BLOCK)
+	sections.push(WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK)
 
 	const icHeader = [
 		`## Intent-Completion Fix Loop: ${items.length} finding(s) in parallel`,

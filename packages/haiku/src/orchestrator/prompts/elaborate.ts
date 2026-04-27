@@ -33,9 +33,9 @@ import {
 import {
 	batchDispatchDirective,
 	emitSubagentDispatchBlock,
-	FSM_CONTRACTS_ELABORATE_BLOCK,
 	inlineFile,
 } from "./_helpers.js"
+import { WORKFLOW_CONTRACTS_ELABORATE_BLOCK } from "./WORKFLOW_CONTRACTS_ELABORATE_BLOCK.js"
 import { definePromptBuilder } from "./define.js"
 
 interface PendingFeedback {
@@ -119,7 +119,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 			)
 		}
 
-		sections.push(FSM_CONTRACTS_ELABORATE_BLOCK)
+		sections.push(WORKFLOW_CONTRACTS_ELABORATE_BLOCK)
 
 		sections.push(
 			[
@@ -192,7 +192,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 		)
 	}
 
-	sections.push(FSM_CONTRACTS_ELABORATE_BLOCK)
+	sections.push(WORKFLOW_CONTRACTS_ELABORATE_BLOCK)
 
 	// Resolve upstream stage inputs — load actual content from prior stages.
 	if (stageDef?.data?.inputs && Array.isArray(stageDef.data.inputs)) {

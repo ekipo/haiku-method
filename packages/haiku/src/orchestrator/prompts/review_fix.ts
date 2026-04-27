@@ -18,10 +18,10 @@ import {
 	batchDispatchDirective,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
-	FSM_CONTRACTS_FIX_LOOP_BLOCK,
 	inlineFile,
 	readInterpretation,
 } from "./_helpers.js"
+import { WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK } from "./WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK.js"
 import { definePromptBuilder } from "./define.js"
 
 interface FixItem {
@@ -43,7 +43,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 	const haikuRoot = findHaikuRoot()
 
 	const sections: string[] = []
-	sections.push(FSM_CONTRACTS_FIX_LOOP_BLOCK)
+	sections.push(WORKFLOW_CONTRACTS_FIX_LOOP_BLOCK)
 
 	const headerLines = [
 		`## Fix Loop: ${items.length} finding(s) in parallel`,

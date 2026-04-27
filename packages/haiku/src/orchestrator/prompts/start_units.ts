@@ -28,11 +28,11 @@ import {
 	buildInlineSubagentContext,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
-	FSM_CONTRACTS_EXECUTE_BLOCK,
 	inlineFile,
 	readInterpretation,
-	SUBAGENT_ERROR_RECOVERY,
 } from "./_helpers.js"
+import { SUBAGENT_ERROR_RECOVERY } from "./SUBAGENT_ERROR_RECOVERY.js"
+import { WORKFLOW_CONTRACTS_EXECUTE_BLOCK } from "./WORKFLOW_CONTRACTS_EXECUTE_BLOCK.js"
 import { definePromptBuilder } from "./define.js"
 
 export default definePromptBuilder(({ slug, studio, action, dir }) => {
@@ -42,7 +42,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 	const firstHat = (action.first_hat as string) || hats[0] || ""
 
 	const sections: string[] = []
-	sections.push(FSM_CONTRACTS_EXECUTE_BLOCK)
+	sections.push(WORKFLOW_CONTRACTS_EXECUTE_BLOCK)
 
 	// Resolve file paths (NOT content) — subagents read these
 	// themselves. Keeps main-agent AND per-subagent context small.

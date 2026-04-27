@@ -29,8 +29,8 @@ import {
 	emitSubagentDispatchBlock,
 	inlineFile,
 	readInterpretation,
-	SUBAGENT_ERROR_RECOVERY,
 } from "./_helpers.js"
+import { SUBAGENT_ERROR_RECOVERY } from "./SUBAGENT_ERROR_RECOVERY.js"
 import { definePromptBuilder } from "./define.js"
 
 interface UnitEntry {

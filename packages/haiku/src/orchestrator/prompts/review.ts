@@ -16,18 +16,18 @@ import {
 	batchDispatchDirective,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
-	FSM_CONTRACTS_REVIEW_BLOCK,
 	inlineFile,
 	readInterpretation,
 	resolveReviewAgentModel,
 } from "./_helpers.js"
+import { WORKFLOW_CONTRACTS_REVIEW_BLOCK } from "./WORKFLOW_CONTRACTS_REVIEW_BLOCK.js"
 import { definePromptBuilder } from "./define.js"
 
 export default definePromptBuilder(({ slug, studio, action }) => {
 	const stage = action.stage as string
 	const sections: string[] = []
 
-	sections.push(FSM_CONTRACTS_REVIEW_BLOCK)
+	sections.push(WORKFLOW_CONTRACTS_REVIEW_BLOCK)
 
 	// Collect agent name → mandate FILE PATH.
 	let agentPaths: Record<string, string> = readReviewAgentPaths(studio, stage)

@@ -74,10 +74,8 @@ test("missing intent returns null", () => {
 })
 
 test("non-xstate-native state routes to runNext driver", () => {
-	// Use an explicitly mid-execute stage state — `execute` isn't in
-	// the native-emit registry, so the driver falls back to runNext.
-	// (start_stage and other pre-stage states migrated to native-emit
-	// in the per-state registry refactor.)
+	// Use a stage state in the gate phase — `gate_review` isn't yet
+	// in the native-emit registry, so the driver falls back to runNext.
 	const { haikuRoot, cleanup } = fixture(
 		"test",
 		{
@@ -85,13 +83,13 @@ test("non-xstate-native state routes to runNext driver", () => {
 			active_stage: "development",
 		},
 		{
-			development: { status: "active", phase: "execute" },
+			development: { status: "active", phase: "gate" },
 		},
 	)
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "execute")
+	assert.strictEqual(result.state, "gate_review")
 	assert.strictEqual(result.driver, "runNext")
 })
 
@@ -175,13 +173,7 @@ test("registry contains the migrated states", () => {
 })
 
 test("registry does NOT contain stage-active states (still on runNext)", () => {
-	for (const name of [
-		"escalate",
-		"blocked",
-		"execute",
-		"review",
-		"gate_review",
-	]) {
+	for (const name of ["escalate", "blocked", "gate_review"]) {
 		assert.ok(
 			!XSTATE_NATIVE_STATES.has(name),
 			`registry should NOT include unmigrated '${name}' yet`,
@@ -210,14 +202,14 @@ test("runNext-driven results carry context but no snapshot", () => {
 		studio: "software",
 		active_stage: "development",
 	}, {
-		development: { status: "active", phase: "execute" },
+		development: { status: "active", phase: "gate" },
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.strictEqual(result.driver, "runNext")
 	assert.strictEqual(result.snapshot, null)
 	assert.strictEqual(result.context.currentStage, "development")
-	assert.strictEqual(result.context.currentPhase, "execute")
+	assert.strictEqual(result.context.currentPhase, "gate")
 })
 
 console.log("\n=== Parity vs runNext (complete state) ===")

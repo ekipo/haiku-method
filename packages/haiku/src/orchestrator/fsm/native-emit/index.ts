@@ -16,6 +16,8 @@ import type { StateName } from "../types.js"
 import complete from "./complete.js"
 import elaborate from "./elaborate.js"
 import error from "./error.js"
+import execute from "./execute.js"
+import review from "./review.js"
 import selectStudio from "./select-studio.js"
 import startStage from "./start-stage.js"
 import type { NativeEmitter } from "./_types.js"
@@ -30,6 +32,8 @@ const REGISTRY: Partial<Record<StateName, NativeEmitter>> = {
 	error,
 	start_stage: startStage,
 	elaborate,
+	execute,
+	review,
 }
 
 /** Set of state names that have a registered emitter. Equivalent to

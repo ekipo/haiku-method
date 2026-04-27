@@ -608,7 +608,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 
 /** Append `feedback-assessor` as the terminal hat when a unit declares
  *  `closes:` items. Mirrors state-tools.ts's resolveUnitHats. */
-function resolveUnitHatsInStudio(
+export function resolveUnitHatsInStudio(
 	studio: string,
 	stage: string,
 	slug: string,
@@ -1286,7 +1286,7 @@ interface QualityGateResult {
  * Read quality_gates from intent.md and all unit files in a stage,
  * execute each gate command, and return failures.
  */
-function runQualityGates(slug: string, stage: string): QualityGateResult[] {
+export function runQualityGates(slug: string, stage: string): QualityGateResult[] {
 	const root = findHaikuRoot()
 	const iDir = join(root, "intents", slug)
 	const intentFile = join(iDir, "intent.md")
@@ -4299,7 +4299,7 @@ export function listUnits(intentDirPath: string, stage: string): UnitInfo[] {
  *  - unitWave: Map<unitName, waveNumber>
  *  - totalWaves: total number of waves
  */
-function computeUnitWaves(units: UnitInfo[]): {
+export function computeUnitWaves(units: UnitInfo[]): {
 	waves: Map<number, string[]>
 	unitWave: Map<string, number>
 	totalWaves: number
@@ -4348,7 +4348,7 @@ function computeUnitWaves(units: UnitInfo[]): {
 /**
  * Find the current wave: the lowest wave number that still has pending units.
  */
-function currentWaveNumber(
+export function currentWaveNumber(
 	units: UnitInfo[],
 	unitWave: Map<string, number>,
 	totalWaves: number,

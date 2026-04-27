@@ -11,6 +11,12 @@ import ListFilesQueryArtifact from "./graphql/gitlab/__generated__/operationsLis
 import type { operationsListIntentsTreeQuery$data } from "./graphql/gitlab/__generated__/operationsListIntentsTreeQuery.graphql"
 import ListIntentsTreeQuery from "./graphql/gitlab/__generated__/operationsListIntentsTreeQuery.graphql"
 import ReadFileQuery from "./graphql/gitlab/__generated__/operationsReadFileQuery.graphql"
+import {
+	classifyArtifact,
+	mergeKnowledge as mergeKnowledgeShared,
+	parseIntentFromRaw as parseIntentFromRawShared,
+	parseStageStateJson,
+} from "./intent-parsing"
 import { parseSettingsYaml } from "./resolve-links"
 import type {
 	BrowseProvider,
@@ -33,14 +39,6 @@ interface GitLabIntentRefData {
 	allBlobs: Array<{ name: string; path: string }>
 	allTrees: Array<{ name: string; path: string }>
 	assets: Array<{ path: string; name: string; rawUrl: string }>
-}
-
-function classifyArtifact(name: string): HaikuArtifact["type"] {
-	const lower = name.toLowerCase()
-	if (lower.endsWith(".md")) return "markdown"
-	if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html"
-	if (/\.(png|jpe?g|gif|svg|webp|avif|bmp|ico)$/.test(lower)) return "image"
-	return "other"
 }
 
 export class GitLabProvider implements BrowseProvider {
@@ -244,10 +242,9 @@ export class GitLabProvider implements BrowseProvider {
 		return { prUrl: null, prStatus: null, prNumber: null }
 	}
 
-	/** Parse raw intent.md text into a HaikuIntent with optional branch/MR metadata.
-	 *  Malformed frontmatter is reported to Sentry and recovered to empty data so the
-	 *  broken intent still appears in the list (title falls back to slug) instead of
-	 *  silently disappearing. */
+	/** Parse raw intent.md text into a HaikuIntent — delegates to the
+	 *  shared cross-provider helper so this surface can't drift from
+	 *  github-provider.ts. */
 	private parseIntentFromRaw(
 		slug: string,
 		rawText: string,
@@ -258,44 +255,7 @@ export class GitLabProvider implements BrowseProvider {
 			prNumber?: number | null
 		},
 	): HaikuIntent {
-		const { data, content } = parseFrontmatter(rawText, {
-			provider: "gitlab",
-			path: `.haiku/intents/${slug}/intent.md`,
-			slug,
-			branch: meta?.branch,
-		})
-		const studio = (data.studio as string) || "ideation"
-		const stages = (data.stages as string[]) || []
-
-		return {
-			slug,
-			title: (data.title as string) || slug,
-			studio,
-			activeStage: (data.active_stage as string) || "",
-			mode: (data.mode as string) || "continuous",
-			createdAt:
-				(data.created_at as string) || (data.created as string) || null,
-			startedAt: (data.started_at as string) || null,
-			completedAt: (data.completed_at as string) || null,
-			studioStages: (data.stages as string[]) || [],
-			composite:
-				(data.composite as Array<{ studio: string; stages: string[] }>) || null,
-			...normalizeIntentStatus(
-				(data.status as string) || "active",
-				(data.completed_at as string) || null,
-				stages.length > 0 ? stages.indexOf(data.active_stage as string) : 0,
-				stages.length,
-			),
-			stagesTotal: stages.length,
-			archived: data.archived === true,
-			follows: (data.follows as string) || null,
-			content,
-			raw: data,
-			branch: meta?.branch,
-			prUrl: meta?.prUrl ?? null,
-			prStatus: meta?.prStatus ?? null,
-			prNumber: meta?.prNumber ?? null,
-		}
+		return parseIntentFromRawShared("gitlab", slug, rawText, meta)
 	}
 
 	/**
@@ -641,23 +601,10 @@ export class GitLabProvider implements BrowseProvider {
 			}
 		}
 
-		// state.json
-		const stateRaw = data.blobByPath.get(`${stagePath}/state.json`)
-		let phase = ""
-		let startedAt: string | null = null
-		let completedAt: string | null = null
-		let gateOutcome: string | null = null
-		if (stateRaw) {
-			try {
-				const s = JSON.parse(stateRaw)
-				phase = s.phase || ""
-				startedAt = s.started_at || null
-				completedAt = s.completed_at || null
-				gateOutcome = s.gate_outcome || null
-			} catch {
-				/* ignore */
-			}
-		}
+		// state.json — shared parsing keeps gitlab + github in sync
+		const { phase, startedAt, completedAt, gateOutcome } = parseStageStateJson(
+			data.blobByPath.get(`${stagePath}/state.json`),
+		)
 
 		let status: "pending" | "active" | "complete" = "pending"
 		if (stageName === activeStage) status = "active"
@@ -714,15 +661,13 @@ export class GitLabProvider implements BrowseProvider {
 			}))
 	}
 
-	/** Merge knowledge files — overlay wins on filename collision, new files are added. */
+	/** Merge knowledge files — overlay wins on filename collision.
+	 *  Thin shim over the shared cross-provider helper. */
 	private mergeKnowledge(
 		base: HaikuKnowledgeFile[],
 		overlay: HaikuKnowledgeFile[],
 	): HaikuKnowledgeFile[] {
-		const byName = new Map<string, HaikuKnowledgeFile>()
-		for (const f of base) byName.set(f.name, f)
-		for (const f of overlay) byName.set(f.name, f)
-		return Array.from(byName.values())
+		return mergeKnowledgeShared(base, overlay)
 	}
 
 	/** Derive ordered stage dir names from tree listing. */

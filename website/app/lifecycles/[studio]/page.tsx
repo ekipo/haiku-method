@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 	const { studio } = await params
 	return {
 		title: `${studio} lifecycle - H·AI·K·U`,
-		description: `Auto-generated FSM state diagram for the ${studio} studio.`,
+		description: `Auto-generated workflow state diagram for the ${studio} studio.`,
 	}
 }
 

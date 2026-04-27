@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs"
 import contextMonitor from "./context-monitor.js"
 import enforceIteration from "./enforce-iteration.js"
-import guardFsmFields from "./guard-fsm-fields.js"
+import guardWorkflowFields from "./guard-workflow-fields.js"
 import injectStateFile from "./inject-state-file.js"
 import promptGuard from "./prompt-guard.js"
 import redirectPlanMode from "./redirect-plan-mode.js"
@@ -25,7 +25,7 @@ import workflowGuard from "./workflow-guard.js"
 const HOOKS: readonly HookDef[] = [
 	contextMonitor,
 	enforceIteration,
-	guardFsmFields,
+	guardWorkflowFields,
 	injectStateFile,
 	promptGuard,
 	redirectPlanMode,

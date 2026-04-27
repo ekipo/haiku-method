@@ -139,7 +139,7 @@ knowledge/                         # Shared knowledge artifacts
   DISCOVERY.md                     # Domain research from inception
 stages/
   {stage-name}/
-    state.json                     # Stage FSM state
+    state.json                     # Stage workflow state
     units/
       unit-01-slug.md              # Unit files with YAML frontmatter
       unit-02-slug.md
@@ -163,7 +163,7 @@ completed_at: null
 
 ### state.json Format
 
-Each stage has a \`state.json\` that tracks the stage FSM:
+Each stage has a \`state.json\` that tracks the stage workflow:
 
 \`\`\`json
 {
@@ -197,7 +197,7 @@ completed_at: "2025-01-16T00:00:00Z"
 ---
 \`\`\`
 
-The \`inputs:\` field lists relative paths from the intent root that this unit depends on. These tell the FSM what upstream artifacts must exist before execution. The paths reference:
+The \`inputs:\` field lists relative paths from the intent root that this unit depends on. These tell the workflow engine what upstream artifacts must exist before execution. The paths reference:
 - \`intent.md\` — the intent definition itself
 - \`knowledge/DISCOVERY.md\` — inception's discovery output
 - \`stages/{stage}/{ARTIFACT}.md\` — discovery outputs from prior stages

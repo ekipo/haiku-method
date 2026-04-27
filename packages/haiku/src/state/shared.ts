@@ -51,7 +51,7 @@ export function _resetIsGitRepoForTests(): void {
 
 /** Test-only override for findHaikuRoot. Set via setHaikuRootForTests
  *  before exercising workflow handlers (or any code path that calls
- *  fsmStartStage / fsmGateAsk / etc.) with a tmpdir intent fixture.
+ *  workflowStartStage / workflowGateAsk / etc.) with a tmpdir intent fixture.
  *  Without this, side-effecting handlers find the parent repo's
  *  .haiku/ and pollute it with stray branches and stage-state files. */
 let _haikuRootOverride: string | null = null
@@ -173,7 +173,7 @@ export function parseFrontmatter(raw: string): {
 } {
 	// Auto-recover from duplicate top-level YAML keys by keeping the last
 	// occurrence and reparsing. haiku_repair separately flags these files so
-	// they get rewritten on disk; this keeps the FSM running in the meantime.
+	// they get rewritten on disk; this keeps the workflow running in the meantime.
 	const tryParse = (text: string) => {
 		const { data, content } = matter(text)
 		return {

@@ -1,5 +1,5 @@
 // tools/state/haiku_unit_set.ts — Set a single field on a unit's
-// frontmatter. Refuses status=completed direct writes (the FSM owns
+// frontmatter. Refuses status=completed direct writes (the workflow engine owns
 // completion exclusively via advance_hat).
 
 import { enforceStageBranch } from "../../state/active-stage.js"
@@ -11,7 +11,7 @@ import { text } from "./_text.js"
 export default defineTool({
 	name: "haiku_unit_set",
 	description:
-		"Set a field on a unit's frontmatter. Refuses status=completed (FSM-only).",
+		"Set a field on a unit's frontmatter. Refuses status=completed (workflow-only).",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -33,7 +33,7 @@ export default defineTool({
 					field,
 					value,
 					message:
-						'Cannot set status to "completed" directly — unit completion is FSM-controlled. Call `haiku_unit_advance_hat` to let the FSM auto-complete the unit\'s last hat, which runs scope validation, feedback-assessor closure, and worktree merge-back. Setting status to other values (pending, active, blocked) is fine.',
+						'Cannot set status to "completed" directly — unit completion is workflow-controlled. Call `haiku_unit_advance_hat` to let the workflow engine auto-complete the unit\'s last hat, which runs scope validation, feedback-assessor closure, and worktree merge-back. Setting status to other values (pending, active, blocked) is fine.',
 				}),
 			)
 		}

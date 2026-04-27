@@ -5,13 +5,13 @@
 //
 //   1. Output validation (defense-in-depth) → outputs_missing
 //   2. Quality gates fail → fix_quality_gates (stays in review)
-//   3. Quality gates pass → fsmAdvancePhase to gate, emit review
+//   3. Quality gates pass → workflowAdvancePhase to gate, emit review
 //      (agent runs adversarial review agents next tick)
 //
-// Side effect: fsmAdvancePhase to gate when gates pass.
+// Side effect: workflowAdvancePhase to gate when gates pass.
 
 import {
-	fsmAdvancePhase,
+	workflowAdvancePhase,
 	runQualityGates,
 	validateStageOutputs,
 } from "../../../orchestrator.js"
@@ -44,7 +44,7 @@ const emit: WorkflowHandler = (ctx) => {
 		}
 	}
 
-	fsmAdvancePhase(slug, currentStage, "gate")
+	workflowAdvancePhase(slug, currentStage, "gate")
 
 	return {
 		action: "review",

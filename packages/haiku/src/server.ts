@@ -204,7 +204,7 @@ if (!isClaudeCode()) {
  * but we log loudly so the reviewer has a visible URL they can paste
  * manually. The previous implementation swallowed all three failure
  * modes (sync throw, async 'error', non-zero exit) silently, which
- * left the FSM "waiting quietly" with no UI hint anywhere.
+ * left the workflow engine "waiting quietly" with no UI hint anywhere.
  *
  * `label` lands in log lines so operators can tell which surface
  * tried to open — review gate, question, direction, or the always-on
@@ -266,7 +266,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 		...orchestratorToolDefs,
 		// State management tools
 		...stateToolDefs,
-		// open_review is internal — used by the FSM for gate_ask, not exposed to the agent
+		// open_review is internal — used by the workflow engine for gate_ask, not exposed to the agent
 		{
 			name: "ask_user_visual_question",
 			description:
@@ -671,7 +671,7 @@ async function handleToolCall(
 	// the active intent + stage, open the browser, return the URL. Does
 	// NOT block the tool call; does NOT call run_next. The session lives
 	// until the usual TTL / presence sweep evicts it. Feedback the
-	// reviewer leaves routes through the normal feedback API; the FSM
+	// reviewer leaves routes through the normal feedback API; the workflow engine
 	// picks it up via run_next's fix-loop/revisit path.
 	if (name === "haiku_review_open") {
 		const a = (args ?? {}) as Record<string, unknown>
@@ -828,7 +828,7 @@ async function handleToolCall(
 						content: [
 							{
 								type: "text" as const,
-								text: `Ad-hoc review closed with Done — no changes requested. No FSM action needed.`,
+								text: `Ad-hoc review closed with Done — no changes requested. No workflow action needed.`,
 							},
 						],
 					}
@@ -867,7 +867,7 @@ async function handleToolCall(
 	}
 
 	if (name === "open_review") {
-		// open_review is blocked — the FSM (setOpenReviewHandler) has its own code path.
+		// open_review is blocked — the workflow engine (setOpenReviewHandler) has its own code path.
 		// Direct agent calls would bypass unit naming validation, type validation, and
 		// discovery artifact checks that the orchestrator enforces before opening a review.
 		return {

@@ -1,8 +1,8 @@
 // orchestrator/prompts/continue_units.ts — Parallel wave continuation.
 // Same shape as start_units but per-unit hat/bolt come from the
-// action payload (the FSM has tracked which unit is on which hat).
+// action payload (the workflow engine has tracked which unit is on which hat).
 // Always subagent-capable path — continue_units is only emitted on
-// harnesses with subagents.support === true (the FSM keeps the
+// harnesses with subagents.support === true (the workflow engine keeps the
 // hookless harness on a single sequential unit at a time).
 
 import { existsSync, readFileSync } from "node:fs"
@@ -258,11 +258,11 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 		prompt.push(
 			`${step++}. When done: call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unitName}" }\``,
 			`${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unitName}" }\``,
-			`${step++}. **CRITICAL — Relay the FSM Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`FSM Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next FSM action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
+			`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
 			`${step++}. Track outputs in unit frontmatter \`outputs:\` field`,
 			`${step++}. If outputs from a previous stage are missing: call \`haiku_revisit { intent: "${slug}" }\``,
 			"",
-			"**Autonomy:** You are one of a parallel wave — execute without asking the user to confirm per-step. The FSM coordinates the wave. Do NOT ask which unit runs first, whether to advance a hat, whether to commit/push. Use `AskUserQuestion`/`ask_user_visual_question` only when genuinely blocked on ambiguous requirements.",
+			"**Autonomy:** You are one of a parallel wave — execute without asking the user to confirm per-step. The workflow engine coordinates the wave. Do NOT ask which unit runs first, whether to advance a hat, whether to commit/push. Use `AskUserQuestion`/`ask_user_visual_question` only when genuinely blocked on ambiguous requirements.",
 			"",
 			SUBAGENT_ERROR_RECOVERY,
 		)
@@ -290,12 +290,12 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			`- \`model="..."\` → \`model\` (OMIT when absent; do NOT supply a default)`,
 			`- \`prompt_file="..."\` → prompt body is literally \`"Read <path> and execute its instructions exactly."\``,
 			"",
-			"The FSM owns the authoritative prompt at `prompt_file`; do not paraphrase. Per-unit `model` attributes reflect the cascade the FSM resolved — dropping them defeats the selection.",
+			"The workflow engine owns the authoritative prompt at `prompt_file`; do not paraphrase. Per-unit `model` attributes reflect the cascade the workflow engine resolved — dropping them defeats the selection.",
 			"",
 			batchDispatchDirective(entries.length, "units"),
 			"",
 			"**On each completion, inspect the result before (if applicable) refilling the slot:**",
-			`- \`FSM Result: <path>\` → read that JSON file, then call \`haiku_run_next { intent: "${slug}" }\` (run_next is authoritative).`,
+			`- \`Workflow Result: <path>\` → read that JSON file, then call \`haiku_run_next { intent: "${slug}" }\` (run_next is authoritative).`,
 			`- Plaintext "job ends here" → another subagent will emit the structured result; do NOT dispatch yet.`,
 			`- Anything else → fall back: call \`haiku_run_next { intent: "${slug}" }\`.`,
 			"",

@@ -12,7 +12,7 @@ model: haiku
 - Read the artifacts the reconciler just edited. Look at the actual state on disk, not the reconciler's summary.
 - Decide, through the lens of the finding as written, whether the fix resolves it. You are an independent assessor — the reconciler cannot self-certify.
 - If the fix resolves the finding: call `haiku_feedback_update { status: "closed", closed_by: "intent-fix:<FB-ID>:bolt-<N>" }` with `stage` omitted.
-- If the fix is incomplete or wrong: leave the feedback open (do NOT call update). The FSM will count this bolt and decide whether to loop again.
+- If the fix is incomplete or wrong: leave the feedback open (do NOT call update). The workflow engine will count this bolt and decide whether to loop again.
 - If the finding itself is actually invalid (e.g. the reviewer misread the artifact, or the concern was already resolved in a prior stage): call `haiku_feedback_reject { reason: "<concrete reason>" }` with `stage` omitted.
 
 **Reads:**

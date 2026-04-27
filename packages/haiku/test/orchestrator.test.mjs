@@ -1,5 +1,5 @@
 #!/usr/bin/env npx tsx
-// Test suite for H·AI·K·U orchestrator — FSM runNext, stage transitions, validation
+// Test suite for H·AI·K·U orchestrator — workflow runNext, stage transitions, validation
 // Run: npx tsx test/orchestrator.test.mjs
 
 import assert from "node:assert"
@@ -183,7 +183,7 @@ ${(opts.criteria || ["- [ ] Default criteria"]).join("\n")}
 	test("haiku_run_next tool defined with intent optional (auto-resolved)", () => {
 		const tool = orchestratorToolDefs.find((t) => t.name === "haiku_run_next")
 		assert.ok(tool)
-		// `intent` is now optional — the FSM auto-resolves from the current
+		// `intent` is now optional — the workflow auto-resolves from the current
 		// git branch (`haiku/<slug>/*`) or from the sole active intent.
 		// Schema either omits `required` or doesn't list `intent` there.
 		const required = tool.inputSchema.required ?? []
@@ -578,7 +578,7 @@ ${(opts.criteria || ["- [ ] Default criteria"]).join("\n")}
 		// Fake git returns "" (not a haiku branch) so we exercise the
 		// "sole active intent" fallback, not the branch-match path.
 		const res = await handleOrchestratorTool("haiku_run_next", {})
-		// Success path: whatever action the FSM picks, it's about `slug`.
+		// Success path: whatever action the workflow picks, it's about `slug`.
 		// We only care that auto-resolve picked the right intent — the
 		// stringified response must include the slug.
 		const body = res.content[0].text
@@ -804,7 +804,7 @@ Second intent body.
 
 		const result = runNext(slug)
 		// With decision_log non-empty, the elaborate gate is satisfied;
-		// the FSM proceeds past it (specific action depends on stage config,
+		// the workflow proceeds past it (specific action depends on stage config,
 		// but it should NOT be elaboration_insufficient)
 		assert.notStrictEqual(result.action, "elaboration_insufficient")
 	})

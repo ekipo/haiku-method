@@ -17,13 +17,13 @@
 //   3. External review reconciliation (only when stage already
 //      completed+blocked): branch-merge or CLI signal → advance,
 //      changes_requested → delegate, otherwise → awaiting_external_review.
-//   4. Auto gate → advance_stage (with fsmAdvanceStage) or
+//   4. Auto gate → advance_stage (with workflowAdvanceStage) or
 //      completeOrReviewIntent.
-//   5. Non-auto gate → gate_review (with fsmGateAsk).
+//   5. Non-auto gate → gate_review (with workflowGateAsk).
 //
 // Side effects: feedback frontmatter writes (integrator_attempts),
 // stage state writes (gate_outcome, pre-review reset on revisit),
-// fsmGateAsk, fsmAdvanceStage, fsmCompleteStage, gitCommitState
+// workflowGateAsk, workflowAdvanceStage, workflowCompleteStage, gitCommitState
 // commits keyed off each sub-path.
 
 import { existsSync, readFileSync } from "node:fs"
@@ -32,9 +32,9 @@ import {
 	checkExternalState,
 	classifyPendingForRevisit,
 	completeOrReviewIntent,
-	fsmAdvanceStage,
-	fsmCompleteStage,
-	fsmGateAsk,
+	workflowAdvanceStage,
+	workflowCompleteStage,
+	workflowGateAsk,
 	handleExternalChangesRequested,
 	maybeEscalate,
 	resolveStageReview,
@@ -278,7 +278,7 @@ const emit: WorkflowHandler = (ctx) => {
 				stageIdxForGate >= 0 && stageIdxForGate < studioStages.length - 1
 					? studioStages[stageIdxForGate + 1]
 					: null
-			fsmGateAsk(slug, currentStage)
+			workflowGateAsk(slug, currentStage)
 			return {
 				action: "gate_review",
 				intent: slug,
@@ -540,7 +540,7 @@ const emit: WorkflowHandler = (ctx) => {
 			gate_context: "stage_gate",
 		})
 		if (nextStage) {
-			fsmAdvanceStage(slug, currentStage, nextStage)
+			workflowAdvanceStage(slug, currentStage, nextStage)
 			return {
 				action: "advance_stage",
 				intent: slug,
@@ -551,7 +551,7 @@ const emit: WorkflowHandler = (ctx) => {
 				message: `Auto-gate passed — advancing to '${nextStage}'. Call haiku_run_next { intent: "${slug}" } immediately.`,
 			}
 		}
-		fsmCompleteStage(slug, currentStage, "advanced")
+		workflowCompleteStage(slug, currentStage, "advanced")
 		return completeOrReviewIntent(
 			slug,
 			studio,
@@ -574,7 +574,7 @@ const emit: WorkflowHandler = (ctx) => {
 		effectiveGateType = reviewType
 	}
 
-	fsmGateAsk(slug, currentStage)
+	workflowGateAsk(slug, currentStage)
 	return {
 		action: "gate_review",
 		intent: slug,

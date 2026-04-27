@@ -1,10 +1,10 @@
 # Architecture-Prototype Sync Rule
 
-The interactive runtime-architecture map at `website/public/prototype-stage-flow.html` is the canonical visualization of how H·AI·K·U actually works at runtime — actors, hooks, FSM phases per stage, every `haiku_run_next` tick, every state write, knowledge flow, modes, post-intent delivery/ops.
+The interactive runtime-architecture map at `website/public/prototype-stage-flow.html` is the canonical visualization of how H·AI·K·U actually works at runtime — actors, hooks, workflow phases per stage, every `haiku_run_next` tick, every state write, knowledge flow, modes, post-intent delivery/ops.
 
 **Whenever the architecture changes, update this prototype.** It is part of the sync surface, not a one-off.
 
-## Auto-generated FSM diagrams (per studio)
+## Auto-generated workflow diagrams (per studio)
 
 The per-studio Mermaid `stateDiagram-v2` files at `website/public/fsm-diagrams/<studio>.mmd` are derived from the xstate machine in `packages/haiku/src/orchestrator/fsm/` and the StudioConfig built from `plugin/studios/<studio>/`. They show every stage's full phase progression, every hat sequence enumerated inside `execute`, and every (bolt × fix-hat) combination inside `review_fix`.
 
@@ -55,10 +55,10 @@ The prototype reflects the **implementation**, not the legacy paper terminology.
 
 ## Churn-reduction v2 (2026-04-19) — Feedback-as-unit fix loop + intent-completion review
 
-- **Stage `fix_hats`** — `STAGE.md` now declares `fix_hats:` as an ordered subset (or superset) of hats. When adversarial review produces open feedback, the FSM dispatches the fix-hat sequence directly against the feedback file. New orchestrator actions: `review_fix` (per-finding dispatch, serial, 3-bolt cap per finding), `upstream_finding_surfaced` (cross-stage routing — never auto-revisits). Fix-mode hats may live outside the main `hats:` rotation (e.g. a `feedback-assessor` hat that runs only in fix loops).
+- **Stage `fix_hats`** — `STAGE.md` now declares `fix_hats:` as an ordered subset (or superset) of hats. When adversarial review produces open feedback, the workflow engine dispatches the fix-hat sequence directly against the feedback file. New orchestrator actions: `review_fix` (per-finding dispatch, serial, 3-bolt cap per finding), `upstream_finding_surfaced` (cross-stage routing — never auto-revisits). Fix-mode hats may live outside the main `hats:` rotation (e.g. a `feedback-assessor` hat that runs only in fix loops).
 - **Stage feedback-assessor hat** — every stage that opts into `fix_hats` now ships `hats/feedback-assessor.md` as a terminal validator that independently decides closure. Not part of the execute rotation.
 - **Studio-level review + fix** — new directories `plugin/studios/{studio}/review-agents/` and `plugin/studios/{studio}/fix-hats/` (NOT per-stage). Fires once, after the final stage's gate passes, when `intent.intent_completion_review === true`. New orchestrator actions: `intent_completion_review` (studio-wide agent dispatch), `intent_completion_fix` (studio-level fix loop). Findings are written at intent scope (`.haiku/intents/{slug}/feedback/FB-NN.md`). Cross-stage findings from this layer always surface to the human — no auto-revisit.
-- **Upstream finding routing** — `haiku_feedback` accepts optional `upstream_stage:` marking findings whose root cause lives elsewhere. FSM surfaces those rather than dispatching the wrong hats.
+- **Upstream finding routing** — `haiku_feedback` accepts optional `upstream_stage:` marking findings whose root cause lives elsewhere. The workflow engine surfaces those rather than dispatching the wrong hats.
 
 These are NOT yet wired into the per-stage visualizations in `prototype-stage-flow.html` beyond the header banner. When adding them:
 - The stage-loop template should show a new branch at gate: pending feedback + `fix_hats` set → `review_fix` dispatch, not `feedback_revisit`.
@@ -67,9 +67,9 @@ These are NOT yet wired into the per-stage visualizations in `prototype-stage-fl
 
 ## Recently closed gaps (track for related follow-up)
 
-- **Discovery fan-out via subagents** (closed 2026-04-14) — the orchestrator now injects a `## Discovery Fan-Out (REQUIRED)` section into the elaborate-phase `tool_use_result`, instructing the agent to spawn one `Task` subagent per declared `discovery/*.md` template (research + production). Per-studio hat md files do not carry this instruction; it's FSM-level so it applies uniformly across studios. Affected file: `packages/haiku/src/orchestrator.ts` (elaborate case, after `discoveryFiles` loop). Prototype reflects this in step ② of Elaborate ("FSM fans out one ↗ subagent per artifact") and in the `elab-to-gate` injection list.
+- **Discovery fan-out via subagents** (closed 2026-04-14) — the orchestrator now injects a `## Discovery Fan-Out (REQUIRED)` section into the elaborate-phase `tool_use_result`, instructing the agent to spawn one `Task` subagent per declared `discovery/*.md` template (research + production). Per-studio hat md files do not carry this instruction; it's workflow-level so it applies uniformly across studios. Affected file: `packages/haiku/src/orchestrator.ts` (elaborate case, after `discoveryFiles` loop). Prototype reflects this in step ② of Elaborate ("the workflow engine fans out one ↗ subagent per artifact") and in the `elab-to-gate` injection list.
 - **MCP tool list correction** (closed 2026-04-14) — Orchestrator actor modal now lists the real 27 tools across `orchestrator.ts`, `state-tools.ts`, and `server.ts`, grouped by category (FSM drivers · state tools · review-server). Removed the previously-invented tool names.
-- **Hat progression mechanism** (closed 2026-04-14) — `hat-to-hat` payload now correctly reflects that the **subagent** calls `haiku_unit_advance_hat` (success) or `haiku_unit_reject_hat` (failure), and the orchestrator internally progresses the FSM in the same call. Not a `haiku_run_next` tick. The action in the modal is now `haiku_unit_advance_hat`.
+- **Hat progression mechanism** (closed 2026-04-14) — `hat-to-hat` payload now correctly reflects that the **subagent** calls `haiku_unit_advance_hat` (success) or `haiku_unit_reject_hat` (failure), and the orchestrator internally progresses the workflow engine in the same call. Not a `haiku_run_next` tick. The action in the modal is now `haiku_unit_advance_hat`.
 - **Missing tools `haiku_select_studio` and `haiku_intent_reset`** (closed 2026-04-14) — added to `TOOL_SPECS` with full input/output/writes. `haiku_select_studio` is now referenced as a clickable pill in the studio-detection step of the intent creation card. `haiku_unit_start`, `haiku_unit_advance_hat`, `haiku_unit_reject_hat` also added.
 - **`ask_user_visual_question`** (closed 2026-04-14) — added to `TOOL_SPECS` and referenced as a clickable pill in the elaborate ① conversation step, noting the agent uses it for structured visual decisions instead of inline chat options.
 - **Wave-spawn atomicity** (closed 2026-04-14) — each Execute wave now shows a small purple dashed callout above the cylinder row: *"↗ parent spawns N subagents in one response · no menu, no per-unit confirmation"*, citing `orchestrator.ts:2509`.

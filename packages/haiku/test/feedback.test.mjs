@@ -444,7 +444,7 @@ try {
 
 	test("agent cannot close human-authored feedback", () => {
 		// FB-04 is human-authored (origin: user-visual).
-		// Agents close via `closed_by`; the FSM forbids setting it on
+		// Agents close via `closed_by`; the workflow forbids setting it on
 		// human-authored items.
 		const result = updateFeedbackFile(
 			intentSlug,

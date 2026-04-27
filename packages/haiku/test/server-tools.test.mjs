@@ -193,11 +193,11 @@ test("haiku_unit_set requires intent, stage, unit, field, value", () => {
 
 test("haiku_run_next: intent is optional (auto-resolved from branch or sole active intent)", () => {
 	const tool = orchestratorToolDefs.find((t) => t.name === "haiku_run_next")
-	// `required` should be absent OR not include "intent" — the FSM resolves it.
+	// `required` should be absent OR not include "intent" — the workflow engine resolves it.
 	const required = tool.inputSchema.required ?? []
 	assert.ok(
 		!required.includes("intent"),
-		"intent should not be required — FSM auto-resolves from current git branch or sole active intent",
+		"intent should not be required — workflow auto-resolves from current git branch or sole active intent",
 	)
 	assert.ok(
 		"intent" in tool.inputSchema.properties,
@@ -550,7 +550,7 @@ test("string properties use type 'string'", () => {
 // ── haiku-api contract invariants ──────────────────────────────────────────
 //
 // These are cheap structural checks that catch drift in the wire contract.
-// If any route drops the `transport: 'loopback'` annotation the FSM refuses
+// If any route drops the `transport: 'loopback'` annotation the workflow engine refuses
 // to start — this test fails loudly at the same level.
 
 console.log("\n=== haiku-api contract invariants ===")

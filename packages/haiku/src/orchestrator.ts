@@ -1,6 +1,6 @@
 // orchestrator.ts — H·AI·K·U stage loop orchestration
 //
-// Deterministic FSM driver. `runNext()` reads state, determines the next
+// Deterministic workflow driver. `runNext()` reads state, determines the next
 // action, performs the state mutation as a side effect, and returns the action
 // to the agent. The agent only calls `haiku_run_next` to advance — it never
 // mutates stage/intent state directly.
@@ -108,18 +108,18 @@ export function resolveStudioFilePath(subpath: string): string | null {
 	return null
 }
 
-// ── FSM Contracts (global rules, ONE source of truth) ────────────────────────
+// ── Workflow Contracts (global rules, ONE source of truth) ────────────────────────
 //
 // These blocks are injected into the orchestrator's tool_use_result for the
 // corresponding phase actions. They define GLOBAL framework rules — not
 // per-studio or per-stage content. Per-studio files (STAGE.md, hats/*.md,
 // review-agents/*.md, phases/*.md) carry domain-specific guidance ONLY; they
-// MUST NOT restate FSM mechanics (they would drift and conflict).
+// MUST NOT restate workflow mechanics (they would drift and conflict).
 //
 // If a rule changes here, it changes for every studio at once.
 
-const _FSM_CONTRACTS_ELABORATE_BLOCK = [
-	"### FSM Contracts (REQUIRED — global framework rules)",
+const _WORKFLOW_CONTRACTS_ELABORATE_BLOCK = [
+	"### Workflow Contracts (REQUIRED — global framework rules)",
 	"",
 	"> ## ⟁ NO UNIT ADVANCES WITHOUT A VERIFICATION PATH.",
 	"> Every acceptance criterion pairs with a command, condition, or review-agent mandate that proves it. No exceptions.",
@@ -130,17 +130,17 @@ const _FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"",
 	"- `stages/{stage}/units/unit-NN-slug.md` — zero-padded NN (`01`, `02`, … `10`, `11`); kebab-case slug; `.md` extension.",
 	"- NN is monotonically increasing across the stage's lifetime, including revisits. Never reuse a number.",
-	"- The FSM validates naming at `haiku_run_next` — non-compliant files block the advance.",
+	"- The the workflow engine validates naming at `haiku_run_next` — non-compliant files block the advance.",
 	"",
 	"#### Unit DAG (`depends_on:`)",
 	"",
 	"- Each unit's `depends_on:` frontmatter lists the names of units in the **same stage** that must complete before this unit starts. Omit the field (or empty list) for units with no dependencies.",
-	"- The DAG MUST be acyclic. The FSM computes topological waves; a cycle blocks the advance.",
+	"- The DAG MUST be acyclic. The workflow engine computes topological waves; a cycle blocks the advance.",
 	"- Cross-stage dependencies go in the stage's `inputs:` (STAGE.md) and resolve to concrete output files from prior stages.",
 	"",
 	"#### Quality gates",
 	"",
-	"- `quality_gates:` frontmatter MUST be a list of **executable gate objects** — `{ name, command, dir? }` — not prose strings. The FSM runs each `command` at `haiku_unit_advance_hat` time; non-zero exit blocks the advance. Prose-only gates are silently skipped and give no enforcement.",
+	"- `quality_gates:` frontmatter MUST be a list of **executable gate objects** — `{ name, command, dir? }` — not prose strings. The workflow engine runs each `command` at `haiku_unit_advance_hat` time; non-zero exit blocks the advance. Prose-only gates are silently skipped and give no enforcement.",
 	"- Canonical shape:",
 	"",
 	"  ```yaml",
@@ -156,7 +156,7 @@ const _FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"",
 	"#### Model selection (`model:` frontmatter on each unit)",
 	"",
-	"- Set `model:` on EVERY unit you create. The FSM reads this at hat-dispatch time and spawns the subagent with the matching tier.",
+	"- Set `model:` on EVERY unit you create. The workflow engine reads this at hat-dispatch time and spawns the subagent with the matching tier.",
 	"- Valid values: `haiku` (cheap/fast), `sonnet` (standard), `opus` (deep reasoning). No other values are honored — unknown strings fall through to the next cascade level.",
 	"- **Calibrate per-unit to the work.** The entire point of per-unit model is that different units have different cognitive load; picking one tier for the whole intent wastes budget on the trivial units and starves the hard ones.",
 	"  - `haiku` — mechanical edits, rename sweeps, formatter passes, simple CRUD additions, boilerplate scaffolding, small docs updates. Decisions are obvious from context; no architectural judgment needed.",
@@ -167,7 +167,7 @@ const _FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"",
 	"#### Bolts, hats, advance",
 	"",
-	"- A **bolt** is one full cycle through the stage's hat sequence for a unit. The FSM advances hats via `haiku_unit_advance_hat`; agents NEVER mutate `bolt`, `hat`, `status`, or `iterations` fields directly (the harness blocks those writes).",
+	"- A **bolt** is one full cycle through the stage's hat sequence for a unit. The the workflow engine advances hats via `haiku_unit_advance_hat`; agents NEVER mutate `bolt`, `hat`, `status`, or `iterations` fields directly (the harness blocks those writes).",
 	"- The agent's responsibility per hat: produce the hat's outputs, then call `haiku_unit_advance_hat`. On reject: call `haiku_unit_reject_hat` with a reason.",
 	"- Maximum bolts per unit: 5. Exceeding escalates to the human.",
 	"",
@@ -177,23 +177,23 @@ const _FSM_CONTRACTS_ELABORATE_BLOCK = [
 	"- Every pending feedback id MUST be referenced by at least one new unit's `closes:` — orphans block advancement.",
 	"- Resolution paths: (a) draft new units that close findings (additive-elaboration), OR (b) fix existing unit specs and close the findings via `haiku_feedback_update status=closed` (pre-execute spec revisit), OR (c) reject stale/invalid findings via `haiku_feedback_reject` with a concrete reason.",
 	"",
-	"#### MCP tool contracts — what the agent calls vs. what the FSM owns",
+	"#### MCP tool contracts — what the agent calls vs. what the workflow engine owns",
 	"",
-	"- `haiku_run_next { intent }` is the sole FSM driver. Agents call it to advance the lifecycle; they never write `state.json`, `intent.md` frontmatter, or unit FSM fields directly.",
+	"- `haiku_run_next { intent }` is the sole workflow driver. Agents call it to advance the lifecycle; they never write `state.json`, `intent.md` frontmatter, or unit workflow fields directly.",
 	"- `haiku_unit_advance_hat` / `haiku_unit_reject_hat` are called by subagents inside each hat; they return the result path the parent reads to drive the next action.",
 	"- `haiku_feedback` / `haiku_feedback_update` / `haiku_feedback_reject` / `haiku_feedback_delete` are the sole channels for logging and resolving review findings.",
-	"- Branch topology, merge semantics, worktree creation, and stage-branch enforcement are owned by the FSM — the agent does not `git checkout`, `git merge`, or create branches manually during stage work.",
+	"- Branch topology, merge semantics, worktree creation, and stage-branch enforcement are owned by the workflow engine — the agent does not `git checkout`, `git merge`, or create branches manually during stage work.",
 	"",
 	"#### Unit content quality (validated at advance)",
 	"",
-	"- Placeholder strings are forbidden in unit specs and frontmatter. The FSM rejects unit advancement when any of these appear: `TBD`, `tbd`, `similar to`, `add error handling`, `etc.`, or a literal `...` placeholder. Either write the concrete value or surface it as a question.",
+	"- Placeholder strings are forbidden in unit specs and frontmatter. The the workflow engine rejects unit advancement when any of these appear: `TBD`, `tbd`, `similar to`, `add error handling`, `etc.`, or a literal `...` placeholder. Either write the concrete value or surface it as a question.",
 	"- Every acceptance criterion MUST be testable: include the command or condition that proves it. `tests pass` is rejected; the verify-command must be concrete and exit-code-driven (e.g. `pnpm test --run path/to/file` exits 0, or `pytest tests/foo.py` exits 0, or `cargo test --test bar` exits 0 — match the project's actual stack).",
 	"- Criteria are drafted as **pairs**: the goal-prose lives in the unit body under `## Completion criteria`; the executable check lives in the unit's `quality_gates:` frontmatter. Two coupled fields, written together at elaboration time. Per-stage ELABORATION.md files supply domain-specific examples; this contract supplies the rule.",
 	"- A criterion that cannot be expressed as a command/condition is a spec gap — surface it (`ask_user_visual_question` or reject the elaborate phase), do not paper over with prose.",
 	"",
 	"##### Specific-but-unverifiable criteria (a common failure mode)",
 	"",
-	"Criteria that *sound* concrete but have no executable check produce specs that look complete but the FSM cannot enforce. Watch for these shapes — they apply across every studio:",
+	"Criteria that *sound* concrete but have no executable check produce specs that look complete but the the workflow engine cannot enforce. Watch for these shapes — they apply across every studio:",
 	"",
 	'- "X is well-organized" / "Output is clean" — no command proves "well-organized"',
 	'- "Performance is acceptable" / "Process is fast" — needs a numeric threshold AND a measurement command (e.g. `p95 < 200ms`)',
@@ -289,7 +289,7 @@ export function buildGuardResponse(
 			current_branch: guard.branch,
 			target_branch: target,
 			dirty_files: files,
-			message: `Uncommitted changes on branch '${guard.branch}' block the switch to '${target}'. These changes belong on '${guard.branch}' — commit them there, then call \`haiku_run_next\` again. The FSM will retry the branch switch automatically.${filesBlock}\n\nNo human intervention needed — just:\n  1. \`git add ${files.length > 0 ? files.join(" ") : "<files listed above>"}\`\n  2. \`git commit -m "haiku: wip on ${guard.branch}"\`\n  3. Call \`haiku_run_next\` to retry.`,
+			message: `Uncommitted changes on branch '${guard.branch}' block the switch to '${target}'. These changes belong on '${guard.branch}' — commit them there, then call \`haiku_run_next\` again. The workflow engine will retry the branch switch automatically.${filesBlock}\n\nNo human intervention needed — just:\n  1. \`git add ${files.length > 0 ? files.join(" ") : "<files listed above>"}\`\n  2. \`git commit -m "haiku: wip on ${guard.branch}"\`\n  3. Call \`haiku_run_next\` to retry.`,
 		}
 		return {
 			content: [
@@ -382,7 +382,7 @@ export function buildElaboratorInstruction(opts: {
 		"- Read every `pending_feedback[].file` COMPLETELY. The title is only a handle; the body carries requirements, tests, and acceptance criteria.",
 		"- Draft one or more new units whose `closes:` frontmatter references the feedback items they resolve.",
 		"- Every pending feedback item MUST be referenced by at least one new unit's `closes:` (orphans block advancement).",
-		"- When drafting is complete, call `haiku_run_next` to advance. The FSM opens a review gate where the user inspects and approves the drafted units via the review UI — that is the ONLY approval path.",
+		"- When drafting is complete, call `haiku_run_next` to advance. The workflow engine opens a review gate where the user inspects and approves the drafted units via the review UI — that is the ONLY approval path.",
 		"",
 		"## Turn discipline",
 		"",
@@ -512,7 +512,7 @@ function resolveStageFixHats(studio: string, stage: string): string[] {
  *  The assessor's job is independent verification of the unit's `closes:`
  *  claims — it reads every feedback body and every output the unit produced,
  *  then decides whether each claim actually resolves the finding. On
- *  approve: FSM promotes each FB item's status to `closed`/`addressed` and
+ *  approve: workflow engine promotes each FB item's status to `closed`/`addressed` and
  *  the unit completes. On reject: the unit bolts back to the first hat with
  *  a reason naming the specific unresolved items. */
 export function buildFeedbackAssessorPrompt(opts: {
@@ -594,7 +594,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 		"",
 		"## Outcome",
 		"",
-		`- **All items closed:** call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unit}" }\`. The FSM will promote each feedback item to \`closed\` (agent-authored) or \`addressed\` (human-authored) automatically.`,
+		`- **All items closed:** call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unit}" }\`. The workflow engine will promote each feedback item to \`closed\` (agent-authored) or \`addressed\` (human-authored) automatically.`,
 		`- **Any still-pending:** call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unit}", reason: "<which items aren't closed and why>" }\`. The unit bolts back to the first hat. The failing feedback items stay \`pending\` — they will be re-addressed on the next bolt.`,
 		"",
 		"## Guardrails",
@@ -794,7 +794,7 @@ export function checkExternalState(url: string): ExternalReviewState {
 
 /**
  * Handle the "changes_requested" outcome from an external review.
- * Creates a feedback file, rolls the FSM back to elaborate, emits telemetry,
+ * Creates a feedback file, rolls the workflow back to elaborate, emits telemetry,
  * and returns the orchestrator action.
  */
 export function handleExternalChangesRequested(
@@ -815,7 +815,7 @@ export function handleExternalChangesRequested(
 		`feedback: create ${fbResult.feedback_id} from external review in ${currentStage}`,
 	)
 
-	// Roll FSM back to elaborate for a revisit cycle
+	// Roll workflow back to elaborate for a revisit cycle
 	const statePath = stageStatePath(slug, currentStage)
 	const stateData = readJson(statePath)
 	stateData.status = "active"
@@ -1401,7 +1401,7 @@ export interface OrchestratorAction {
 	[key: string]: unknown
 }
 
-// ── FSM side-effect helpers ────────────────────────────────────────────────
+// ── workflow side-effect helpers ────────────────────────────────────────────────
 
 /**
  * Resolve the effective branching mode for a given stage.
@@ -1423,7 +1423,7 @@ function findPreviousStage(slug: string, stage: string): string | undefined {
 	return idx > 0 ? studioStages[idx - 1] : undefined
 }
 
-export function fsmStartStage(slug: string, stage: string): void {
+export function workflowStartStage(slug: string, stage: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 
 	// Branch isolation first — if this fails (merge conflict), no state is mutated.
@@ -1541,7 +1541,7 @@ export function fsmStartStage(slug: string, stage: string): void {
 	sealIntentState(slug)
 }
 
-export function fsmAdvancePhase(
+export function workflowAdvancePhase(
 	slug: string,
 	stage: string,
 	toPhase: string,
@@ -1554,7 +1554,7 @@ export function fsmAdvancePhase(
 	sealIntentState(slug)
 }
 
-export function fsmCompleteStage(
+export function workflowCompleteStage(
 	slug: string,
 	stage: string,
 	gateOutcome: string,
@@ -1581,15 +1581,15 @@ export function fsmCompleteStage(
 	sealIntentState(slug)
 }
 
-export function fsmAdvanceStage(
+export function workflowAdvanceStage(
 	slug: string,
 	currentStage: string,
 	nextStage: string,
 ): void {
 	// Complete current stage
-	fsmCompleteStage(slug, currentStage, "advanced")
+	workflowCompleteStage(slug, currentStage, "advanced")
 
-	// Update intent's active_stage to next. Must happen before fsmStartStage
+	// Update intent's active_stage to next. Must happen before workflowStartStage
 	// runs its own frontmatter write so the seal covers the final value.
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (existsSync(intentFile)) {
@@ -1599,21 +1599,21 @@ export function fsmAdvanceStage(
 	// Atomic advance: immediately enter the next stage in the same tick.
 	// This merges the completed stage branch into intent main, reaps it, and
 	// creates/resets the next stage branch — all before run_next returns.
-	// Without this, the FSM leaves dirty state on the completed branch while
+	// Without this, the workflow engine leaves dirty state on the completed branch while
 	// the next tick's `ensureOnStageBranch` guard checks out intent main
 	// (ops branch doesn't exist yet → fall back to main) via an auto-commit
 	// WIP detour, stranding the advance on a branch that never gets merged.
-	// fsmStartStage is idempotent w.r.t. pos-0 state — it will overwrite
+	// workflowStartStage is idempotent w.r.t. pos-0 state — it will overwrite
 	// whatever was there with the fresh default.
-	fsmStartStage(slug, nextStage)
+	workflowStartStage(slug, nextStage)
 
-	// Reseal: fsmCompleteStage sealed against active_stage=currentStage,
-	// then fsmStartStage rewrote frontmatter again; the prior checksums are
+	// Reseal: workflowCompleteStage sealed against active_stage=currentStage,
+	// then workflowStartStage rewrote frontmatter again; the prior checksums are
 	// stale and verifyIntentState() would false-positive as tampering.
 	sealIntentState(slug)
 }
 
-export function fsmGateAsk(slug: string, stage: string): void {
+export function workflowGateAsk(slug: string, stage: string): void {
 	const path = stageStatePath(slug, stage)
 	const data = readJson(path)
 	data.phase = "gate"
@@ -1634,7 +1634,7 @@ export function fsmGateAsk(slug: string, stage: string): void {
  * fires at the FIRST stage's elaborate→execute gate to review initial
  * specs. This one fires at the END, after the final stage's gate passes.
  */
-function fsmEnterIntentCompletionReview(slug: string): void {
+function workflowEnterIntentCompletionReview(slug: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (!existsSync(intentFile)) return
 	setFrontmatterField(intentFile, "phase", "awaiting_completion_review")
@@ -1648,7 +1648,7 @@ function fsmEnterIntentCompletionReview(slug: string): void {
  * the stage branch (local + remote), and switch the current checkout
  * to intent main.
  *
- * Mirror of the prev-stage merge+reap that `fsmStartStage` runs on
+ * Mirror of the prev-stage merge+reap that `workflowStartStage` runs on
  * every non-final stage transition. There's no next stage to trigger
  * that merge when the final stage completes — without this, the
  * primary worktree stays parked on the dead stage branch, intent
@@ -1660,7 +1660,7 @@ function fsmEnterIntentCompletionReview(slug: string): void {
  * phase still opens so a human can diagnose + reconcile manually
  * rather than blocking the intent forever on an unresolved merge.
  */
-function fsmFinalizeStageIntoIntentMain(slug: string, stage: string): void {
+function workflowFinalizeStageIntoIntentMain(slug: string, stage: string): void {
 	if (!isGitRepo()) return
 	if (!stage) return
 	const stageBranch = `haiku/${slug}/${stage}`
@@ -1670,7 +1670,7 @@ function fsmFinalizeStageIntoIntentMain(slug: string, stage: string): void {
 		const mergeResult = mergeStageBranchIntoMain(slug, stage)
 		if (!mergeResult.success) {
 			console.error(
-				`[fsmFinalizeStageIntoIntentMain] merge ${stageBranch}→${intentMain} failed: ${mergeResult.message}.\nIntent-completion review will still open; resolve the merge manually before approving the final gate.\nRecovery paths for the stage branch if the reap below loses it before you can merge:\n  - \`git reflog show ${stageBranch}\` — the branch's tip is still in reflog until gc runs (default 90 days).\n  - \`origin/${stageBranch}\` — if the branch was pushed, the remote tracking ref still has the tip.\n  - \`git fsck --lost-found\` — catches dangling commits even after the branch ref is deleted.`,
+				`[workflowFinalizeStageIntoIntentMain] merge ${stageBranch}→${intentMain} failed: ${mergeResult.message}.\nIntent-completion review will still open; resolve the merge manually before approving the final gate.\nRecovery paths for the stage branch if the reap below loses it before you can merge:\n  - \`git reflog show ${stageBranch}\` — the branch's tip is still in reflog until gc runs (default 90 days).\n  - \`origin/${stageBranch}\` — if the branch was pushed, the remote tracking ref still has the tip.\n  - \`git fsck --lost-found\` — catches dangling commits even after the branch ref is deleted.`,
 			)
 			// Intentionally don't return — still try to switch to main so
 			// at least subsequent operations run against the correct
@@ -1681,7 +1681,7 @@ function fsmFinalizeStageIntoIntentMain(slug: string, stage: string): void {
 
 	if (branchExists(stageBranch)) {
 		deleteStageBranch(slug, stage)
-		// Best-effort remote delete — same pattern as fsmStartStage's
+		// Best-effort remote delete — same pattern as workflowStartStage's
 		// prev-stage reap.
 		try {
 			execFileSync("git", ["push", "origin", "--delete", stageBranch], {
@@ -1699,7 +1699,7 @@ function fsmFinalizeStageIntoIntentMain(slug: string, stage: string): void {
 
 /**
  * Shared completion path used by every gate-pass site that used to call
- * `fsmIntentComplete` + return `intent_complete` directly. Returns the
+ * `workflowIntentComplete` + return `intent_complete` directly. Returns the
  * correct action for the current opt-in/opt-out state:
  *   - skip_intent_completion_review = true → fire intent_complete as before
  *   - otherwise → enter completion-review phase, open a gate_review
@@ -1724,8 +1724,8 @@ export function completeOrReviewIntent(
 	// specs and stage-level reviews upstream have gotten sharper.
 	const reviewOnCompletion = intent.intent_completion_review !== false
 
-	// Final-stage branch cleanup: fsmAdvanceStage does this atomically
-	// mid-intent via fsmStartStage(nextStage), but when the *final*
+	// Final-stage branch cleanup: workflowAdvanceStage does this atomically
+	// mid-intent via workflowStartStage(nextStage), but when the *final*
 	// stage completes there's no nextStage to drive it — the branch
 	// sits on disk, intent main misses the final-stage commits, and
 	// our worktree stays parked on a dead branch. Intent-completion
@@ -1736,11 +1736,11 @@ export function completeOrReviewIntent(
 			? (intent.active_stage as string)
 			: ""
 	if (finalStage) {
-		fsmFinalizeStageIntoIntentMain(slug, finalStage)
+		workflowFinalizeStageIntoIntentMain(slug, finalStage)
 	}
 
 	if (!reviewOnCompletion) {
-		fsmIntentComplete(slug)
+		workflowIntentComplete(slug)
 		return {
 			action: "intent_complete",
 			intent: slug,
@@ -1748,7 +1748,7 @@ export function completeOrReviewIntent(
 			message: sourceMessage,
 		}
 	}
-	fsmEnterIntentCompletionReview(slug)
+	workflowEnterIntentCompletionReview(slug)
 	// Next `haiku_run_next` tick enters the `awaiting_completion_review`
 	// handler, which dispatches studio-level review agents (if any),
 	// orchestrates the intent-scope fix loop, and only opens the final
@@ -1775,7 +1775,7 @@ export function completeOrReviewIntent(
  * SURFACED — this layer explicitly forbids auto-revisiting stages.
  */
 
-export function fsmIntentComplete(slug: string): void {
+export function workflowIntentComplete(slug: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (existsSync(intentFile)) {
 		setFrontmatterField(intentFile, "status", "completed")
@@ -1811,10 +1811,10 @@ export function fsmIntentComplete(slug: string): void {
  *  derive-state output, including composite intents. This shim only
  *  needs to:
  *
- *    1. Surface intent_not_found before the FSM tick (derive-state
+ *    1. Surface intent_not_found before the workflow tick (derive-state
  *       returns null for missing intents; tests rely on a concrete
  *       error action).
- *    2. Run the FSM tick. Tamper detection + cross-cutting consistency
+ *    2. Run the workflow tick. Tamper detection + cross-cutting consistency
  *       repair + per-state emission all live inside runWorkflowTick.
  *    3. Surface a structural error if the tick produces no action —
  *       indicates a derive-state or workflow registration gap.
@@ -1870,7 +1870,7 @@ export function isStagePreExecute(
  * Clean up any legacy feedback files in a pre-execute stage's feedback/
  * directory. Intents created before pre-exec-feedback was removed may have
  * FB-NN.md files left behind; deleting them makes the state consistent with
- * the new invariant (no FB persistence pre-execute) and prevents the FSM
+ * the new invariant (no FB persistence pre-execute) and prevents the workflow
  * from re-triggering old pre-review code paths.
  */
 export function cleanupPreExecuteFeedback(
@@ -2268,7 +2268,7 @@ function uncompleteIntent(slug: string, intentFile: string): void {
 		dirty = true
 	}
 	if (dirty) {
-		// All the above fields are FSM-tracked in INTENT_FIELDS; reseal so
+		// All the above fields are workflow-tracked in INTENT_FIELDS; reseal so
 		// the next verifyIntentState() doesn't false-positive as tampering.
 		sealIntentState(slug)
 	}
@@ -2389,16 +2389,16 @@ export function resetFixLoopBolts(slug: string, stage: string): void {
 }
 
 /**
- * Mark every stage AFTER `targetStage` as stale so the FSM re-enters them
+ * Mark every stage AFTER `targetStage` as stale so the workflow re-enters them
  * on advance rather than fast-forwarding past a `completed` marker.
  *
  * When the human revisits stage X, every stage that was built against X's
  * previous output is now based on obsolete artifacts. Without this reset,
- * the FSM's advance_stage logic sees those stages as still `completed`
+ * the workflow engine's advance_stage logic sees those stages as still `completed`
  * and blithely walks past them, shipping work rooted in the old design.
  *
  * We rewind status → "active", phase → "elaborate", completed_at → null.
- * fsmStartStage will do the rest of the reset when each stage gets re-
+ * workflowStartStage will do the rest of the reset when each stage gets re-
  * entered (iterations, started_at, etc.). The stage's artifacts and units
  * are kept on disk — a re-run that finds them still valid can close
  * immediately; a re-run that finds them broken starts from the feedback
@@ -2461,7 +2461,7 @@ function revisitEarlierStage(
 ): OrchestratorAction {
 	// Only the target stage is reset. Intermediate stages between target and
 	// fromStage keep their completed status — when the agent finishes the
-	// revisited stage and calls haiku_run_next, the FSM's consistency check
+	// revisited stage and calls haiku_run_next, the workflow engine's consistency check
 	// sees them as completed and fast-forwards through to the next incomplete
 	// stage. This is intentional: revisit fixes one stage without forcing a
 	// full replay of everything that came after.
@@ -2518,19 +2518,19 @@ function revisitEarlierStage(
 
 	// Mark every downstream stage as needing revalidation. They were built
 	// against pre-revisit artifacts; their "completed" status is stale. If
-	// we left them alone, the FSM's next-stage logic would fast-forward
+	// we left them alone, the workflow engine's next-stage logic would fast-forward
 	// through all of them without ever running them — shipping work that
 	// depended on the obsolete upstream.
 	//
 	// Setting status="active", phase="elaborate", completed_at=null makes
-	// the FSM re-enter each stage in order. fsmStartStage then decides
+	// the workflow re-enter each stage in order. workflowStartStage then decides
 	// whether prior work still applies (via merge forward from main) or
 	// needs a fresh pass. A `revalidation_of_visit` field records the
 	// target's pre-revisit visit count so downstream stages can show "this
 	// stage was rerun because <targetStage> changed in visit N+1".
 	markDownstreamStagesStale(slug, iDir, targetStage, intentFile)
 
-	// Update intent's active_stage. `active_stage` is FSM-tracked in
+	// Update intent's active_stage. `active_stage` is workflow-tracked in
 	// INTENT_FIELDS, so we must reseal after the write — uncompleteIntent
 	// only reseals when IT mutates something. Call it first so a single
 	// reseal covers both writes on the completed-intent path.
@@ -2684,7 +2684,7 @@ export function enrichActionWithPreview(action: OrchestratorAction): void {
 				[]
 			tell_user = `Continuing ${entries.length} units in parallel: ${entries.map((u) => `${u.name}(${u.hat}#${u.bolt})`).join(", ")}.`
 			next_step =
-				"Each active unit resumes in its own worktree. After all subagents return, the FSM advances."
+				"Each active unit resumes in its own worktree. After all subagents return, the the workflow engine advances."
 			break
 		}
 

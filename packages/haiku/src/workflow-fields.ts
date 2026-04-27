@@ -1,4 +1,4 @@
-// fsm-fields.ts — canonical list of FSM-controlled fields per file type.
+// workflow-fields.ts — canonical list of workflow-controlled fields per file type.
 //
 // Used by:
 //   - state-tools.ts (haiku_unit_set guard, per-tool write protection)
@@ -6,7 +6,7 @@
 //
 // Keeping these as a single source of truth ensures the write guard and
 // the tamper detector can't drift out of alignment — a gap on either side
-// means an agent can mutate FSM state without being caught.
+// means an agent can mutate workflow state without being caught.
 
 export const INTENT_FIELDS = [
 	"status",

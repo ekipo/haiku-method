@@ -3,7 +3,7 @@
 // A unit's worktree forks off the STAGE branch (always — never intent
 // main), lives at `.haiku/worktrees/{slug}/{unit}`, and merges back
 // into the stage branch when the unit completes. The merge is
-// special-cased to auto-resolve the unit-md conflict (the FSM writes
+// special-cased to auto-resolve the unit-md conflict (the workflow engine writes
 // to the unit's own state file from the stage-branch side while the
 // unit branch carries a frozen-at-fork copy — taking the stage side
 // is correct because the unit worktree has no business mutating its
@@ -118,10 +118,10 @@ export function mergeUnitWorktree(
 		// so we don't disturb whatever branch the user happens to be on.
 		//
 		// Conflict handling: the unit .md file under stages/<stage>/units/
-		// routinely conflicts because the FSM writes iteration/hat state to
+		// routinely conflicts because the workflow engine writes iteration/hat state to
 		// it from the stage-branch side while the unit branch carries a
 		// frozen-at-fork copy. For those files only, take the stage side
-		// (the live FSM state) — the unit worktree has no business mutating
+		// (the live workflow engine state) — the unit worktree has no business mutating
 		// its own state file. Non-unit-md conflicts still surface as real
 		// conflicts the agent must resolve.
 		const onStageBranch = getCurrentBranch() === stageBranch

@@ -23,7 +23,7 @@ import type { WebSocket as WsWebSocket } from "ws"
 const SESSION_CANCEL_LOG_PATH = "/tmp/haiku-session-cancel.log"
 
 /** Append-only log for session-close events. Helps trace why an SPA
- *  saw the "session ended" overlay when the FSM didn't expect to
+ *  saw the "session ended" overlay when the workflow engine didn't expect to
  *  cancel — the file persists across restarts so post-mortems aren't
  *  blocked by lost stderr. */
 export function logClose(msg: string): void {

@@ -1,8 +1,8 @@
 // state/scope.ts — Unit-scope validation + output auto-population.
 //
-// At unit completion the FSM checks whether the agent's writes stayed
+// At unit completion the workflow engine checks whether the agent's writes stayed
 // within the stage's declared scope (output templates + always-allowed
-// FSM metadata). Same module also auto-populates the unit's outputs[]
+// workflow metadata). Same module also auto-populates the unit's outputs[]
 // list from the diff so the unit spec stays a faithful record of what
 // landed.
 
@@ -138,7 +138,7 @@ function getUnitWorktreeChanges(
  * Compute the allowed write scope for a stage. Derives from:
  *   - Stage output templates' `location:` fields (with `scope:` intent|repo)
  *   - Stage discovery templates' `location:` fields (for pre-execute hats)
- *   - Always-allowed FSM metadata paths
+ *   - Always-allowed workflow metadata paths
  */
 function computeStageScope(
 	slug: string,
@@ -290,14 +290,14 @@ function autoPopulateOutputs(
 
 /**
  * Validate that the unit's writes stay within the stage's declared scope
- * (output templates + always-allowed FSM metadata). Called at unit
+ * (output templates + always-allowed workflow metadata). Called at unit
  * completion (last hat advance_hat) BEFORE the worktree merges back.
  *
  * Scope source of truth:
  *   - Stage's output templates' `location:` + `scope:` fields (intent|repo)
  *   - Templates with `scope: repo` and descriptive locations grant a
  *     repo-wide wildcard
- *   - Always-allowed FSM metadata (unit spec, state files, feedback dir,
+ *   - Always-allowed workflow metadata (unit spec, state files, feedback dir,
  *     intent state dir, integrity, knowledge)
  *
  * Unit.outputs[] is AUTO-POPULATED from the diff as a side effect — no

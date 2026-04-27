@@ -1,5 +1,5 @@
 #!/usr/bin/env npx tsx
-// Tests for the guard-fsm-fields PreToolUse hook.
+// Tests for the guard-workflow-fields PreToolUse hook.
 // Covers both the status=completed guard AND the intent-completion
 // phase-flag guards, plus the Edit/MultiEdit projected-content reconstruction
 // that prevents slice-only bypasses.
@@ -8,7 +8,7 @@ import assert from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { guardFsmFields } from "../src/hooks/guard-fsm-fields.ts"
+import { guardFsmFields } from "../src/hooks/guard-workflow-fields.ts"
 
 const tmp = mkdtempSync(join(tmpdir(), "haiku-guard-test-"))
 const origCwd = process.cwd()
@@ -105,7 +105,7 @@ function runGuard(input) {
 }
 
 try {
-	console.log("\n=== guard-fsm-fields: status=completed block ===")
+	console.log("\n=== guard-workflow-fields: status=completed block ===")
 
 	await test("Write status: completed is blocked on intent.md", async () => {
 		const r = await runGuard({
@@ -146,7 +146,7 @@ try {
 		assert.ok(!r.blocked, "non-haiku files should not be guarded")
 	})
 
-	console.log("\n=== guard-fsm-fields: intent-completion phase spoofing ===")
+	console.log("\n=== guard-workflow-fields: intent-completion phase spoofing ===")
 
 	await test("Edit that sets phase: awaiting_completion_review via slice is blocked", async () => {
 		// Bypass attempt: old_string="active" (matching the phase: active line),

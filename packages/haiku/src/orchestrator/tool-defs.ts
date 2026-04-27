@@ -1,7 +1,7 @@
 // orchestrator/tool-defs.ts — MCP tool definitions for orchestration tools.
 //
 // Pure declaration of name + description + inputSchema for every
-// haiku_* tool that drives the FSM (intent create, run-next, revisit,
+// haiku_* tool that drives the workflow engine (intent create, run-next, revisit,
 // archive, etc.). Handlers stay in orchestrator.ts (handleOrchestratorTool
 // switch).
 
@@ -9,11 +9,11 @@ export const orchestratorToolDefs = [
 	{
 		name: "haiku_run_next",
 		description:
-			"Advance an intent through its lifecycle. The FSM reads state, determines the next action, " +
+			"Advance an intent through its lifecycle. The workflow engine reads state, determines the next action, " +
 			"performs the state mutation (start stage, advance phase, complete stage, etc.), and returns " +
 			"the action to the agent. The agent follows the returned action — it never mutates stage or " +
 			"intent state directly. " +
-			"When `intent` is omitted, the FSM auto-resolves it from the current git branch " +
+			"When `intent` is omitted, the workflow engine auto-resolves it from the current git branch " +
 			"(`haiku/<slug>/main` or `haiku/<slug>/<stage>`) — lets pickup/revisit skills be thin " +
 			"one-line redirects without asking the user to pick an intent the checkout already names. " +
 			"If omitted and no branch match exists, falls back to the single active intent; errors " +
@@ -33,7 +33,7 @@ export const orchestratorToolDefs = [
 			},
 		},
 	},
-	// haiku_gate_approve removed — gates are handled by the FSM (review UI + elicitation fallback)
+	// haiku_gate_approve removed — gates are handled by the workflow engine (review UI + elicitation fallback)
 	{
 		name: "haiku_intent_create",
 		description:
@@ -112,7 +112,7 @@ export const orchestratorToolDefs = [
 				stage: {
 					type: "string",
 					description:
-						"Target stage to revisit (optional — omit to let the FSM infer the target)",
+						"Target stage to revisit (optional — omit to let the workflow engine infer the target)",
 				},
 				reasons: {
 					type: "array",

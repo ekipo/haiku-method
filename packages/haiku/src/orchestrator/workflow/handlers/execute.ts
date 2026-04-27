@@ -15,14 +15,14 @@
 //   7. Stuck (none active, none ready, not all complete) → blocked
 //
 // Side effects: createUnitWorktree per unit dispatch,
-// fsmAdvancePhase on the all-complete path.
+// workflowAdvancePhase on the all-complete path.
 
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
 	computeUnitWaves,
 	currentWaveNumber,
-	fsmAdvancePhase,
+	workflowAdvancePhase,
 	listUnits,
 	resolveStageHats,
 	resolveStageMetadata,
@@ -63,7 +63,7 @@ const emit: WorkflowHandler = (ctx) => {
 		const outputValidation = validateStageOutputs(slug, currentStage, studio)
 		if (outputValidation) return outputValidation
 
-		fsmAdvancePhase(slug, currentStage, "review")
+		workflowAdvancePhase(slug, currentStage, "review")
 
 		return {
 			action: "advance_phase",

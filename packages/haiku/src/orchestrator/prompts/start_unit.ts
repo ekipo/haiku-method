@@ -12,7 +12,7 @@
 //      the intent dir; merge in stage-wide upstream artifacts.
 //   5. If the hat is `feedback-assessor`, dispatch the alternate
 //      assessor prompt (verification, not production).
-//   6. Otherwise emit the standard hat dispatch with FSM contract
+//   6. Otherwise emit the standard hat dispatch with workflow contract
 //      reminders, scope, and the advance/reject/error-recovery flow.
 
 import { existsSync, readFileSync } from "node:fs"
@@ -223,7 +223,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 				}),
 			)
 			sections.push(
-				"### Parent Instructions (do NOT include in subagent prompt)\n\nAfter the assessor returns: call `haiku_run_next { intent: ... }`. If it approved, the FSM has marked the unit's claimed feedback items as `closed`. If it rejected, the unit has bolted back to the first hat and the feedback items remain `pending`.",
+				"### Parent Instructions (do NOT include in subagent prompt)\n\nAfter the assessor returns: call `haiku_run_next { intent: ... }`. If it approved, the workflow engine has marked the unit's claimed feedback items as `closed`. If it rejected, the unit has bolted back to the first hat and the feedback items remain `pending`.",
 			)
 		} else {
 			if (inlineCtx) sections.push(inlineCtx)
@@ -307,7 +307,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 	prompt.push(
 		`${step++}. When done: call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unit}" }\``,
 		`${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unit}" }\``,
-		`${step++}. **CRITICAL — Relay the FSM Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`FSM Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next FSM action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
+		`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
 		`${step++}. Track outputs in unit frontmatter \`outputs:\` field`,
 		`${step++}. If outputs from a previous stage are missing: call \`haiku_revisit { intent: "${slug}" }\``,
 		"",
@@ -333,7 +333,7 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 		)
 
 		sections.push(
-			'### Parent Instructions (do NOT include in subagent prompt)\n\nSpawn the subagent with the Task tool. Map the `<subagent>` block attributes to the tool parameters **exactly**:\n\n- `type="..."` → `subagent_type` argument\n- `model="..."` → `model` argument (OMIT the `model` arg when the attribute is absent — do NOT pass a default)\n- `prompt_file="..."` → the prompt body is the literal string `"Read <path> and execute its instructions exactly."` (substitute `<path>` with the attribute value)\n\nPassing the `model` attribute is non-negotiable when it\'s present — the FSM resolved the tier from the unit/hat/stage/studio cascade and the wrong tier undermines the whole selection logic.\n\n**When the subagent returns, its final message will be one of:**\n- `FSM Result: <path>` — read that JSON file and act on its `action` field. Valid actions: `continue_unit` (spawn next subagent for same unit), `start_units` (dispatch wave), `advance_phase`, `review`, `advance_stage`, `intent_complete`, `blocked`. For unit-level actions, call `haiku_run_next { intent: ... }` to get the FSM\'s canonical next step (the result file and run_next return the same data; run_next is the authoritative drive step).\n- Plaintext "job ends here" message — another subagent in the wave will produce the structured result; do not dispatch yet.\n- Anything else (subagent non-compliant) — fall back: call `haiku_run_next { intent: ... }`.\n\nDo NOT stop until run_next returns `gate_review`, `advance_stage → intent_complete`, `intent_complete`, or `error`.',
+			'### Parent Instructions (do NOT include in subagent prompt)\n\nSpawn the subagent with the Task tool. Map the `<subagent>` block attributes to the tool parameters **exactly**:\n\n- `type="..."` → `subagent_type` argument\n- `model="..."` → `model` argument (OMIT the `model` arg when the attribute is absent — do NOT pass a default)\n- `prompt_file="..."` → the prompt body is the literal string `"Read <path> and execute its instructions exactly."` (substitute `<path>` with the attribute value)\n\nPassing the `model` attribute is non-negotiable when it\'s present — the workflow engine resolved the tier from the unit/hat/stage/studio cascade and the wrong tier undermines the whole selection logic.\n\n**When the subagent returns, its final message will be one of:**\n- `Workflow Result: <path>` — read that JSON file and act on its `action` field. Valid actions: `continue_unit` (spawn next subagent for same unit), `start_units` (dispatch wave), `advance_phase`, `review`, `advance_stage`, `intent_complete`, `blocked`. For unit-level actions, call `haiku_run_next { intent: ... }` to get the workflow engine\'s canonical next step (the result file and run_next return the same data; run_next is the authoritative drive step).\n- Plaintext "job ends here" message — another subagent in the wave will produce the structured result; do not dispatch yet.\n- Anything else (subagent non-compliant) — fall back: call `haiku_run_next { intent: ... }`.\n\nDo NOT stop until run_next returns `gate_review`, `advance_stage → intent_complete`, `intent_complete`, or `error`.',
 		)
 	} else {
 		// Subagentless: direct execution in current context.

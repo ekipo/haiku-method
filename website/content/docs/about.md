@@ -55,7 +55,7 @@ H·AI·K·U universalized the framework with the **studio model**: named lifecyc
 What H·AI·K·U added beyond AI-DLC 2026:
 
 - **Studios** — domain-specific lifecycle templates with their own stages, hats, and review agents
-- **FSM enforcement** — a state machine drives all transitions; the agent cannot bypass gates, skip stages, or produce work outside its scope
+- **workflow enforcement** — a state machine drives all transitions; the agent cannot bypass gates, skip stages, or produce work outside its scope
 - **Stage-scoped execution** — elaboration produces the plan, execution produces the work, and the two never mix
 - **Worktree isolation** — parallel units execute in isolated git worktrees that merge back on completion
 - **Visual review UI** — browser-based review pages with comments, annotations, DAG visualization, and approve/decline controls
@@ -75,7 +75,7 @@ We believe:
 
 H·AI·K·U was originally developed at [The Bushido Collective](https://thebushido.co) as an open-source project. In 2026, ownership transferred to [GigSmart](https://gigsmart.com), where the framework continues to be actively developed and maintained.
 
-The GigSmart team battle-tested the studio/stage/hat model across real features, validated the inception -> design -> product -> development -> operations -> security pipeline, pushed the limits of parallel execution and worktree isolation, and provided the real-world feedback that shaped the review UI, gate behavior, and FSM enforcement.
+The GigSmart team battle-tested the studio/stage/hat model across real features, validated the inception -> design -> product -> development -> operations -> security pipeline, pushed the limits of parallel execution and worktree isolation, and provided the real-world feedback that shaped the review UI, gate behavior, and workflow enforcement.
 
 ## Acknowledgments
 

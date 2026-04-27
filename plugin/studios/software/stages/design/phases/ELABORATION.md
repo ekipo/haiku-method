@@ -46,7 +46,7 @@ When generating criteria for this stage, focus on verifiable design deliverables
 
 ### Bad criteria — design-specific unverifiable
 
-(In addition to the universal unverifiable shapes called out in the FSM contracts.)
+(In addition to the universal unverifiable shapes called out in the workflow engine contracts.)
 
 - "Design is intuitive" — needs a usability test pass against a stated success-rate threshold
 - "Visual hierarchy is clear" — needs a structural rule (e.g. heading scale, contrast progression) the reviewer can apply consistently

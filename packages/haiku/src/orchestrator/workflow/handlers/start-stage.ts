@@ -22,7 +22,7 @@
 //      effective stages set (intent.stages allow-list /
 //      intent.skip_stages deny-list). May terminate the intent if
 //      no included stage remains.
-//   5. start_stage emission with workflow side effect (fsmStartStage),
+//   5. start_stage emission with workflow side effect (workflowStartStage),
 //      surfacing parent knowledge for follow-up intents.
 //
 // derive-state.ts returns "start_stage" both for the empty-active
@@ -39,7 +39,7 @@ import {
 import { dirname, join } from "node:path"
 import {
 	completeOrReviewIntent,
-	fsmStartStage,
+	workflowStartStage,
 	resolveIntentStages,
 	resolveStageHats,
 	resolveStageMetadata,
@@ -289,7 +289,7 @@ const emit: WorkflowHandler = (ctx, rootArg) => {
 	}
 
 	try {
-		fsmStartStage(slug, currentStage)
+		workflowStartStage(slug, currentStage)
 	} catch (err) {
 		return {
 			action: "error",

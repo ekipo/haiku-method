@@ -553,7 +553,7 @@ export interface StudioInfo {
 // `listStudios` walks the studio search paths and reads every STUDIO.md.
 // Several hot paths call `resolveStudio` (and therefore `listStudios`) many
 // times per request — hat resolution, stage reviews, branch-mode checks.
-// Without memoization these became an N·studios I/O multiplier on every FSM
+// Without memoization these became an N·studios I/O multiplier on every workflow
 // step. We cache the scan for a short TTL so a single request sees a
 // consistent snapshot without re-walking disk, and we key the cache on the
 // search-path list so changes to cwd or plugin root invalidate it implicitly.

@@ -1,4 +1,4 @@
-// tools/orchestrator/haiku_run_next.ts — The FSM driver. Sole tool
+// tools/orchestrator/haiku_run_next.ts — The workflow driver. Sole tool
 // agents call to advance the H·AI·K·U lifecycle.
 //
 // Flow per call:
@@ -9,13 +9,13 @@
 //      writes land on the right branch).
 //   4. Optional external_review_url write (records URL on the
 //      blocked stage's state.json for approval polling).
-//   5. Drive `runNext(slug)` — the canonical FSM tick.
+//   5. Drive `runNext(slug)` — the canonical workflow tick.
 //   6. Telemetry + session log.
 //   7. Per-action processing:
 //      - external_review_requested: append the "where did you submit"
 //        prompt to the message.
 //      - gate_review: open the review UI, block, process the
-//        decision (approved → fsmAdvancePhase/Stage/Complete or
+//        decision (approved → workflowAdvancePhase/Stage/Complete or
 //        completeOrReviewIntent; external_review → mark blocked;
 //        revisit_action short-circuit; otherwise persist feedback
 //        files and route by gate context).
@@ -36,10 +36,10 @@ import {
 	buildRunInstructions,
 	completeOrReviewIntent,
 	enrichActionWithPreview,
-	fsmAdvancePhase,
-	fsmAdvanceStage,
-	fsmCompleteStage,
-	fsmIntentComplete,
+	workflowAdvancePhase,
+	workflowAdvanceStage,
+	workflowCompleteStage,
+	workflowIntentComplete,
 	getElicitInput,
 	getOpenReviewAndWait,
 	isStagePreExecute,
@@ -83,7 +83,7 @@ function readFrontmatter(filePath: string): Record<string, unknown> {
 export default defineTool({
 	name: "haiku_run_next",
 	description:
-		"Advance the FSM. Returns the next action for the agent to take, with rendered instructions appended. Auto-resolves `intent` from the current branch when omitted; if multiple intents are active, requires explicit `intent`. Pass `external_review_url` when a stage is blocked on external review to record the URL for approval polling.",
+		"Advance the workflow. Returns the next action for the agent to take, with rendered instructions appended. Auto-resolves `intent` from the current branch when omitted; if multiple intents are active, requires explicit `intent`. Pass `external_review_url` when a stage is blocked on external review to record the URL for approval polling.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -129,7 +129,7 @@ export default defineTool({
 						content: [
 							{
 								type: "text" as const,
-								text: `Multiple active intents (${active.map((i) => i.slug).join(", ")}). Pass \`intent\` explicitly, or checkout an intent branch (\`git switch haiku/<slug>/main\`) so the FSM can auto-resolve.`,
+								text: `Multiple active intents (${active.map((i) => i.slug).join(", ")}). Pass \`intent\` explicitly, or checkout an intent branch (\`git switch haiku/<slug>/main\`) so the workflow engine can auto-resolve.`,
 							},
 						],
 						isError: true,
@@ -150,7 +150,7 @@ export default defineTool({
 		// Stage-branch enforcement: before ANY stage-scoped write, align
 		// the current checkout with the active stage branch. If main has
 		// drifted ahead (feedback files or state leaked there), merge
-		// main → stage first so the FSM sees a consistent view. No-op in
+		// main → stage first so the workflow engine sees a consistent view. No-op in
 		// filesystem mode. Must run BEFORE the external_review_url write
 		// below — otherwise that write could land on the wrong branch.
 		{
@@ -257,7 +257,7 @@ export default defineTool({
 
 		// External review: include instructions about recording the URL.
 		if (result.action === "external_review_requested") {
-			result.message = `${(result.message as string) || ""}\n\nIMPORTANT: Ask the user WHERE they submitted the work for review (PR URL, MR link, email, Slack channel, etc.). Record the URL by calling haiku_run_next { intent: "${slug}", external_review_url: "<url>" } so the FSM can track approval status.`
+			result.message = `${(result.message as string) || ""}\n\nIMPORTANT: Ask the user WHERE they submitted the work for review (PR URL, MR link, email, Slack channel, etc.). Record the URL by calling haiku_run_next { intent: "${slug}", external_review_url: "<url>" } so the workflow engine can track approval status.`
 		}
 
 		const _openReviewAndWait = getOpenReviewAndWait()
@@ -315,13 +315,13 @@ export default defineTool({
 					})
 				if (reviewResult.decision === "approved") {
 					// Final intent-completion review — the terminal bookend.
-					// Approval fires fsmIntentComplete and returns
+					// Approval fires workflowIntentComplete and returns
 					// intent_complete.
 					if (gateContext === "intent_completion") {
 						const studioForCompletion =
 							(readFrontmatter(join(intentDir(slug), "intent.md"))
 								.studio as string) || ""
-						fsmIntentComplete(slug)
+						workflowIntentComplete(slug)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {
 							action: "intent_complete",
@@ -341,7 +341,7 @@ export default defineTool({
 							"intent.md",
 						)
 						setFrontmatterField(intentFilePath, "intent_reviewed", true)
-						if (nextPhase) fsmAdvancePhase(slug, stage, nextPhase)
+						if (nextPhase) workflowAdvancePhase(slug, stage, nextPhase)
 						gitCommitState(`haiku: intent ${slug} approved by user`)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {
@@ -356,7 +356,7 @@ export default defineTool({
 					}
 					if (gateContext === "elaborate_to_execute" && nextPhase) {
 						// Phase advancement (specs approved → start execution).
-						fsmAdvancePhase(slug, stage, nextPhase)
+						workflowAdvancePhase(slug, stage, nextPhase)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {
 							action: "advance_phase",
@@ -369,7 +369,7 @@ export default defineTool({
 						return text(withInstructions(gateResult))
 					}
 					if (nextStage) {
-						fsmAdvanceStage(slug, stage, nextStage)
+						workflowAdvanceStage(slug, stage, nextStage)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {
 							action: "advance_stage",
@@ -381,7 +381,7 @@ export default defineTool({
 						}
 						return text(withInstructions(gateResult))
 					}
-					fsmCompleteStage(slug, stage, "advanced")
+					workflowCompleteStage(slug, stage, "advanced")
 					syncSessionMetadata(slug, args.state_file as string | undefined)
 					// Stage approved ≠ intent complete. Enter the intent-
 					// review bookend unless the intent explicitly opted out.
@@ -396,7 +396,7 @@ export default defineTool({
 					return text(withInstructions(gateResult))
 				}
 				if (reviewResult.decision === "external_review") {
-					fsmCompleteStage(slug, stage, "blocked")
+					workflowCompleteStage(slug, stage, "blocked")
 					syncSessionMetadata(slug, args.state_file as string | undefined)
 					const gateResult = {
 						action: "external_review_requested",
@@ -489,7 +489,7 @@ export default defineTool({
 					// of short-circuiting to the gate on the stale "already
 					// dispatched" signal. Also reset intent-scope fix-loop
 					// bolt counters so the next completion cycle starts with
-					// a fresh budget. These fields are FSM-tracked in
+					// a fresh budget. These fields are workflow-tracked in
 					// INTENT_FIELDS, so we must reseal the integrity
 					// checksum after writing or verifyIntentState() will
 					// false-positive.
@@ -665,7 +665,7 @@ export default defineTool({
 										"intent.md",
 									)
 									setFrontmatterField(intentFilePath, "intent_reviewed", true)
-									if (nextPhase) fsmAdvancePhase(slug, stage, nextPhase)
+									if (nextPhase) workflowAdvancePhase(slug, stage, nextPhase)
 									gitCommitState(
 										`haiku: intent ${slug} approved by user (elicitation)`,
 									)
@@ -684,7 +684,7 @@ export default defineTool({
 									return text(withInstructions(elicitApproveResult))
 								}
 								if (gateContext === "elaborate_to_execute" && nextPhase) {
-									fsmAdvancePhase(slug, stage, nextPhase)
+									workflowAdvancePhase(slug, stage, nextPhase)
 									syncSessionMetadata(
 										slug,
 										args.state_file as string | undefined,
@@ -701,7 +701,7 @@ export default defineTool({
 									return text(withInstructions(elicitApproveResult))
 								}
 								if (nextStage) {
-									fsmAdvanceStage(slug, stage, nextStage)
+									workflowAdvanceStage(slug, stage, nextStage)
 									syncSessionMetadata(
 										slug,
 										args.state_file as string | undefined,
@@ -719,7 +719,7 @@ export default defineTool({
 								// Final stage approved via elicitation — enter
 								// intent-completion bookend instead of completing
 								// silently.
-								fsmCompleteStage(slug, stage, "advanced")
+								workflowCompleteStage(slug, stage, "advanced")
 								syncSessionMetadata(slug, args.state_file as string | undefined)
 								const elicitStudio =
 									(readFrontmatter(join(intentDir(slug), "intent.md"))
@@ -826,7 +826,7 @@ export default defineTool({
 				}
 
 				if (repairResult.success && !repairResult.fallbackUsed) {
-					// Repair agent succeeded — run FSM again to get the real
+					// Repair agent succeeded — run the workflow again to get the real
 					// next action.
 					const postRepairResult = runNext(slug)
 

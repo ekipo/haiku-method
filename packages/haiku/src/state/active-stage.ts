@@ -2,7 +2,7 @@
 // hat resolution, and session-metadata sync.
 //
 // These helpers all answer the same question in different shapes:
-// "what stage / unit / hat is the FSM currently on for this intent?"
+// "what stage / unit / hat is the workflow currently on for this intent?"
 // They're used by every state-mutating tool to align reads + writes
 // with the right branch and hat sequence.
 
@@ -25,7 +25,7 @@ import {
 //
 // Registered by orchestrator at startup to avoid circular imports between
 // state-tools and orchestrator. Used by advance_hat to internally progress
-// the FSM after unit completion.
+// the workflow after unit completion.
 
 export type RunNextHandler = (slug: string) => {
 	action: string

@@ -49,7 +49,7 @@ export interface StageIteration {
 	feedback_signature?: string
 }
 
-/** Maximum number of agent-invoked iterations allowed before the FSM
+/** Maximum number of agent-invoked iterations allowed before the workflow engine
  *  escalates to the human. User-invoked revisits (`trigger: "user-revisit"`)
  *  are NOT capped — explicit user intent always wins.
  *

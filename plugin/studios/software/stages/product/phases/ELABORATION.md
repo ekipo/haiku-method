@@ -30,7 +30,7 @@ When generating criteria for this stage, focus on behavioral verification:
 
 ### Bad criteria — product-specific unverifiable
 
-(In addition to the universal unverifiable shapes called out in the FSM contracts.)
+(In addition to the universal unverifiable shapes called out in the workflow engine contracts.)
 
 - "Behavior is intuitive" — needs a usability-test pass with a stated success-rate threshold
 - "Coverage is comprehensive across the user-facing capability list" — needs a structural check counting scenarios against the capability list, not a subjective judgment

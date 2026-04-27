@@ -61,7 +61,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 	sections.push(icHeader.join("\n"))
 
 	sections.push(
-		'### Parallel Fix-Chain Dispatch\n\nEach finding below has its own hat chain. **Within a chain, hats run serially.** **Across chains, findings run in parallel.** The final hat in each chain validates closure and calls `haiku_feedback_update { status: "closed" }` (omit `stage`). If a chain leaves its feedback open, the FSM loops that finding again on the next `haiku_run_next` — up to the bolt cap.\n',
+		'### Parallel Fix-Chain Dispatch\n\nEach finding below has its own hat chain. **Within a chain, hats run serially.** **Across chains, findings run in parallel.** The final hat in each chain validates closure and calls `haiku_feedback_update { status: "closed" }` (omit `stage`). If a chain leaves its feedback open, the workflow engine loops that finding again on the next `haiku_run_next` — up to the bolt cap.\n',
 	)
 
 	for (const {
@@ -103,13 +103,13 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 					`- All file edits, reads, and git operations MUST happen inside this path.`,
 					`- Use \`git -C "${fbWorktree}" <cmd>\` or \`cd\` into the worktree once. Do NOT run bare \`git\` in the parent tree.`,
 					`- Commit frequently with \`haiku: intent-fix ${fbId} bolt ${fixBolt} (${hat})\`. Do NOT push.`,
-					`- Do NOT run \`git worktree remove\`, \`git branch -d\`, or \`git merge\` — the FSM owns merge-back on the next \`haiku_run_next\` after the assessor closes the finding.`,
+					`- Do NOT run \`git worktree remove\`, \`git branch -d\`, or \`git merge\` — the workflow engine owns merge-back on the next \`haiku_run_next\` after the assessor closes the finding.`,
 					"",
 				)
 			} else {
 				promptLines.push(
 					"## Parallel-batch warning",
-					`This fix loop is running in parallel with other findings. Multiple chains may edit the **same files** at overlapping times (no isolation worktree is allocated in this environment). When you edit, read the file immediately before writing so you don't clobber another chain's change. The assessor will catch incomplete fixes and the FSM will retry on the next bolt.`,
+					`This fix loop is running in parallel with other findings. Multiple chains may edit the **same files** at overlapping times (no isolation worktree is allocated in this environment). When you edit, read the file immediately before writing so you don't clobber another chain's change. The assessor will catch incomplete fixes and the workflow engine will retry on the next bolt.`,
 					"",
 				)
 			}
@@ -135,7 +135,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 				"## Fix-mode scope (STRICT)",
 				`- You are addressing ONE finding: **${fbId}** — _${fbTitle}_.`,
 				`- The artifact(s) the feedback flags live under \`.haiku/intents/${slug}/stages/*/\` — edit them in place.`,
-				"- Do NOT create a new unit spec. Do NOT modify unit FSM fields. Do NOT touch unrelated artifacts.",
+				"- Do NOT create a new unit spec. Do NOT modify unit workflow fields. Do NOT touch unrelated artifacts.",
 				"- Do NOT call `haiku_unit_advance_hat` or `haiku_unit_reject_hat`.",
 				"",
 				"## Instructions",
@@ -157,7 +157,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 					`   - **Stage B — Quality / regression.** Inspect the diff (\`git show HEAD\`). Does the edit introduce a regression — broken neighboring behavior, scope creep, or violations of studio-wide standards?`,
 					`${step++}. **Decide:**`,
 					`   - **A passes AND B passes** → call \`haiku_feedback_update { intent: "${slug}", feedback_id: "${fbId}", status: "closed", closed_by: "intent-fix:${fbId}:bolt-${fixBolt}" }\` — omit \`stage\`.`,
-					`   - **A fails** → leave status unchanged (the FSM counts this bolt).`,
+					`   - **A fails** → leave status unchanged (the workflow engine counts this bolt).`,
 					`   - **A passes, B fails** → leave the original open AND log the regression as a new finding via \`haiku_feedback({ intent: "${slug}", title: "<regression from intent-fix:${fbId}>", body: "<diff hunk + impact>", origin: "studio-review", author: "fix-assessor" })\`. Omit \`stage\` (intent scope).`,
 					`   - **Finding is invalid** → call \`haiku_feedback_reject { intent: "${slug}", feedback_id: "${fbId}", reason: "<concrete reason>" }\` — omit \`stage\`.`,
 					`${step++}. Return \`fix-assessor: closed | open | rejected — <reason>\`. Verb of completed action; zero hedging.`,
@@ -195,7 +195,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 		"",
 		batchDispatchDirective(items.length, "fix chains"),
 		"",
-		`After the FINAL wave completes for all findings, call \`haiku_run_next { intent: "${slug}" }\` — the FSM decides: advance to gate, loop still-open findings, or escalate.`,
+		`After the FINAL wave completes for all findings, call \`haiku_run_next { intent: "${slug}" }\` — the workflow engine decides: advance to gate, loop still-open findings, or escalate.`,
 	]
 	if (items.length > 1) {
 		icWaveLines.push(

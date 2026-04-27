@@ -1,6 +1,6 @@
 // state/git-commit.ts — git add/commit/push for lifecycle state changes.
 //
-// All state mutations the FSM performs are committed via these helpers.
+// All state mutations the workflow engine performs are committed via these helpers.
 // They are no-ops in non-git environments (filesystem mode), and never
 // throw — git failures are reported via the return shape so callers can
 // surface them in tool output.

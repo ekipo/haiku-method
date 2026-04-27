@@ -75,7 +75,7 @@ export function cleanupOrphanedStageBranches(slug: string): {
 		if (segment.startsWith("unit-")) continue
 		if (!isBranchMerged(stripped, mainBranch)) continue
 		// git push origin --delete is destructive; wrap in tryRun so a
-		// permission or network issue doesn't crash the FSM.
+		// permission or network issue doesn't crash the workflow engine.
 		if (tryRun(["git", "push", "origin", "--delete", stripped])) {
 			result.deleted_remote.push(stripped)
 		}
@@ -125,7 +125,7 @@ export function deleteStageBranch(slug: string, stage: string): boolean {
 /**
  * Finalize an intent's branches when the intent completes:
  *   1. Merge any unmerged stage branches forward into `haiku/{slug}/main`
- *      (handles the final stage which fsmStartStage never got to consolidate).
+ *      (handles the final stage which workflowStartStage never got to consolidate).
  *   2. Checkout `haiku/{slug}/main` so the user lands on the intent hub.
  *   3. Delete every merged `haiku/{slug}/{stage}` branch.
  *   4. Prune worktrees.
@@ -211,7 +211,7 @@ export function finalizeIntentBranches(
 /**
  * Prepare the target stage branch for a go-back revisit.
  *
- * Per FSM contract: on revisit from fromStage → targetStage, the target
+ * Per workflow contract: on revisit from fromStage → targetStage, the target
  * stage merges in BOTH intent main (approved upstream changes) AND the
  * fromStage branch (unapproved future work — feedback files, in-flight
  * artifacts, state notes). This ensures feedback and artifacts from the
@@ -221,7 +221,7 @@ export function finalizeIntentBranches(
  * Non-destructive: never deletes branches. All commits on fromStage and
  * targetStage are preserved. Unit state reset (re-queueing to pending)
  * is the caller's responsibility and happens in a separate step via the
- * FSM state-writing code path.
+ * workflow state-writing code path.
  *
  * No-op in non-git environments.
  */
@@ -304,7 +304,7 @@ export function prepareRevisitBranch(
 					success: false,
 					message:
 						conflicts.length > 0
-							? `Merge main → ${targetStage} left ${conflicts.length} conflicted file(s): ${conflicts.join(", ")}. Resolve conflicts on branch '${targetBranch}' (edit files, \`git add\`, \`git commit\`), then retry the revisit — the FSM will detect main is already merged and continue with the ${fromStage} merge.`
+							? `Merge main → ${targetStage} left ${conflicts.length} conflicted file(s): ${conflicts.join(", ")}. Resolve conflicts on branch '${targetBranch}' (edit files, \`git add\`, \`git commit\`), then retry the revisit — the workflow engine will detect main is already merged and continue with the ${fromStage} merge.`
 							: `Merge main → ${targetStage} failed: ${mergeErr instanceof Error ? mergeErr.message : String(mergeErr)}`,
 				}
 			}

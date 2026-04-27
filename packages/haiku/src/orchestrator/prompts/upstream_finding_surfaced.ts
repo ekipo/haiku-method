@@ -1,7 +1,7 @@
 // orchestrator/prompts/upstream_finding_surfaced.ts — Cross-stage
 // findings surfaced from review. Groups items by upstream stage so
 // the user can decide per-finding: revisit upstream, reject, or
-// accept. The FSM never auto-fixes these — the wrong stage's hats
+// accept. The workflow engine never auto-fixes these — the wrong stage's hats
 // can't address a different stage's artifacts.
 
 import { definePromptBuilder } from "./define.js"
@@ -38,7 +38,7 @@ export default definePromptBuilder(({ slug, action }) => {
 	return [
 		`## Cross-Stage Findings Surfaced: ${ufsStage}`,
 		"",
-		`Reviewers in stage **${ufsStage}** flagged findings whose root cause lives in a **different stage**. The FSM will NOT fix these with ${ufsStage}'s hats — the wrong hats cannot fix a different stage's artifacts. This is a human decision.`,
+		`Reviewers in stage **${ufsStage}** flagged findings whose root cause lives in a **different stage**. The workflow engine will NOT fix these with ${ufsStage}'s hats — the wrong hats cannot fix a different stage's artifacts. This is a human decision.`,
 		"",
 		"### Findings by Upstream Stage",
 		"",
@@ -48,7 +48,7 @@ export default definePromptBuilder(({ slug, action }) => {
 		"",
 		"Present the findings to the user and ask them to pick ONE of the following per finding:",
 		"",
-		`1. **Revisit upstream** — call \`haiku_revisit { intent: "${slug}", stage: "<upstream-stage>" }\` to roll the FSM back to that stage. This re-enters the upstream stage's gate and will dispatch the upstream stage's fix loop against the cross-stage finding (which the FSM re-scopes as same-stage for that stage).`,
+		`1. **Revisit upstream** — call \`haiku_revisit { intent: "${slug}", stage: "<upstream-stage>" }\` to roll the workflow engine back to that stage. This re-enters the upstream stage's gate and will dispatch the upstream stage's fix loop against the cross-stage finding (which the workflow engine re-scopes as same-stage for that stage).`,
 		`2. **Reject the finding** — call \`haiku_feedback_reject { intent: "${slug}", stage: "${ufsStage}", feedback_id: "<FB-XX>", reason: "<concrete reason>" }\` if the finding is stale, invalid, or out-of-scope for this intent.`,
 		`3. **Accept as-is** — the user can manually close the finding via the review UI if they accept the tradeoff.`,
 		"",

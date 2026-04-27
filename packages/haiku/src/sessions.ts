@@ -157,7 +157,7 @@ export interface ReviewSession {
 	/** Ad-hoc sessions are opened on-demand via `haiku_review_open` (not a
 	 *  gate). The UI hides Approve, swaps the primary button to
 	 *  Done/Close (no feedback) or Request Changes (with feedback), and
-	 *  shows an "Ad-hoc review" badge in the header. The FSM does not
+	 *  shows an "Ad-hoc review" badge in the header. The workflow engine does not
 	 *  treat an ad-hoc session's status as a gate decision — durable
 	 *  feedback left on the session routes through the usual fix-loop on
 	 *  the next `run_next`. */

@@ -58,7 +58,7 @@ Each harness has its own configuration location and format. In all cases, update
 **Notes:**
 - No subagent support. Units execute sequentially rather than in parallel.
 - ~100 tool limit.
-- No MCP elicitation support. Review gates are FSM-enforced rather than interactive.
+- No MCP elicitation support. Review gates are workflow-enforced rather than interactive.
 
 ### Gemini CLI
 
@@ -97,7 +97,7 @@ mcpServers:
 **Notes:**
 - MCP prompts support is still maturing. Prompts are not yet exposed as slash commands.
 - Subagents execute sequentially (no parallel spawning).
-- No elicitation support. Review gates are FSM-enforced.
+- No elicitation support. Review gates are workflow-enforced.
 
 ### Kiro
 
@@ -146,8 +146,8 @@ Valid values: `claude-code`, `cursor`, `windsurf`, `gemini-cli`, `opencode`, `ki
 | Skills as slash commands | Native | Via prompts | Via prompts | Slash commands | Limited | Slash commands |
 | Parallel subagents | Yes | Yes | No | Experimental | No | Yes |
 | Hook system | Yes | No | No | No | No | Yes |
-| Quality gates | Hook-based | FSM-enforced | FSM-enforced | FSM-enforced | FSM-enforced | Hook-based |
-| FSM tamper detection | Hook-based | Checksum | Checksum | Checksum | Checksum | Hook-based |
+| Quality gates | Hook-based | workflow-enforced | workflow-enforced | workflow-enforced | workflow-enforced | Hook-based |
+| Workflow tamper detection | Hook-based | Checksum | Checksum | Checksum | Checksum | Hook-based |
 | Browser review UI | Yes | No | No | No | No | No |
 | MCP elicitation | Yes | Yes | No | No | No | Yes |
 
@@ -166,4 +166,4 @@ When running H·AI·K·U outside Claude Code, the following limitations apply:
 - **No auto-context injection on session start.** Claude Code injects H·AI·K·U context automatically via hooks. Other harnesses must use the `haiku:status` prompt at the start of each session to load active intent state.
 - **No automatic output tracking.** The agent must explicitly register outputs via `haiku_unit_set`. Claude Code's hook system handles this transparently.
 - **No context exhaustion warnings.** Claude Code detects when the context window is running low and triggers a graceful checkpoint. Other harnesses do not provide this signal.
-- **Browser-based review UI unavailable.** The `haiku-review-server` serves a local web UI for reviewing stage gates. In other harnesses, review gates use MCP elicitation where available, or fall back to FSM-enforced advancement.
+- **Browser-based review UI unavailable.** The `haiku-review-server` serves a local web UI for reviewing stage gates. In other harnesses, review gates use MCP elicitation where available, or fall back to workflow-enforced advancement.

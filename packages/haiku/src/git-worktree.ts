@@ -13,7 +13,7 @@
 // - When a stage completes, the stage branch merges back into intent main
 //   and the stage branch is deleted.
 //
-// All merges happen through **temporary worktrees** so the FSM never
+// All merges happen through **temporary worktrees** so the workflow engine never
 // mutates the currently-checked-out branch of the main repo worktree —
 // scope discipline is enforced at the filesystem level. The MCP's cwd
 // stays put; we create ephemeral worktrees for each merge target.
@@ -204,9 +204,9 @@ function checkoutOrCreate(branch: string, baseBranch?: string): string {
  * forked from a neutral base).
  *
  * The no-checkout contract is load-bearing: this function runs at the
- * top of every `fsmStartStage` tick, and earlier revisions that used
+ * top of every `workflowStartStage` tick, and earlier revisions that used
  * `checkoutOrCreate` here would shove HEAD back to `haiku/<slug>/main`
- * on every FSM tick, even while work was in-flight on a stage branch.
+ * on every workflow tick, even while work was in-flight on a stage branch.
  * That wiped editor state, threw away test runs, and forced manual
  * `git switch` every time the session resumed. Merging main is the
  * caller's job (via `mergeStageBranchIntoMain`'s temp-worktree path or
@@ -435,7 +435,7 @@ export function ensureStageBranch(slug: string, stage: string): string {
 	const mainBranch = `haiku/${slug}/main`
 	if (!isGitRepo()) return stageBranch
 	if (branchExists(stageBranch)) return stageBranch
-	// Intent main must exist first; a healthy FSM always creates it before any stage.
+	// Intent main must exist first; a healthy workflow always creates it before any stage.
 	if (!branchExists(mainBranch)) createIntentBranch(slug)
 	tryRun(["git", "branch", stageBranch, mainBranch])
 	return stageBranch
@@ -461,10 +461,10 @@ export function ensureStageBranch(slug: string, stage: string): string {
  * Non-fatal: returns { ok: false } on any failure and leaves the repo in
  * the best-effort state — callers log the warning but never crash.
  *
- * WHY: the FSM must reside on the stage branch for the full lifetime of
+ * WHY: the workflow engine must reside on the stage branch for the full lifetime of
  * the stage. Main is only updated at stage exit (merge stage → main).
  * Without this guard, any drift — user checkout, hook side-effect, an
- * earlier FSM bug — causes subsequent state writes to land on the wrong
+ * earlier workflow bug — causes subsequent state writes to land on the wrong
  * branch, producing the exact "stage work shipped to dev without the
  * sweep fixes" problem.
  */
@@ -500,7 +500,7 @@ export function ensureOnStageBranch(
 		// Pre-init state: the intent's branches haven't been created yet.
 		// We can't enforce what doesn't exist, but we MUST avoid leaving the
 		// agent on a foreign intent's branch — otherwise the caller
-		// (fsmStartStage → createIntentBranch) would fork haiku/{slug}/main
+		// (workflowStartStage → createIntentBranch) would fork haiku/{slug}/main
 		// off that foreign branch and inherit its history. Fall back to the
 		// repo mainline (main/master/etc.) so branch creation forks from a
 		// clean, neutral base.
@@ -664,7 +664,7 @@ export function ensureOnStageBranch(
 					intentMain,
 					"--no-edit",
 					"-m",
-					`haiku: merge intent-main → stage ${stage} (FSM branch enforcement)`,
+					`haiku: merge intent-main → stage ${stage} (workflow branch enforcement)`,
 				])
 				return {
 					ok: true,
@@ -797,7 +797,7 @@ function autoCommitDirtyTree(
 			"git",
 			"commit",
 			"-m",
-			`haiku: auto-commit wip on ${branch} (FSM branch enforcement)`,
+			`haiku: auto-commit wip on ${branch} (workflow branch enforcement)`,
 		])
 		return { ok: true, committed_files: files }
 	} catch (err) {

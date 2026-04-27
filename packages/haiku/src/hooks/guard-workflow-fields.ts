@@ -1,12 +1,12 @@
-// guard-fsm-fields — PreToolUse hook for Write/Edit
+// guard-workflow-fields — PreToolUse hook for Write/Edit
 //
-// Blocks direct file edits that attempt to spoof FSM-controlled fields on
+// Blocks direct file edits that attempt to spoof workflow-controlled fields on
 // haiku state files (intent.md, stage state.json, unit.md). On hookless
 // harnesses, tampering is caught by the checksum in `state-integrity.ts`;
 // on hook-capable harnesses (Claude Code/Kiro), the checksum is a no-op so
 // THIS hook is the primary line of defense. Keep the blocked-field list in
-// sync with `fsm-fields.ts` / `state-integrity.ts`, or agents will find a
-// way to mutate FSM state without either gate catching it.
+// sync with `workflow-fields.ts` / `state-integrity.ts`, or agents will find a
+// way to mutate workflow state without either gate catching it.
 //
 // What's blocked:
 //   - `status: completed` on any state file (the canonical check-in field)
@@ -14,7 +14,7 @@
 //     `completion_review_dispatched: true`, `completion_review_skipped`).
 //     These drive the pre-intent-completion review branch in `runNext`;
 //     a hand-edited `true` skips or shortcuts the studio-level review
-//     without the FSM ever actually running it.
+//     without the workflow engine ever actually running it.
 //
 // Other field transitions (status → pending/active/blocked, phase →
 // elaborate/execute/review/gate) remain agent-editable for legitimate
@@ -116,7 +116,7 @@ export async function guardFsmFields(
 	if (yamlCompleted || jsonCompleted) {
 		out(
 			`BLOCKED: Cannot directly set status to "completed" on ${kind} files. ` +
-				`Completion is FSM-controlled — use the MCP tools (haiku_run_next, ` +
+				`Completion is workflow-controlled — use the MCP tools (haiku_run_next, ` +
 				`haiku_unit_advance_hat) so scope validation, feedback closure, ` +
 				`worktree merge-back, and integrity sealing run. Setting status to ` +
 				`other values (pending, active, blocked) via direct edit is fine.`,
@@ -126,8 +126,8 @@ export async function guardFsmFields(
 
 	// Intent-only guards: hand-editing completion-review phase flags would
 	// let an agent enter or exit the studio-level adversarial review
-	// without the FSM actually running it. These fields are written only
-	// by `fsmEnterIntentCompletionReview`, `runIntentCompletionReview`, and
+	// without the workflow engine actually running it. These fields are written only
+	// by `workflowEnterIntentCompletionReview`, `runIntentCompletionReview`, and
 	// the gate-rejection handler — every legitimate path reseals the
 	// integrity checksum. A direct edit would also skip the reseal.
 	if (isIntentFile) {
@@ -145,7 +145,7 @@ export async function guardFsmFields(
 					: "completion_review_skipped: true"
 			out(
 				`BLOCKED: Cannot directly set \`${offending}\` on intent files. ` +
-					`The intent-completion review phase is FSM-controlled — call ` +
+					`The intent-completion review phase is workflow-controlled — call ` +
 					`haiku_run_next to enter it, or approve the gate_review to exit. ` +
 					`Hand-editing this field would short-circuit the studio-level ` +
 					`adversarial review without running it.`,
@@ -156,8 +156,8 @@ export async function guardFsmFields(
 }
 
 export default defineHook({
-	name: "guard-fsm-fields",
-	description: "PreToolUse Write/Edit/MultiEdit: block hand-edits that spoof FSM-controlled fields.",
+	name: "guard-workflow-fields",
+	description: "PreToolUse Write/Edit/MultiEdit: block hand-edits that spoof workflow-controlled fields.",
 	async handle(input, _ctx) {
 		await guardFsmFields(input)
 	},

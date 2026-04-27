@@ -1242,7 +1242,7 @@ body
 			unit: "unit-01-gates-fail",
 		})
 		const text = getTextResult(result)
-		// Response is the FSM Result envelope path; the persisted state should
+		// Response is the Workflow Result envelope path; the persisted state should
 		// show bolt+1, hat unchanged.
 		const fmRaw = readFileSync(
 			join(intentDirPath, "stages", "gated", "units", "unit-01-gates-fail.md"),
@@ -1258,8 +1258,8 @@ body
 			`expected hat to remain builder, got: ${fm}`,
 		)
 		assert.ok(
-			text.includes("FSM Result written to:"),
-			`expected FSM Result envelope, got: ${text}`,
+			text.includes("Workflow Result written to:"),
+			`expected Workflow Result envelope, got: ${text}`,
 		)
 		assert.ok(
 			text.includes("gates failed") || text.includes("always-fail"),

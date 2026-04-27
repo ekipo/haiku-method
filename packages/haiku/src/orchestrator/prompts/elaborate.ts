@@ -5,7 +5,7 @@
 //      decide whether new work is needed for this iteration.
 //   2. Revisit (iteration > 1) — pending feedback drove a roll-back
 //      to elaborate; emit the focused additive-elaboration block.
-//   3. Fresh elaborate — full rendering: stage def, FSM contracts,
+//   3. Fresh elaborate — full rendering: stage def, workflow contracts,
 //      upstream inputs, prior-stage enumeration, optional discovery
 //      fan-out (early-return if any artifacts are pending), then
 //      output expectations + design-provider hint + approach
@@ -134,9 +134,9 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 				"",
 				"**A. New units are needed.** Draft them as `unit-NN-<slug>.md` under `.haiku/intents/.../stages/<stage>/units/`. Continue the file-naming sequence from the highest existing number. Each new unit's `inputs:` MUST reference the prior-stage artifacts it builds on. Then call `haiku_run_next`.",
 				"",
-				"**B. Pending units need revision.** Edit their `.md` files in place (the FSM guard permits editing units whose `status` is NOT `completed`). Then call `haiku_run_next`.",
+				"**B. Pending units need revision.** Edit their `.md` files in place (the workflow engine guard permits editing units whose `status` is NOT `completed`). Then call `haiku_run_next`.",
 				"",
-				"**C. No changes needed — nothing has evolved that warrants new work in this stage.** Call `haiku_run_next` immediately without adding or modifying any units. The FSM compares the pre-elaborate unit count to the post-elaborate count; if unchanged AND no pending units exist, it advances directly to the gate (skipping pre-review + execute + review — there's nothing new to review or execute).",
+				"**C. No changes needed — nothing has evolved that warrants new work in this stage.** Call `haiku_run_next` immediately without adding or modifying any units. The workflow engine compares the pre-elaborate unit count to the post-elaborate count; if unchanged AND no pending units exist, it advances directly to the gate (skipping pre-review + execute + review — there's nothing new to review or execute).",
 				"",
 				"**Be honest about C.** If the intent genuinely hasn't evolved in ways that affect this stage, choosing C is correct. Making busy-work units just to look thorough wastes effort and creates maintenance drag.",
 			].join("\n"),
@@ -284,7 +284,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 	// Discovery fan-out — one subagent per declared discovery artifact,
 	// each in its own isolation worktree off the stage branch. The
 	// pattern mirrors fix-chain worktrees: subagents write in their own
-	// tree, the FSM merges back on the next `haiku_run_next`.
+	// tree, the workflow engine merges back on the next `haiku_run_next`.
 	const discoveryArtifactsAll: Array<{
 		name: string
 		templatePath: string
@@ -350,7 +350,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 			join(studio, "stages", stage, "STAGE.md"),
 		)
 
-		let fanOutText = `## Discovery Fan-Out (REQUIRED)\n\nThis stage produces ${discoveryArtifacts.length} discovery artifact${plural}: ${artifactNames}.\n\n**Spawn one subagent per artifact** using the EXACT content between \`<subagent>\` tags as the prompt. Each subagent writes inside its own isolation worktree — the FSM merges their work back into the stage branch on the next \`haiku_run_next\`.\n\n${batchDispatchDirective(discoveryArtifacts.length, "discovery subagents")}\n\n`
+		let fanOutText = `## Discovery Fan-Out (REQUIRED)\n\nThis stage produces ${discoveryArtifacts.length} discovery artifact${plural}: ${artifactNames}.\n\n**Spawn one subagent per artifact** using the EXACT content between \`<subagent>\` tags as the prompt. Each subagent writes inside its own isolation worktree — the workflow engine merges their work back into the stage branch on the next \`haiku_run_next\`.\n\n${batchDispatchDirective(discoveryArtifacts.length, "discovery subagents")}\n\n`
 
 		for (const a of discoveryArtifacts) {
 			const wt = createDiscoveryWorktree(slug, stage, a.name)
@@ -370,7 +370,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 					`**Rules:**`,
 					`- Write the populated discovery artifact INSIDE this worktree path (under \`${wt}/.haiku/intents/${slug}/knowledge/\` per the template's \`location:\`).`,
 					`- If you commit, use \`git -C "${wt}" add -A && git -C "${wt}" commit -m "..."\`. Do NOT push.`,
-					`- Do NOT run \`git worktree remove\`, \`git branch -d\`, or \`git merge\` — the FSM owns merge-back.`,
+					`- Do NOT run \`git worktree remove\`, \`git branch -d\`, or \`git merge\` — the workflow engine owns merge-back.`,
 					"",
 				)
 			}
@@ -394,7 +394,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 				`- You research **only** the axis defined by the "${a.name}" template. Other discovery artifacts in this stage are being researched by **sibling subagents in parallel** — do NOT investigate adjacent domains, do NOT pre-empt their work, do NOT leave notes for them.`,
 				"- If you encounter information that belongs primarily in a sibling artifact, do NOT write it to the sibling's file path — that creates merge conflicts at the integrator step. Note it briefly as a *context boundary* in your own artifact (e.g. *\"depends on auth model — see security artifact\"*) and let the sibling agent author the substance. Cross-cutting constraints that genuinely shape multiple axes (security boundaries, hard dependencies) should be noted in your artifact too, in the boundary section, so they're not lost if the sibling misses them.",
 				"- Your write path is ONE file at the template's `location:`. Any other file write — sibling artifacts, intent.md, unit specs, knowledge files outside your `location:` — is a scope violation.",
-				"- Do NOT attempt to summarize or synthesize across sibling artifacts. The elaborate phase does that on the next FSM tick, after all discovery merges back.",
+				"- Do NOT attempt to summarize or synthesize across sibling artifacts. The elaborate phase does that on the next workflow tick, after all discovery merges back.",
 				"",
 				"## Instructions",
 				"",
@@ -414,7 +414,7 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 			})}\n\n`
 		}
 
-		fanOutText += `### Parent Instructions (do NOT include in subagent prompts)\n\nSpawn each subagent above using the EXACT content between \`<subagent>\` tags as the prompt. When ALL subagents return, call \`haiku_run_next { intent: "${slug}" }\` — the FSM merges their isolation worktrees back into the stage branch (resolving conflicts via the integrator if needed) and then emits the unit-decomposition instructions. **Do NOT proceed to decomposition in this response** — wait for the next FSM tick so the merged knowledge artifacts are visible.`
+		fanOutText += `### Parent Instructions (do NOT include in subagent prompts)\n\nSpawn each subagent above using the EXACT content between \`<subagent>\` tags as the prompt. When ALL subagents return, call \`haiku_run_next { intent: "${slug}" }\` — the workflow engine merges their isolation worktrees back into the stage branch (resolving conflicts via the integrator if needed) and then emits the unit-decomposition instructions. **Do NOT proceed to decomposition in this response** — wait for the next workflow tick so the merged knowledge artifacts are visible.`
 
 		sections.push(fanOutText)
 

@@ -7,7 +7,7 @@
 // covers both cases.
 //
 // upstream_stage validation is strict: typos would silently route
-// findings into a ghost stage the FSM never visits. Self-reference
+// findings into a ghost stage the workflow engine never visits. Self-reference
 // is also rejected — pointing upstream at the current stage is
 // meaningless and would cause the gate vs. intent-completion layer
 // to classify the same finding inconsistently.

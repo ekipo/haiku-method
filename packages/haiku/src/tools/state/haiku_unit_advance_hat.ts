@@ -1,6 +1,6 @@
 // tools/state/haiku_unit_advance_hat.ts — Advance a unit to the
 // next hat. On the last hat, auto-completes the unit and progresses
-// the FSM via the runNext callback.
+// the workflow engine via the runNext callback.
 //
 // Hot-path. Performs in order:
 //   1. Branch alignment (pre-find + post-find re-align for cross-stage cases)
@@ -72,7 +72,7 @@ import { text } from "./_text.js"
 export default defineTool({
 	name: "haiku_unit_advance_hat",
 	description:
-		"Advance a unit to the next hat in the sequence. When called on the last hat, auto-completes the unit and progresses the FSM. The system resolves the current hat, next hat, and stage internally.",
+		"Advance a unit to the next hat in the sequence. When called on the last hat, auto-completes the unit and progresses the workflow. The system resolves the current hat, next hat, and stage internally.",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -198,7 +198,7 @@ export default defineTool({
 		// Per-hat opt-in quality gates with auto-reject. Opt-in by hat (not
 		// unit-wide) so early hats like a planner that haven't produced
 		// verifiable artifacts yet don't trip on gates the builder will
-		// satisfy later. On failure, FSM auto-rejects (bolt+1, same hat
+		// satisfy later. On failure, workflow auto-rejects (bolt+1, same hat
 		// retries) rather than asking the agent to fix-and-retry.
 		if (currentHat) {
 			const intentFile = `${intentDir(args.intent as string)}/intent.md`
@@ -285,7 +285,7 @@ export default defineTool({
 							_push_warning: pushWarning(autoRejectGit) || undefined,
 						})
 						return text(
-							`FSM Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nFSM Result: ${resultPath}\n\nDo NOT add prose or summary. Parent reads the file to drive the rebolt — gates failed (${gateResult.failures.map((f) => f.name).join(", ")}), bolt ${currentBolt + 1}/${MAX_UNIT_BOLTS}, retrying ${currentHat}.`,
+							`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose or summary. Parent reads the file to drive the rebolt — gates failed (${gateResult.failures.map((f) => f.name).join(", ")}), bolt ${currentBolt + 1}/${MAX_UNIT_BOLTS}, retrying ${currentHat}.`,
 						)
 					}
 				}
@@ -361,7 +361,7 @@ export default defineTool({
 							message:
 								`Cannot complete unit: ${scopeResult.violations.length} file(s) were written outside the stage's declared scope.\n\n` +
 								`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
-								`Allowed paths (stage output templates + FSM metadata):\n${allowedSummary}\n\n` +
+								`Allowed paths (stage output templates + workflow metadata):\n${allowedSummary}\n\n` +
 								`To resolve (in the unit worktree): (a) drop ALL unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${advStage})\` — recommended if the unit just started and few commits landed; or (b) amend the bad file out of the latest commit with \`git rm <file> && git commit --amend --no-edit\`; or (c) whole-commit rollback with \`git revert --no-edit <commit-sha>\` for each bad commit.\n\nNOTE: \`git checkout HEAD -- <file>\` does NOT work on committed files (it's a no-op when the file matches HEAD). Use one of the above.\n\nAlternatively: (d) update the stage's output template \`location:\` / \`scope:\` if this pattern is legitimate, or (e) call \`haiku_revisit\` if the scope itself is wrong.`,
 						}),
 					)
@@ -400,7 +400,7 @@ export default defineTool({
 					JSON.stringify({
 						error: "unit_outputs_empty",
 						message:
-							"Cannot complete unit: no outputs were produced. Every unit must write at least one artifact that the FSM can detect (stage artifact under `stages/<stage>/...` excluding `units/`/`state.json`, knowledge document under `knowledge/`, or a file matching a stage output template `location:`). The FSM auto-populates `outputs:` from the git diff at advance time; if you've written files but they're not showing up, verify they've been committed in the unit worktree, or add them explicitly to the unit's `outputs:` frontmatter field.",
+							"Cannot complete unit: no outputs were produced. Every unit must write at least one artifact that the the workflow engine can detect (stage artifact under `stages/<stage>/...` excluding `units/`/`state.json`, knowledge document under `knowledge/`, or a file matching a stage output template `location:`). The workflow engine auto-populates `outputs:` from the git diff at advance time; if you've written files but they're not showing up, verify they've been committed in the unit worktree, or add them explicitly to the unit's `outputs:` frontmatter field.",
 					}),
 				)
 			}
@@ -426,7 +426,7 @@ export default defineTool({
 			}
 
 			completeUnitIteration(advPath, "advance")
-			// Dual-write: parent (for FSM reads) AND unit worktree (so the
+			// Dual-write: parent (for workflow reads) AND unit worktree (so the
 			// merge commit captures the completion state).
 			setUnitFrontmatterField(
 				args.intent as string,
@@ -496,7 +496,7 @@ export default defineTool({
 
 			// Merge the unit branch into its STAGE branch. Units ALWAYS fan
 			// in to their stage branch regardless of whatever branch the
-			// MCP's parent worktree happens to be on — the FSM works in the
+			// MCP's parent worktree happens to be on — the workflow engine works in the
 			// scope of the stage, not the parent worktree. mergeUnitWorktree
 			// uses a temp worktree so the MCP's checkout is never disturbed.
 			const intentSlug = args.intent as string
@@ -540,7 +540,7 @@ export default defineTool({
 					? ""
 					: ` (${mergeResult.message})`
 
-			// Internally call runNext to progress the FSM state, but DO NOT
+			// Internally call runNext to progress the workflow state, but DO NOT
 			// return orchestration-level actions (start_units, start_unit) to
 			// the caller — those are for the PARENT agent, not the subagent
 			// that just finished its hat. The subagent's job ends here; the
@@ -561,7 +561,7 @@ export default defineTool({
 				])
 				if (subagentLocalActions.has(next.action as string)) {
 					return text(
-						`Unit ${args.unit} completed (last hat)${mergeNote}. FSM next action (${next.action}) is for the parent orchestrator — this subagent's job ends here. The parent will call haiku_run_next when all wave subagents return.${pushWarning(completeGit)}`,
+						`Unit ${args.unit} completed (last hat)${mergeNote}. Next action (${next.action}) is for the parent orchestrator — this subagent's job ends here. The parent will call haiku_run_next when all wave subagents return.${pushWarning(completeGit)}`,
 					)
 				}
 				const payload = injectPushWarning(
@@ -575,7 +575,7 @@ export default defineTool({
 				})
 				writeResultFile(resultPath, payload)
 				return text(
-					`FSM Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nFSM Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next FSM action (phase/stage/intent transition).`,
+					`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action (phase/stage/intent transition).`,
 				)
 			}
 
@@ -641,7 +641,7 @@ export default defineTool({
 						message:
 							`Cannot advance hat '${currentHat}': ${scopeResult.violations.length} file(s) were written outside the stage's declared scope.\n\n` +
 							`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
-							`Allowed paths (stage output templates + FSM metadata):\n${allowedSummary}\n\n` +
+							`Allowed paths (stage output templates + workflow metadata):\n${allowedSummary}\n\n` +
 							`Revert the out-of-bounds commits in the unit worktree: drop all unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${advStage})\`, or amend a single file out with \`git rm <file> && git commit --amend --no-edit\`, or \`git revert --no-edit <commit-sha>\` for a whole commit. NOTE: \`git checkout HEAD -- <file>\` is a no-op on committed files. Or update the stage's output template if this pattern is legitimate. Do NOT advance with scope violations — downstream hats will run blind.`,
 					}),
 				)
@@ -701,7 +701,7 @@ export default defineTool({
 			})
 			writeResultFile(resultPath, payload)
 			return text(
-				`FSM Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nFSM Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next FSM action.`,
+				`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose, summary, or description. The parent reads the file to drive the next workflow action.`,
 			)
 		}
 

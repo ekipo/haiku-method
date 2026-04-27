@@ -1,5 +1,5 @@
 // orchestrator/prompts/revisited.ts — `revisit()` succeeded. The
-// FSM rolled the active stage's phase back (typically to elaborate)
+// workflow engine rolled the active stage's phase back (typically to elaborate)
 // and re-queued units. The agent picks up from the new phase.
 
 import { definePromptBuilder } from "./define.js"

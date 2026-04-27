@@ -1,5 +1,5 @@
 #!/usr/bin/env npx tsx
-// Tests for the FSM state-derivation function. Each test sets up a
+// Tests for the workflow state-derivation function. Each test sets up a
 // minimal on-disk intent fixture in tmpdir, calls deriveCurrentState,
 // and asserts the returned state name matches the expected coarse
 // state.

@@ -145,7 +145,7 @@ export default defineTool({
 						scope: scopeResult.scope,
 						message:
 							`Cannot reject hat: the unit worktree still contains ${scopeResult.violations.length} out-of-scope write(s) that must be reverted first. ` +
-							`Attempt ${newAttempts}/${MAX_UNIT_BOLTS} — after ${MAX_UNIT_BOLTS} scope-violation rejects, the FSM escalates to the user.\n\n` +
+							`Attempt ${newAttempts}/${MAX_UNIT_BOLTS} — after ${MAX_UNIT_BOLTS} scope-violation rejects, the workflow engine escalates to the user.\n\n` +
 							`Out-of-bounds files:\n${scopeResult.violations.map((v) => `  - ${v}`).join("\n")}\n\n` +
 							`Revert the out-of-bounds commits in the unit worktree: drop all unit commits with \`git reset --hard $(git merge-base HEAD haiku/${args.intent as string}/${rejectStage})\`, or amend a single file out with \`git rm <file> && git commit --amend --no-edit\`, or \`git revert --no-edit <commit-sha>\` for a whole commit. NOTE: \`git checkout HEAD -- <file>\` is a NO-OP on committed files and will not clear the violation. After the revert, call reject_hat again.`,
 					}),
@@ -244,7 +244,7 @@ export default defineTool({
 			_push_warning: pushWarning(rejectGit) || undefined,
 		})
 		return text(
-			`FSM Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nFSM Result: ${resultPath}\n\nDo NOT add prose or summary. Parent reads the file to drive the rebolt.`,
+			`Workflow Result written to: ${resultPath}\n\nYOUR FINAL MESSAGE TO THE PARENT MUST BE EXACTLY ONE LINE:\n\nWorkflow Result: ${resultPath}\n\nDo NOT add prose or summary. Parent reads the file to drive the rebolt.`,
 		)
 	},
 })

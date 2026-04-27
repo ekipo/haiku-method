@@ -508,7 +508,7 @@ try {
 		const result = runNext(slug)
 
 		// Resolution-aware routing: when any pending item is
-		// human-authored with no explicit `resolution`, the FSM must
+		// human-authored with no explicit `resolution`, the workflow engine must
 		// open the review UI rather than auto-firing the fix loop. The
 		// reviewer triages each item (pick a resolution or leave for
 		// agent triage), then explicitly clicks "Send to agent" which
@@ -601,7 +601,7 @@ try {
 		const result = runNext(slug)
 
 		// All items are agent-authored → legacy fix-loop contract
-		// stands. The FSM dispatches without human intervention.
+		// stands. The workflow engine dispatches without human intervention.
 		assert.strictEqual(result.action, "review_fix")
 		assert.strictEqual(result.items.length, 2)
 	})
@@ -1293,7 +1293,7 @@ Cannot be resolved autonomously.`,
 			`---\nname: feedback-assessor\n---\n.`,
 		)
 
-		// Mark plan as completed so the FSM's consistency check doesn't
+		// Mark plan as completed so the workflow engine's consistency check doesn't
 		// rewind to it. Without this, runNext's "all stages before
 		// active_stage are completed" guard would reset us to plan.
 		createStageState(intentDirPath, "plan", {

@@ -51,7 +51,7 @@ export type FeedbackOrigin = (typeof FEEDBACK_ORIGINS)[number]
  *                writes `closed_by: <unit>` on the feedback item but DOES
  *                NOT change its status — the agent doing the work cannot
  *                self-certify.
- *   fixing     — the FSM is mid-fix-loop on this finding (one or more
+ *   fixing     — the workflow is mid-fix-loop on this finding (one or more
  *                `fix_hats` bolts have run against it).
  *   addressed  — an independent actor (feedback-assessor hat, human via the
  *                review UI, or another agent) verified the closure.
@@ -74,7 +74,7 @@ export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number]
  *  item before escalating to the human. */
 export const MAX_FIX_LOOP_BOLTS = 3
 
-/** Cap on how many times the FSM will dispatch the integrator subagent
+/** Cap on how many times the workflow will dispatch the integrator subagent
  *  against a single fix-chain merge conflict before giving up. */
 export const MAX_INTEGRATOR_ATTEMPTS = 3
 

@@ -100,7 +100,7 @@ export const stateToolDefs = [
 	{
 		name: "haiku_unit_advance_hat",
 		description:
-			"Advance a unit to the next hat in the sequence. When called on the last hat, auto-completes the unit and progresses the FSM. The system resolves the current hat, next hat, and stage internally.",
+			"Advance a unit to the next hat in the sequence. When called on the last hat, auto-completes the unit and progresses the workflow. The system resolves the current hat, next hat, and stage internally.",
 		inputSchema: {
 			type: "object" as const,
 			properties: { intent: { type: "string" }, unit: { type: "string" } },
@@ -298,7 +298,7 @@ export const stateToolDefs = [
 	{
 		name: "haiku_review_open",
 		description:
-			'Open an ad-hoc review pane in the browser for the active intent and BLOCK until the reviewer clicks Done or Request Changes (or the pane times out at 30min). The UI swaps Approve for Done/Close, shows an "Ad-hoc review" badge, and never mutates FSM state on its own. Return value is a concrete next-step instruction: on Done the tool returns "no changes requested"; on Request Changes it returns a nudge to call haiku_run_next so the durable feedback routes through the normal fix-loop / revisit path.',
+			'Open an ad-hoc review pane in the browser for the active intent and BLOCK until the reviewer clicks Done or Request Changes (or the pane times out at 30min). The UI swaps Approve for Done/Close, shows an "Ad-hoc review" badge, and never mutates workflow state on its own. Return value is a concrete next-step instruction: on Done the tool returns "no changes requested"; on Request Changes it returns a nudge to call haiku_run_next so the durable feedback routes through the normal fix-loop / revisit path.',
 		inputSchema: {
 			type: "object" as const,
 			properties: {
@@ -386,7 +386,7 @@ export const stateToolDefs = [
 				upstream_stage: {
 					type: "string",
 					description:
-						"When the finding's root cause lives in a DIFFERENT stage than the one being reviewed, name it here. The FSM surfaces cross-stage findings to the human rather than routing them through the current stage's fix loop — the wrong hats cannot fix a different stage's artifacts.",
+						"When the finding's root cause lives in a DIFFERENT stage than the one being reviewed, name it here. The workflow surfaces cross-stage findings to the human rather than routing them through the current stage's fix loop — the wrong hats cannot fix a different stage's artifacts.",
 				},
 			},
 			required: ["intent", "title", "body"],

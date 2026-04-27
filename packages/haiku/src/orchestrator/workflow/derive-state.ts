@@ -137,7 +137,7 @@ export function deriveCurrentState(
 			context: baseContext("", "", {}),
 		}
 	}
-	// Production writes `awaiting_completion_review` via fsmEnterIntentCompletionReview;
+	// Production writes `awaiting_completion_review` via workflowEnterIntentCompletionReview;
 	// `intent_completion` is reserved for callers that want the same routing under
 	// the more descriptive name. Both surface to the same workflow handler.
 	if (phase === "intent_completion" || phase === "awaiting_completion_review") {

@@ -24,7 +24,7 @@
 //        - first dispatch → pre_review (with side-effect: stage state
 //          dispatch flag + git commit)
 //        - grace window before ack → pre_review_waiting
-//  11. Spec gate (auto/ask): auto-advance via fsmAdvancePhase or
+//  11. Spec gate (auto/ask): auto-advance via workflowAdvancePhase or
 //      open gate_review.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs"
@@ -33,7 +33,7 @@ import { topologicalSort } from "../../../dag.js"
 import {
 	buildElaboratorInstruction,
 	cleanupPreExecuteFeedback,
-	fsmAdvancePhase,
+	workflowAdvancePhase,
 	resolveStageMetadata,
 	resolveStageReview,
 	resolveStudioStages,
@@ -279,7 +279,7 @@ const emit: WorkflowHandler = (ctx) => {
 				message: `Re-entering stage '${currentStage}' with ${completedUnitsList.length} completed unit(s) from prior iteration(s). Treat completed work as knowledge; decide whether this iteration needs new or modified units.`,
 			}
 		}
-		fsmAdvancePhase(slug, currentStage, "gate")
+		workflowAdvancePhase(slug, currentStage, "gate")
 		return {
 			action: "advance_phase",
 			intent: slug,
@@ -630,7 +630,7 @@ const emit: WorkflowHandler = (ctx) => {
 			setFrontmatterField(intentFile, "intent_reviewed", true)
 			gitCommitState(`haiku: intent ${slug} auto-approved`)
 		}
-		fsmAdvancePhase(slug, currentStage, "execute")
+		workflowAdvancePhase(slug, currentStage, "execute")
 		emitTelemetry("haiku.gate.auto_advanced", {
 			intent: slug,
 			stage: currentStage,

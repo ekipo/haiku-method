@@ -730,7 +730,7 @@ export function scanOneIntent(
 					field: `stages/${stageName}/state.json`,
 					severity: "warning",
 					message:
-						"Missing state.json for stage before active_stage — FSM will reset backwards",
+						"Missing state.json for stage before active_stage — workflow will reset backwards",
 					fix: `Create state.json with status: "completed" (stage is before active_stage '${repairActiveStage}')`,
 				})
 			}

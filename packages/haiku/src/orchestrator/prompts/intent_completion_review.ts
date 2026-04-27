@@ -2,7 +2,7 @@
 // review pass that fires once after the final stage gate passes.
 // Spawns one subagent per studio review-agent in parallel; findings
 // are logged at intent scope (no stage). Cross-stage findings get
-// `upstream_stage:` so the FSM surfaces them rather than fixing.
+// `upstream_stage:` so the workflow engine surfaces them rather than fixing.
 
 import { readStudioReviewAgentPaths } from "../../studio-reader.js"
 import {
@@ -28,7 +28,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 			"",
 			"### Review Agent Fan-Out (REQUIRED)",
 			"",
-			`**Spawn exactly one subagent per review agent in parallel — no duplicates.** Findings are logged at **intent scope** (stage omitted) via \`haiku_feedback\`. After every agent completes, call \`haiku_run_next { intent: "${slug}" }\` — the FSM will dispatch the studio fix-hat loop against any findings, or open the final gate if the review is clean.`,
+			`**Spawn exactly one subagent per review agent in parallel — no duplicates.** Findings are logged at **intent scope** (stage omitted) via \`haiku_feedback\`. After every agent completes, call \`haiku_run_next { intent: "${slug}" }\` — the workflow will dispatch the studio fix-hat loop against any findings, or open the final gate if the review is clean.`,
 		].join("\n"),
 	)
 
@@ -54,7 +54,7 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 			"**You MUST NOT write, edit, or create any file.** Your ONLY output channel is the `haiku_feedback` MCP tool. If you're tempted to fix an issue yourself, log it as feedback instead. Any file write is a scope violation.",
 			"",
 			"## Scope routing (CRITICAL)",
-			'Findings whose root cause lives in a **specific stage** MUST include `upstream_stage: "<stage-name>"`. The FSM surfaces those cross-stage findings to the human rather than routing them through the studio fix loop. Whole-intent concerns (inconsistencies across stages, missing integrations, studio-wide standard violations) do NOT have a single upstream stage — omit the field.',
+			'Findings whose root cause lives in a **specific stage** MUST include `upstream_stage: "<stage-name>"`. The workflow surfaces those cross-stage findings to the human rather than routing them through the studio fix loop. Whole-intent concerns (inconsistencies across stages, missing integrations, studio-wide standard violations) do NOT have a single upstream stage — omit the field.',
 			"",
 			"## Instructions",
 			"",

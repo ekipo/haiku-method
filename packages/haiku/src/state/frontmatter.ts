@@ -96,7 +96,7 @@ export function setFrontmatterField(
 
 /** Write a unit frontmatter field to BOTH the parent worktree's copy AND
  *  the unit's dedicated worktree (if one exists). The dual write is what
- *  keeps the FSM's reads (parent) in sync with the merge commits produced
+ *  keeps the workflow engine's reads (parent) in sync with the merge commits produced
  *  by `mergeUnitWorktree` (unit worktree). Missing either side causes the
  *  status-drift bug where a unit completes in one view but appears active
  *  in the other. */

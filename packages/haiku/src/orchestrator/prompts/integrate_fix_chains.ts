@@ -1,7 +1,7 @@
 // orchestrator/prompts/integrate_fix_chains.ts — Resolve merge
 // conflicts produced by fix chains. One integrator subagent per
 // chain works in-place inside that chain's worktree (MERGE_HEAD is
-// set). The FSM owns the actual commit/merge — integrators ONLY
+// set). The workflow engine owns the actual commit/merge — integrators ONLY
 // stage resolved files. Capped at MAX_INTEGRATOR_ATTEMPTS per
 // chain.
 
@@ -34,7 +34,7 @@ export default definePromptBuilder(({ slug, action }) => {
 	)
 	sections.push(
 		integrateStage
-			? `One or more fix chains in stage **${integrateStage}** produced edits that conflict with the stage branch when merging back. An **integrator** subagent per chain will resolve the conflicts in-place inside that chain's worktree. After all integrators return, call \`haiku_run_next { intent: "${slug}" }\` — the FSM will commit each resolution and forward-merge into the stage branch.`
+			? `One or more fix chains in stage **${integrateStage}** produced edits that conflict with the stage branch when merging back. An **integrator** subagent per chain will resolve the conflicts in-place inside that chain's worktree. After all integrators return, call \`haiku_run_next { intent: "${slug}" }\` — the workflow engine will commit each resolution and forward-merge into the stage branch.`
 			: `One or more intent-completion fix chains conflict with intent main. An **integrator** subagent per chain will resolve the conflicts in-place. After all return, call \`haiku_run_next { intent: "${slug}" }\` to complete the merges.`,
 	)
 	sections.push(
@@ -67,8 +67,8 @@ export default definePromptBuilder(({ slug, action }) => {
 			`2. Resolve the conflict. Preserve BOTH the base-branch advance AND the fix's intent — the fix-chain's original goal was to address feedback \`${it.feedback_id}\`, so the resolution must still close that finding. If the base-branch change already addressed the same concern in a different way, prefer the base-branch version and note it in your return summary.`,
 			`3. Write the resolved file (no conflict markers remaining).`,
 			`4. Stage the resolution: \`git -C "${it.worktree}" add <file>\` for each resolved file.`,
-			`5. **Do NOT commit.** The FSM commits the merge on the next \`haiku_run_next\` — this is intentional so merge-in-progress state stays consistent.`,
-			`6. **Do NOT run \`git merge --abort\`, \`git reset\`, \`git worktree remove\`, or \`git branch -d\`.** The FSM owns those.`,
+			`5. **Do NOT commit.** The workflow engine commits the merge on the next \`haiku_run_next\` — this is intentional so merge-in-progress state stays consistent.`,
+			`6. **Do NOT run \`git merge --abort\`, \`git reset\`, \`git worktree remove\`, or \`git branch -d\`.** The workflow engine owns those.`,
 			`7. Return a one-line summary: \`integrator: resolved <N> file(s) — <short rationale>\`. If you can't resolve a file (ambiguous, requires decisions outside your scope), leave the markers and return \`integrator: unresolved — <reason>\` so the next attempt / human sees why.`,
 			"",
 			"## Scope (STRICT)",
@@ -95,7 +95,7 @@ export default definePromptBuilder(({ slug, action }) => {
 			"",
 			batchDispatchDirective(integrateItems.length, "integrators"),
 			"",
-			`After every integrator returns, call \`haiku_run_next { intent: "${slug}" }\` — the FSM commits each resolution and forward-merges. If any chain still has unresolved markers, the FSM re-dispatches (up to attempt ${integrateMaxAttempts}). If a chain exhausts its integrator budget, it escalates to the human.`,
+			`After every integrator returns, call \`haiku_run_next { intent: "${slug}" }\` — the workflow engine commits each resolution and forward-merges. If any chain still has unresolved markers, the workflow engine re-dispatches (up to attempt ${integrateMaxAttempts}). If a chain exhausts its integrator budget, it escalates to the human.`,
 		].join("\n"),
 	)
 

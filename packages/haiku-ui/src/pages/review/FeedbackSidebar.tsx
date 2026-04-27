@@ -34,7 +34,7 @@ import {
 	useAnnounce,
 } from "../../a11y"
 import { useApiClient } from "../../api/context"
-import { RevisitModal } from "../../components/RevisitModal"
+import { RevisitModal } from "../../organisms/RevisitModal"
 import { FeedbackPanelBody } from "./FeedbackPanelBody"
 import { useFeedbackSidebarController } from "./useFeedbackSidebarController"
 
@@ -108,7 +108,7 @@ export function FeedbackSidebar({
 	// Resolution the reviewer wants this comment routed through. `null`
 	// means "let the agent triage" — the default and most common path.
 	const [composerResolution, setComposerResolution] = useState<
-		null | "question" | "inline_fix" | "stage_revisit" | "upstream_rewind"
+		null | "question" | "inline_fix" | "stage_revisit"
 	>(null)
 	const [addingComment, setAddingComment] = useState(false)
 	const [submitting, setSubmitting] = useState<DecisionKind | null>(null)
@@ -220,13 +220,13 @@ export function FeedbackSidebar({
 			? "Adds a pending feedback item. Persisted immediately — the next run_next picks it up via the normal fix-loop."
 			: mode === "request"
 				? `${pendingCount} pending item${pendingCount === 1 ? "" : "s"} already persisted. Request Changes closes this pane; the next run_next routes each item through the normal fix-loop.`
-				: "Ad-hoc review — no gate to advance. Done closes the pane without touching the FSM."
+				: "Ad-hoc review — no gate to advance. Done closes the pane without touching the workflow engine."
 		: mode === "add"
 			? 'Adds a pending feedback item. Use the Route dropdown to steer the agent, or leave it on "Let agent decide" and the triage pass will classify.'
 			: mode === "request"
 				? `Hands ${pendingCount} item${pendingCount === 1 ? "" : "s"} to the agent on ${stage ?? "(stage)"}. Each routes per its resolution: reply, inline fix, stage revisit, or upstream rewind.`
 				: mode === "approve"
-					? "No feedback pending — approving advances the FSM to the next stage."
+					? "No feedback pending — approving advances the workflow engine to the next stage."
 					: `Type a comment above or click into another stage.`
 
 	return (
@@ -344,11 +344,7 @@ export function FeedbackSidebar({
 							setComposerResolution(
 								v === ""
 									? null
-									: (v as
-											| "question"
-											| "inline_fix"
-											| "stage_revisit"
-											| "upstream_rewind"),
+									: (v as "question" | "inline_fix" | "stage_revisit"),
 							)
 						}}
 						disabled={addingComment}
@@ -360,9 +356,6 @@ export function FeedbackSidebar({
 						<option value="inline_fix">Inline fix · one-bolt patch</option>
 						<option value="stage_revisit">
 							Stage revisit · re-run the stage
-						</option>
-						<option value="upstream_rewind">
-							Upstream rewind · surface to human
 						</option>
 					</select>
 				</div>

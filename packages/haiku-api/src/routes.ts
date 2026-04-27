@@ -144,17 +144,9 @@ export const routes: readonly RouteSpec[] = [
 		transport: "loopback",
 	},
 
-	// Review pane (always-available) ─────────────────────────────────────
-	{
-		method: "GET",
-		pathTemplate: "/review/current",
-		operationId: "getReviewCurrentPage",
-		request: null,
-		response: null,
-		summary: "Serve the always-available review pane (HTML SPA entry).",
-		tag: "review",
-		transport: "loopback",
-	},
+	// Review pane ───────────────────────────────────────────────────────
+	// Note: `/review/current` is served via the SPA catch-all in
+	// http.ts setNotFoundHandler — it has no dedicated handler.
 	{
 		method: "GET",
 		pathTemplate: "/review/{sessionId}",
@@ -228,6 +220,11 @@ export const routes: readonly RouteSpec[] = [
 		summary: "Record a design-direction archetype + parameter selection.",
 		tag: "direction",
 		transport: "loopback",
+		// Selections may carry per-pass screenshot data URLs from
+		// ArtifactAnnotator (~hundreds of KB each). Bump the cap to
+		// match the feedback-create ceiling so multi-annotation
+		// submissions don't trip the default 1 MB body limit.
+		maxBodyBytes: FEEDBACK_CREATE_MAX_BYTES,
 	},
 
 	// Question ───────────────────────────────────────────────────────────
@@ -260,6 +257,11 @@ export const routes: readonly RouteSpec[] = [
 		summary: "Submit answers for a question session.",
 		tag: "question",
 		transport: "loopback",
+		// Answers may carry per-pass screenshot data URLs from
+		// ArtifactAnnotator. Bump the cap to match feedback-create so
+		// multi-annotation submissions don't trip the default 1 MB body
+		// limit.
+		maxBodyBytes: FEEDBACK_CREATE_MAX_BYTES,
 	},
 
 	// Revisit ────────────────────────────────────────────────────────────

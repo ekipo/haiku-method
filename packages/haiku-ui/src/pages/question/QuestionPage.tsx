@@ -6,28 +6,31 @@
 /**
  * QuestionPage — canonical implementation for /question/:sessionId.
  *
- * Structure per unit-14 spec:
- *   - Optional context block (markdown).
- *   - Image carousel when multiple images; single <img> otherwise.
- *   - Response form discriminated on question shape:
- *       options.length > 0  -> <fieldset><legend><input type="radio" /></fieldset>
- *       options.length === 0 -> <textarea> with explicit htmlFor/id label association.
- *   - On submit success announces "Answer submitted" via the global polite live region.
- *
- * Design references:
- *   - aria-landmark-spec.md §1 (landmarks already owned by <ShellLayout>).
- *   - aria-live-sequencing-spec.md §2 (useAnnounce wraps #feedback-live-polite).
- *   - focus-ring-spec.html §1 (focusRingClass on every interactive element).
+ * Annotations follow the same pattern as the review page and the
+ * direction page: each reference image is wrapped in <ArtifactAnnotator>
+ * so the live image stays interactive by default; the pencil FAB
+ * toggles annotation mode; on submit the browser screen-captures the
+ * rendered surface (via getDisplayMedia) + composites the reviewer's
+ * strokes. The captured screenshots ride along with the answer payload
+ * and the MCP tool unpacks them into image content blocks so Claude
+ * sees what the reviewer was looking at.
  */
 
 import { MarkdownViewer } from "@haiku/shared"
-import { paths, type QuestionDef, type QuestionSessionPayload } from "haiku-api"
+import {
+	paths,
+	type QuestionAnnotations,
+	type QuestionDef,
+	type QuestionScreenshotAnnotation,
+	type QuestionSessionPayload,
+} from "haiku-api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { focusRingClass, touchTargetClass, useAnnounce } from "../../a11y"
 import { useApiClient } from "../../api/context"
-import { Card, SectionHeading } from "../../components/Card"
-import { SubmitSuccess } from "../../components/SubmitSuccess"
+import { Card, SectionHeading } from "../../atoms/Card"
 import { tryCloseTab } from "../../lib/tryCloseTab"
+import { SubmitSuccess } from "../../molecules/SubmitSuccess"
+import { ArtifactAnnotator } from "../../organisms/ArtifactAnnotator"
 
 interface Props {
 	session: QuestionSessionPayload
@@ -64,6 +67,28 @@ export function QuestionPage({
 			freeText: "",
 		})),
 	)
+	// Each annotation pass = one comment + one captured screenshot,
+	// tagged with which reference image (image_index) it came from.
+	const [annotations, setAnnotations] = useState<
+		QuestionScreenshotAnnotation[]
+	>([])
+	const handleAnnotationSubmit = useCallback(
+		(imageIndex: number) => (comment: string, screenshotDataUrl: string) => {
+			setAnnotations((prev) => [
+				...prev,
+				{
+					comment,
+					screenshot_data_url: screenshotDataUrl,
+					image_index: imageIndex,
+				},
+			])
+			return Promise.resolve()
+		},
+		[],
+	)
+	const removeAnnotation = useCallback((index: number) => {
+		setAnnotations((prev) => prev.filter((_, i) => i !== index))
+	}, [])
 	const [submitting, setSubmitting] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | null>(null)
 	const [done, setDone] = useState(false)
@@ -118,13 +143,22 @@ export function QuestionPage({
 			}
 		})
 
+		const wireAnnotations: QuestionAnnotations | undefined =
+			annotations.length > 0 ? { screenshots: annotations } : undefined
+
 		try {
-			await client.submitAnswer(sessionId, { answers: requestAnswers })
+			await client.submitAnswer(sessionId, {
+				answers: requestAnswers,
+				...(wireAnnotations ? { annotations: wireAnnotations } : {}),
+			})
 			announce("polite", "Answer submitted")
 			setDone(true)
 			tryCloseTab({
 				url: paths.questionAnswer(sessionId),
-				body: { answers: requestAnswers },
+				body: {
+					answers: requestAnswers,
+					...(wireAnnotations ? { annotations: wireAnnotations } : {}),
+				},
 			})
 		} catch (err) {
 			const message =
@@ -149,16 +183,73 @@ export function QuestionPage({
 			)}
 
 			{imageUrls.length >= 2 ? (
-				<QuestionCarousel images={imageUrls} />
+				<QuestionCarousel
+					images={imageUrls}
+					onAnnotationSubmit={handleAnnotationSubmit}
+				/>
 			) : imageUrls.length === 1 ? (
 				<Card>
-					<img
-						src={imageUrls[0]}
-						alt="Question reference"
-						className="w-full rounded-lg border border-stone-200 dark:border-stone-700"
-					/>
+					<SectionHeading>Reference image</SectionHeading>
+					<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
+						The image is interactive by default. Click the pencil FAB
+						(bottom-right) to annotate — draw on the surface, add a comment,
+						submit. Each pass screenshots the rendered image so Claude sees the
+						captured spot.
+					</p>
+					<ArtifactAnnotator
+						artifactName="reference image"
+						onSubmit={handleAnnotationSubmit(0)}
+					>
+						<img
+							src={imageUrls[0]}
+							alt="Question reference"
+							className="w-full h-auto bg-white"
+						/>
+					</ArtifactAnnotator>
 				</Card>
 			) : null}
+
+			{annotations.length > 0 && (
+				<Card>
+					<SectionHeading>
+						Captured annotations ({annotations.length})
+					</SectionHeading>
+					<ul className="space-y-2">
+						{annotations.map((a, i) => (
+							<li
+								key={`q-annot-${a.screenshot_data_url.slice(-32)}-${a.comment.slice(0, 16)}`}
+								className="flex items-start gap-3 p-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+							>
+								<img
+									src={a.screenshot_data_url}
+									alt={`Annotation ${i + 1} thumbnail`}
+									className="shrink-0 w-24 h-16 object-cover rounded border border-stone-200 dark:border-stone-700"
+								/>
+								<div className="flex-1 min-w-0">
+									<p className="text-xs text-stone-500 dark:text-stone-400 mb-1">
+										Annotation {i + 1} · image {a.image_index + 1}
+									</p>
+									<p className="text-sm text-stone-800 dark:text-stone-100 break-words">
+										{a.comment}
+									</p>
+								</div>
+								<button
+									type="button"
+									onClick={() => removeAnnotation(i)}
+									aria-label={`Remove annotation ${i + 1}`}
+									className={`shrink-0 px-2 py-1 text-xs font-semibold rounded-md border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-300 transition-colors ${focusRingClass}`}
+								>
+									Remove
+								</button>
+							</li>
+						))}
+					</ul>
+					<p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+						These ship with your answer so the agent sees exactly what you were
+						looking at when you commented.
+					</p>
+				</Card>
+			)}
 
 			<form onSubmit={handleSubmit} noValidate>
 				{questions.map((q, qIdx) => {
@@ -209,11 +300,17 @@ export function QuestionPage({
 
 // ── Carousel ────────────────────────────────────────────────────────────────
 
+interface QuestionCarouselProps {
+	images: string[]
+	onAnnotationSubmit: (
+		imageIndex: number,
+	) => (comment: string, screenshotDataUrl: string) => Promise<void>
+}
+
 function QuestionCarousel({
 	images,
-}: {
-	images: string[]
-}): React.ReactElement {
+	onAnnotationSubmit,
+}: QuestionCarouselProps): React.ReactElement {
 	const [active, setActive] = useState(0)
 	const regionRef = useRef<HTMLDivElement | null>(null)
 	const announce = useAnnounce()
@@ -254,6 +351,11 @@ function QuestionCarousel({
 	return (
 		<Card>
 			<SectionHeading>Reference images</SectionHeading>
+			<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
+				Each image stays interactive. Click the pencil FAB (bottom-right) to
+				annotate — draw on the surface, add a comment, submit. Captured
+				annotations show in a list below.
+			</p>
 			<CarouselRegion
 				regionRef={regionRef}
 				onKeyDown={handleKeyDown}
@@ -261,6 +363,7 @@ function QuestionCarousel({
 				active={active}
 				onPrev={() => go(-1)}
 				onNext={() => go(1)}
+				onAnnotationSubmit={onAnnotationSubmit}
 			/>
 		</Card>
 	)
@@ -275,6 +378,9 @@ interface CarouselRegionProps {
 	active: number
 	onPrev: () => void
 	onNext: () => void
+	onAnnotationSubmit: (
+		imageIndex: number,
+	) => (comment: string, screenshotDataUrl: string) => Promise<void>
 }
 
 function CarouselRegion({
@@ -284,6 +390,7 @@ function CarouselRegion({
 	active,
 	onPrev,
 	onNext,
+	onAnnotationSubmit,
 }: CarouselRegionProps): React.ReactElement {
 	// Per FB-73, Prev/Next controls live INSIDE the role="region" container
 	// so a keyboard user who reaches the region also reaches the controls,
@@ -306,6 +413,7 @@ function CarouselRegion({
 						index={i}
 						total={images.length}
 						isActive={i === active}
+						onSubmit={onAnnotationSubmit(i)}
 					/>
 				))}
 			</div>
@@ -340,6 +448,7 @@ interface CarouselSlideProps {
 	index: number
 	total: number
 	isActive: boolean
+	onSubmit: (comment: string, screenshotDataUrl: string) => Promise<void>
 }
 
 function CarouselSlide({
@@ -347,6 +456,7 @@ function CarouselSlide({
 	index,
 	total,
 	isActive,
+	onSubmit,
 }: CarouselSlideProps): React.ReactElement {
 	// Inactive slides are hidden via display:none (`.hidden`) AND
 	// `aria-hidden="true"` — some SRs buffer display:none content differently,
@@ -359,11 +469,16 @@ function CarouselSlide({
 			aria-hidden={isActive ? undefined : "true"}
 			className={isActive ? "block" : "hidden"}
 		>
-			<img
-				src={url}
-				alt={`Reference ${index + 1} of ${total}`}
-				className="w-full rounded-lg border border-stone-200 dark:border-stone-700"
-			/>
+			<ArtifactAnnotator
+				artifactName={`reference image ${index + 1}`}
+				onSubmit={onSubmit}
+			>
+				<img
+					src={url}
+					alt={`Reference ${index + 1} of ${total}`}
+					className="w-full h-auto bg-white"
+				/>
+			</ArtifactAnnotator>
 		</div>
 	)
 }

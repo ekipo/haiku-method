@@ -57,7 +57,7 @@ If monitoring patterns were discovered and your intent has a deployment surface,
 
 ### 4. Design Direction (New Projects Only)
 
-For greenfield or early-stage projects, the AI presents a **design direction picker** where you select a visual archetype and tune parameters like density, color temperature, and typographic contrast. This seeds the project's design knowledge for consistent visual output. Established projects skip this step.
+For greenfield or early-stage projects, the AI presents a **design direction picker** where you choose between a handful of rendered archetype previews. You can pick one as the final direction (optionally dropping pinned annotations on the preview for pointed feedback) or ask the AI for more variants — keeping the archetypes you like and asking for fresh takes on the rest. The chosen archetype seeds the project's design knowledge for consistent visual output. Established projects skip this step.
 
 ### 5. Studio Selection
 

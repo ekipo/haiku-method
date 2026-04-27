@@ -9,6 +9,12 @@ import ListHaikuBranchesQuery from "./graphql/github/__generated__/operationsLis
 import type { operationsListIntentsQuery$data } from "./graphql/github/__generated__/operationsListIntentsQuery.graphql"
 import ListIntentsQuery from "./graphql/github/__generated__/operationsListIntentsQuery.graphql"
 import ReadFileQuery from "./graphql/github/__generated__/operationsReadFileQuery.graphql"
+import {
+	classifyArtifact,
+	mergeKnowledge as mergeKnowledgeShared,
+	parseIntentFromRaw as parseIntentFromRawShared,
+	parseStageStateJson,
+} from "./intent-parsing"
 import { parseSettingsYaml } from "./resolve-links"
 import type {
 	BrowseProvider,
@@ -23,14 +29,6 @@ import { normalizeIntentStatus, parseFrontmatter, parseUnit } from "./types"
 
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 const apiCache = new Map<string, { data: unknown; ts: number }>()
-
-function classifyArtifact(name: string): HaikuArtifact["type"] {
-	const lower = name.toLowerCase()
-	if (lower.endsWith(".md")) return "markdown"
-	if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html"
-	if (/\.(png|jpe?g|gif|svg|webp|avif|bmp|ico)$/.test(lower)) return "image"
-	return "other"
-}
 
 export class GitHubProvider implements BrowseProvider {
 	readonly name = "GitHub"
@@ -180,6 +178,9 @@ export class GitHubProvider implements BrowseProvider {
 	 *  Malformed frontmatter is reported to Sentry and recovered to empty data so the
 	 *  broken intent still appears in the list (title falls back to slug) instead of
 	 *  silently disappearing. */
+	/** Parse raw intent.md text into a HaikuIntent — delegates to the
+	 *  shared cross-provider helper so this surface can't drift from
+	 *  gitlab-provider.ts. */
 	private parseIntentFromRaw(
 		slug: string,
 		rawText: string,
@@ -190,51 +191,7 @@ export class GitHubProvider implements BrowseProvider {
 			prNumber?: number | null
 		},
 	): HaikuIntent {
-		const { data: frontmatter, content } = parseFrontmatter(rawText, {
-			provider: "github",
-			path: `.haiku/intents/${slug}/intent.md`,
-			slug,
-			branch: meta?.branch,
-		})
-		const studio = (frontmatter.studio as string) || "ideation"
-		const stages = (frontmatter.stages as string[]) || []
-
-		return {
-			slug,
-			title: (frontmatter.title as string) || slug,
-			studio,
-			activeStage: (frontmatter.active_stage as string) || "",
-			mode: (frontmatter.mode as string) || "continuous",
-			createdAt:
-				(frontmatter.created_at as string) ||
-				(frontmatter.created as string) ||
-				null,
-			startedAt: (frontmatter.started_at as string) || null,
-			completedAt: (frontmatter.completed_at as string) || null,
-			studioStages: (frontmatter.stages as string[]) || [],
-			composite:
-				(frontmatter.composite as Array<{
-					studio: string
-					stages: string[]
-				}>) || null,
-			...normalizeIntentStatus(
-				(frontmatter.status as string) || "active",
-				(frontmatter.completed_at as string) || null,
-				stages.length > 0
-					? stages.indexOf(frontmatter.active_stage as string)
-					: 0,
-				stages.length,
-			),
-			stagesTotal: stages.length,
-			archived: frontmatter.archived === true,
-			follows: (frontmatter.follows as string) || null,
-			content,
-			raw: frontmatter,
-			branch: meta?.branch,
-			prUrl: meta?.prUrl ?? null,
-			prStatus: meta?.prStatus ?? null,
-			prNumber: meta?.prNumber ?? null,
-		}
+		return parseIntentFromRawShared("github", slug, rawText, meta)
 	}
 
 	/**
@@ -499,25 +456,13 @@ export class GitHubProvider implements BrowseProvider {
 			}
 		}
 
-		// state.json
+		// state.json — shared parsing keeps gitlab + github in sync
 		const stateEntry = stageChildren.find(
 			(e) => e.name === "state.json" && e.type === "blob",
 		)
-		let phase = ""
-		let startedAt: string | null = null
-		let completedAt: string | null = null
-		let gateOutcome: string | null = null
-		if (stateEntry?.object?.text) {
-			try {
-				const s = JSON.parse(stateEntry.object.text)
-				phase = s.phase || ""
-				startedAt = s.started_at || null
-				completedAt = s.completed_at || null
-				gateOutcome = s.gate_outcome || null
-			} catch {
-				/* ignore */
-			}
-		}
+		const { phase, startedAt, completedAt, gateOutcome } = parseStageStateJson(
+			stateEntry?.object?.text,
+		)
 
 		let status: "pending" | "active" | "complete" = "pending"
 		if (stageName === activeStage) status = "active"
@@ -545,15 +490,13 @@ export class GitHubProvider implements BrowseProvider {
 			.map((e) => ({ name: e.name, content: e.object?.text || "" }))
 	}
 
-	/** Merge knowledge files — overlay wins on filename collision, new files are added. */
+	/** Merge knowledge files — overlay wins on filename collision.
+	 *  Thin shim over the shared cross-provider helper. */
 	private mergeKnowledge(
 		base: HaikuKnowledgeFile[],
 		overlay: HaikuKnowledgeFile[],
 	): HaikuKnowledgeFile[] {
-		const byName = new Map<string, HaikuKnowledgeFile>()
-		for (const f of base) byName.set(f.name, f)
-		for (const f of overlay) byName.set(f.name, f)
-		return Array.from(byName.values())
+		return mergeKnowledgeShared(base, overlay)
 	}
 
 	// ── getIntent: three-level trust merge ───────────────────────────────

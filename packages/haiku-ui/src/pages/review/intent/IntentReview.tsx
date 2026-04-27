@@ -1,16 +1,16 @@
 import { CriteriaChecklist, MarkdownViewer, StatusBadge } from "@haiku/shared"
 import { useState } from "react"
+import { Card, SectionHeading } from "../../../atoms/Card"
+import { type TabDef, Tabs } from "../../../molecules/Tabs"
 import {
 	AnnotationCanvas,
 	type AnnotationPin,
-} from "../../../components/AnnotationCanvas"
-import { Card, SectionHeading } from "../../../components/Card"
+} from "../../../organisms/AnnotationCanvas"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
-import { MermaidDiagram } from "../../../components/MermaidDiagram"
-import { type TabDef, Tabs } from "../../../components/Tabs"
+} from "../../../organisms/InlineComments"
+import { MermaidDiagram } from "../../../organisms/MermaidDiagram"
 import type { ParsedUnit } from "../../../parsed"
 import type { ReviewAnnotations } from "../../../types"
 import { KnowledgeTab } from "../shared/KnowledgeTab"

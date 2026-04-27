@@ -8,6 +8,7 @@
 // that the MCP server (a separate process) cannot see at call time.
 
 import { join } from "node:path"
+import { defineHook } from "./define.js"
 
 function pathToSlug(fsPath: string): string {
 	return fsPath.replace(/^\//, "-").replace(/[/.]/g, "-")
@@ -64,3 +65,12 @@ export async function injectStateFile(
 
 	process.stdout.write(JSON.stringify(injected))
 }
+
+export default defineHook({
+	name: "inject-state-file",
+	description:
+		"PreToolUse: inject state_file path + _session_context into haiku_* tool calls.",
+	async handle(input, _ctx) {
+		await injectStateFile(input)
+	},
+})

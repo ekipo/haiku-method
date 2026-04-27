@@ -1,11 +1,11 @@
-// state-integrity.ts — FSM state tamper detection for hookless harnesses
+// state-integrity.ts — workflow state tamper detection for hookless harnesses
 //
-// When hooks are available (Claude Code, Kiro), the guard-fsm-fields hook
-// blocks direct writes to FSM-controlled fields at edit time. For hookless
+// When hooks are available (Claude Code, Kiro), the guard-workflow-fields hook
+// blocks direct writes to workflow-controlled fields at edit time. For hookless
 // harnesses, agents can bypass MCP tools and edit .haiku/ files directly
 // using the harness's native file tools.
 //
-// This module provides read-time detection: after each FSM mutation, we
+// This module provides read-time detection: after each workflow mutation, we
 // store a checksum of the protected fields. On the next read, we verify
 // the checksum. Mismatches indicate tampering.
 //
@@ -15,7 +15,6 @@
 import { createHash } from "node:crypto"
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { INTENT_FIELDS, STAGE_FIELDS, UNIT_FIELDS } from "./fsm-fields.js"
 import { getCapabilities } from "./harness.js"
 import {
 	findHaikuRoot,
@@ -23,6 +22,7 @@ import {
 	readJson,
 	stageStatePath,
 } from "./state-tools.js"
+import { INTENT_FIELDS, STAGE_FIELDS, UNIT_FIELDS } from "./workflow-fields.js"
 
 // ── Checksum computation ────────────────────────────────────────────────────
 
@@ -66,8 +66,8 @@ function extractActiveUnitFields(
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Compute and store a checksum for the intent's current FSM state.
- * Called after every FSM mutation in the orchestrator.
+ * Compute and store a checksum for the intent's current workflow state.
+ * Called after every workflow mutation in the orchestrator.
  * No-op when hooks are available (Claude Code, Kiro).
  */
 export function sealIntentState(slug: string): void {
@@ -108,13 +108,13 @@ export function sealIntentState(slug: string): void {
 		const checksumPath = join(root, "intents", slug, ".fsm_checksum")
 		writeFileSync(checksumPath, checksum)
 	} catch (err) {
-		// Non-fatal — never break the FSM for integrity tracking.
+		// Non-fatal — never break the workflow engine for integrity tracking.
 		console.error(`[haiku] sealIntentState(${slug}) failed:`, err)
 	}
 }
 
 /**
- * Verify that the intent's FSM state hasn't been tampered with.
+ * Verify that the intent's workflow state hasn't been tampered with.
  * Returns null if valid (or if hooks handle it), or an error message if tampered.
  * Called at the top of runNext() for hookless harnesses.
  */
@@ -158,7 +158,7 @@ export function verifyIntentState(slug: string): string | null {
 
 		if (actualChecksum !== expectedChecksum) {
 			return (
-				"FSM state integrity check failed — lifecycle fields were modified " +
+				"workflow state integrity check failed — lifecycle fields were modified " +
 				"outside of the H·AI·K·U tools. Direct edits to status, active_stage, " +
 				"phase, gate_outcome, hat, bolt, and similar fields corrupt the state " +
 				"machine. Use haiku_run_next, haiku_unit_start, haiku_unit_advance_hat, " +

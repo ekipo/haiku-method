@@ -1,13 +1,14 @@
 /**
- * DirectionPage — completion-criteria regression tests (unit-14).
+ * DirectionPage — completion-criteria regression tests.
  *
- * Assertions map 1:1 to the unit spec `Completion Criteria — Direction page`
- * block:
- *   - <fieldset role="radiogroup"> with native <input type="radio"> cards.
+ * Covers:
+ *   - <fieldset role="radiogroup"> with native <input type="radio"> cards (select mode).
  *   - Keyboard navigation via ArrowRight / ArrowLeft updates aria-checked.
- *   - Every parameter <input> is routed through the canonical `Input` primitive
- *     (asserted by the primitive's BASE class signature).
- *   - Submit posts { archetype, parameters } through ApiClient.submitDirection.
+ *   - Submit posts { mode: "select", archetype, comments?, annotations? }
+ *     through ApiClient.submitDirection.
+ *   - Mode switch to "regenerate" replaces radios with checkboxes (keep set)
+ *     and submits { mode: "regenerate", keep[], comments? }.
+ *   - PreviewDialog focus-trap behaviour (FB-69 regression).
  */
 
 import { readFileSync } from "node:fs"
@@ -26,8 +27,6 @@ import { LiveRegionShell } from "../../../a11y"
 import type { ApiClient } from "../../../api/client"
 import { ApiClientProvider } from "../../../api/context"
 import { DirectionPage } from "../DirectionPage"
-
-const PRIMITIVE_BASE_SIGNATURE = "rounded-lg"
 
 function loadFixture(file: string): DirectionSessionPayload {
 	const p = join(__dirname, "..", "..", "..", "..", "test-fixtures", file)
@@ -75,7 +74,7 @@ function Harness({
 	)
 }
 
-describe("DirectionPage — radiogroup", () => {
+describe("DirectionPage — radiogroup (select mode)", () => {
 	afterEach(() => {
 		cleanup()
 		document.body.innerHTML = ""
@@ -115,7 +114,6 @@ describe("DirectionPage — radiogroup", () => {
 			fieldset.querySelectorAll('input[type="radio"]'),
 		) as HTMLInputElement[]
 
-		// Initial: first archetype selected.
 		expect(radios[0]?.getAttribute("aria-checked")).toBe("true")
 		expect(radios[1]?.getAttribute("aria-checked")).toBe("false")
 
@@ -145,33 +143,7 @@ describe("DirectionPage — radiogroup", () => {
 	})
 })
 
-describe("DirectionPage — parameter inputs", () => {
-	afterEach(() => {
-		cleanup()
-		document.body.innerHTML = ""
-	})
-
-	it("every parameter <input> flows through the canonical Input primitive", () => {
-		const session = loadFixture("direction-session.json")
-		const { container } = render(
-			<Harness client={makeMockClient()}>
-				<DirectionPage session={session} sessionId={session.session_id} />
-			</Harness>,
-		)
-
-		// Only the range sliders should exist under the parameters section.
-		const rangeInputs = container.querySelectorAll('input[type="range"]')
-		expect(rangeInputs.length).toBe(3)
-		for (const el of Array.from(rangeInputs)) {
-			const cls = el.getAttribute("class") ?? ""
-			// The Input primitive adds the base classes (rounded-lg + border +
-			// bg-white/dark-bg etc). We check for a distinctive BASE fragment.
-			expect(cls).toContain(PRIMITIVE_BASE_SIGNATURE)
-		}
-	})
-})
-
-describe("DirectionPage — submit", () => {
+describe("DirectionPage — submit (select mode)", () => {
 	beforeEach(() => {
 		document.body.innerHTML = ""
 	})
@@ -180,7 +152,7 @@ describe("DirectionPage — submit", () => {
 		document.body.innerHTML = ""
 	})
 
-	it("posts { archetype, parameters } via submitDirection", async () => {
+	it("posts { mode: 'select', archetype } via submitDirection", async () => {
 		const session = loadFixture("direction-session.json")
 		const submitDirection = vi.fn(async () => ({ ok: true as const }))
 		const client = makeMockClient({ submitDirection })
@@ -207,21 +179,135 @@ describe("DirectionPage — submit", () => {
 		if (!call) throw new Error("no submit call")
 		const [sessionIdArg, body] = call
 		expect(sessionIdArg).toBe(session.session_id)
+		expect(body.mode).toBe("select")
+		if (body.mode !== "select") throw new Error("expected select mode")
 		expect(body.archetype).toBe("Minimal")
-		expect(typeof body.parameters).toBe("object")
-		expect(body.parameters.density).toBeCloseTo(0.3)
 
-		// The polite live region should have announced the success.
 		await waitFor(() => {
 			const polite = document.getElementById("feedback-live-polite")
 			expect(polite?.textContent).toBe("Direction selected")
 		})
 	})
 
-	// TODO(haiku-api-contract): re-enable once DirectionSelectRequest carries
-	// `comment` + `annotations`. Currently the comment is collected locally
-	// but not transmitted — see DirectionPage.tsx handleSubmit for the TODO.
-	it.todo("submit includes comment when the schema supports it")
+	it("includes typed comment in the submitted body", async () => {
+		const session = loadFixture("direction-session.json")
+		const submitDirection = vi.fn(async () => ({ ok: true as const }))
+		const client = makeMockClient({ submitDirection })
+
+		render(
+			<Harness client={client}>
+				<DirectionPage session={session} sessionId={session.session_id} />
+			</Harness>,
+		)
+
+		const textarea = screen.getByLabelText(
+			/optional comment/i,
+		) as HTMLTextAreaElement
+		fireEvent.change(textarea, {
+			target: { value: "Lean into the typography." },
+		})
+
+		fireEvent.click(
+			screen.getByRole("button", { name: /choose this direction/i }),
+		)
+
+		await waitFor(() => {
+			expect(submitDirection).toHaveBeenCalledTimes(1)
+		})
+		const calls = submitDirection.mock.calls as unknown as Array<
+			[string, DirectionSelectRequest]
+		>
+		const body = calls[0]?.[1]
+		if (!body) throw new Error("no submit call")
+		if (body.mode !== "select") throw new Error("expected select mode")
+		expect(body.comments).toBe("Lean into the typography.")
+	})
+})
+
+describe("DirectionPage — regenerate mode", () => {
+	beforeEach(() => {
+		document.body.innerHTML = ""
+	})
+	afterEach(() => {
+		cleanup()
+		document.body.innerHTML = ""
+	})
+
+	function switchToRegenerate() {
+		const radio = screen.getByRole("radio", {
+			name: /show me different variants/i,
+		})
+		fireEvent.click(radio)
+	}
+
+	it("swaps the archetype radios for keep checkboxes when mode='regenerate'", () => {
+		const session = loadFixture("direction-session.json")
+		const { container } = render(
+			<Harness client={makeMockClient()}>
+				<DirectionPage session={session} sessionId={session.session_id} />
+			</Harness>,
+		)
+
+		switchToRegenerate()
+
+		expect(
+			container.querySelectorAll('fieldset input[type="checkbox"]').length,
+		).toBe(3)
+		expect(
+			container.querySelectorAll('fieldset[role="radiogroup"]').length,
+		).toBe(0)
+	})
+
+	it("posts { mode: 'regenerate', keep[] } via submitDirection", async () => {
+		const session = loadFixture("direction-session.json")
+		const submitDirection = vi.fn(async () => ({ ok: true as const }))
+		const client = makeMockClient({ submitDirection })
+
+		render(
+			<Harness client={client}>
+				<DirectionPage session={session} sessionId={session.session_id} />
+			</Harness>,
+		)
+
+		switchToRegenerate()
+
+		const minimalKeep = document.getElementById(
+			"direction-keep-minimal",
+		) as HTMLInputElement | null
+		if (!minimalKeep) throw new Error("keep checkbox for Minimal not found")
+		fireEvent.click(minimalKeep)
+
+		fireEvent.click(
+			screen.getByRole("button", { name: /generate more — keep 1/i }),
+		)
+
+		await waitFor(() => {
+			expect(submitDirection).toHaveBeenCalledTimes(1)
+		})
+		const calls = submitDirection.mock.calls as unknown as Array<
+			[string, DirectionSelectRequest]
+		>
+		const body = calls[0]?.[1]
+		if (!body) throw new Error("no submit call")
+		expect(body.mode).toBe("regenerate")
+		if (body.mode !== "regenerate") throw new Error("expected regenerate mode")
+		expect(body.keep).toEqual(["Minimal"])
+	})
+
+	it("submit button reads 'fresh batch' when nothing is kept", () => {
+		const session = loadFixture("direction-session.json")
+		render(
+			<Harness client={makeMockClient()}>
+				<DirectionPage session={session} sessionId={session.session_id} />
+			</Harness>,
+		)
+
+		switchToRegenerate()
+
+		expect(
+			screen.getByRole("button", { name: /generate a fresh batch/i }),
+		).toBeTruthy()
+	})
 })
 
 describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
@@ -257,9 +343,6 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 			return el as HTMLElement
 		})
 
-		// The backdrop (the element carrying bg-black/60) must NOT be the dialog
-		// surface — role conflict between interactive click-to-close and the
-		// dialog role is what the reviewer called out.
 		expect(dialog.className).not.toContain("bg-black")
 		const backdrop = container.querySelector(
 			"[aria-hidden='true'].bg-black\\/60",
@@ -286,8 +369,6 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 			return el as HTMLElement
 		})
 
-		// Initial focus should land on a tabbable inside the dialog (the close
-		// button is the first tabbable in the surface).
 		await waitFor(() => {
 			const active = document.activeElement as HTMLElement | null
 			expect(active).not.toBeNull()
@@ -316,28 +397,18 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 			return el as HTMLElement
 		})
 
-		// Wait for initial focus landing.
 		await waitFor(() => {
 			expect(dialog.contains(document.activeElement)).toBe(true)
 		})
 
-		// Tab forward — focus should stay inside the dialog.
 		fireEvent.keyDown(dialog, { key: "Tab" })
 		expect(dialog.contains(document.activeElement)).toBe(true)
 
-		// Shift+Tab — also stays inside.
 		fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true })
 		expect(dialog.contains(document.activeElement)).toBe(true)
 	})
 
-	// TODO(direction-page-flake): test-order contamination with the rest of
-	// the vitest run — passes 10/10 via `vitest run <this file>` alone but
-	// fails 2/10 in the whole suite (document.body becomes undefined at
-	// afterEach cleanup, suggesting jsdom teardown bleeding in from an
-	// earlier test file). Root-cause investigation deferred so quality
-	// gates don't block unrelated work. Focus-restoration behavior is still
-	// covered by the isolated-file run.
-	it.skip("restores focus to the invoking button when the dialog closes", async () => {
+	it("restores focus to the invoking button when the dialog closes", async () => {
 		const session = loadFixture("direction-session.json")
 		const { container } = render(
 			<Harness client={makeMockClient()}>
@@ -359,11 +430,9 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 			expect(dialog.contains(document.activeElement)).toBe(true)
 		})
 
-		// Close via the in-dialog Close button.
 		const closeBtn = screen.getByRole("button", { name: /dismiss preview/i })
 		fireEvent.click(closeBtn)
 
-		// Dialog unmounts → useFocusTrap cleanup restores focus to the trigger.
 		await waitFor(() => {
 			expect(
 				container.querySelector('[role="dialog"][aria-modal="true"]'),
@@ -374,9 +443,7 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 		})
 	})
 
-	// TODO(direction-page-flake): same order-contamination as the previous
-	// skipped test. Tracked as a single follow-up.
-	it.skip("closes on Escape and restores focus to the invoker", async () => {
+	it("closes on Escape and restores focus to the invoker", async () => {
 		const session = loadFixture("direction-session.json")
 		const { container } = render(
 			<Harness client={makeMockClient()}>
@@ -398,7 +465,6 @@ describe("DirectionPage — PreviewDialog focus trap (FB-69)", () => {
 			expect(dialog.contains(document.activeElement)).toBe(true)
 		})
 
-		// Escape is wired at the document level by the parent.
 		fireEvent.keyDown(document, { key: "Escape" })
 
 		await waitFor(() => {

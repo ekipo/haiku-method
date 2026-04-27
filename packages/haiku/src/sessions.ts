@@ -157,7 +157,7 @@ export interface ReviewSession {
 	/** Ad-hoc sessions are opened on-demand via `haiku_review_open` (not a
 	 *  gate). The UI hides Approve, swaps the primary button to
 	 *  Done/Close (no feedback) or Request Changes (with feedback), and
-	 *  shows an "Ad-hoc review" badge in the header. The FSM does not
+	 *  shows an "Ad-hoc review" badge in the header. The workflow engine does not
 	 *  treat an ad-hoc session's status as a gate decision — durable
 	 *  feedback left on the session routes through the usual fix-loop on
 	 *  the next `run_next`. */
@@ -170,7 +170,6 @@ export interface ReviewSession {
 	feedback: string
 	annotations?: ReviewAnnotations
 	gate_type?: string
-	html: string
 	/** If this review follows a prior changes_requested decision for the same
 	 *  intent, a snapshot of the prior review's content is attached here so
 	 *  the SPA can render a delta and show the previous feedback. */
@@ -209,6 +208,12 @@ export interface QuestionAnswer {
 
 export interface QuestionAnnotations {
 	comments?: Array<{ selectedText: string; comment: string; paragraph: number }>
+	pins?: Array<{ x: number; y: number; text: string; image_index: number }>
+	screenshots?: Array<{
+		comment: string
+		screenshot_data_url: string
+		image_index: number
+	}>
 }
 
 export interface QuestionSession {
@@ -223,44 +228,43 @@ export interface QuestionSession {
 	answers: QuestionAnswer[]
 	feedback: string
 	annotations?: QuestionAnnotations
-	html: string
 }
 
 export interface DesignArchetypeData {
 	name: string
 	description: string
 	preview_html: string
-	default_parameters: Record<string, number>
 }
 
-export interface DesignParameterData {
-	name: string
-	label: string
-	description: string
-	min: number
-	max: number
-	step: number
-	default: number
-	labels: { low: string; high: string }
-}
+/** A user's response to a design-direction picker. Either a final
+ *  selection (`mode: "select"`) or a regenerate request asking the
+ *  agent for more variants (`mode: "regenerate"`). */
+export type DirectionSelection =
+	| {
+			mode: "select"
+			archetype: string
+			comments?: string
+			annotations?: {
+				pins?: Array<{ x: number; y: number; text: string }>
+				screenshots?: Array<{
+					comment: string
+					screenshot_data_url: string
+				}>
+			}
+	  }
+	| {
+			mode: "regenerate"
+			keep: string[]
+			comments?: string
+	  }
 
 export interface DesignDirectionSession {
 	session_type: "design_direction"
 	session_id: string
 	intent_slug: string
 	archetypes: DesignArchetypeData[]
-	parameters: DesignParameterData[]
 	status: "pending" | "answered"
-	selection: {
-		archetype: string
-		parameters: Record<string, number>
-		comments?: string
-		annotations?: {
-			screenshot?: string
-			pins?: Array<{ x: number; y: number; text: string }>
-		}
-	} | null
-	html: string
+	selection: DirectionSelection | null
 }
 
 const sessions = new Map<

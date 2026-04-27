@@ -1,5 +1,7 @@
 // prompt-guard — Advisory scan for prompt injection in spec file writes
 
+import { defineHook } from "./define.js"
+
 const INJECTION_PATTERNS =
 	/ignore previous|disregard|override instructions|you are now|system prompt|<system>|<\/system>/i
 
@@ -21,3 +23,12 @@ export async function promptGuard(
 		)
 	}
 }
+
+export default defineHook({
+	name: "prompt-guard",
+	description:
+		"PreToolUse Write/Edit: advisory scan for prompt injection in haiku spec writes.",
+	async handle(input, ctx) {
+		await promptGuard(input, ctx.pluginRoot)
+	},
+})

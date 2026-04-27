@@ -1,0 +1,272 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: executive-strategy
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> landscape : studio.selected
+  landscape --> options
+  options --> evaluate
+  evaluate --> decide
+  decide --> communicate
+  communicate --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> communicate : gate.changes_requested
+
+  state landscape {
+    [*] --> landscape_start_stage
+    landscape_start_stage --> landscape_elaborate : tick
+    landscape_elaborate --> landscape_execute : elaborate.advance
+    landscape_elaborate --> landscape_review_fix : feedback.pending
+    state landscape_execute {
+      [*] --> landscape_execute_strategist
+      landscape_execute_strategist --> landscape_execute_analyst : hat.advance
+      landscape_execute_analyst --> landscape_execute_verifier : hat.advance
+      landscape_execute_analyst --> landscape_execute_strategist : hat.reject
+      landscape_execute_verifier --> landscape_execute_done : hat.advance
+      landscape_execute_verifier --> landscape_execute_analyst : hat.reject
+      landscape_execute_done --> [*]
+    }
+    landscape_execute --> landscape_review
+    landscape_review --> landscape_gate : review.clean
+    landscape_review --> landscape_review_fix : review.findings
+    state landscape_review_fix {
+      [*] --> landscape_review_fix_bolt_1
+      state landscape_review_fix_bolt_1 {
+        [*] --> landscape_review_fix_bolt_1_strategist
+        landscape_review_fix_bolt_1_strategist --> landscape_review_fix_bolt_1_feedback_assessor : fix.advance
+        landscape_review_fix_bolt_1_feedback_assessor --> landscape_review_fix_bolt_1_validated : fix.advance
+        landscape_review_fix_bolt_1_validated --> [*]
+      }
+      landscape_review_fix_bolt_1 --> landscape_review_fix_done : feedback.closed
+      landscape_review_fix_bolt_1 --> landscape_review_fix_bolt_2 : feedback.open
+      state landscape_review_fix_bolt_2 {
+        [*] --> landscape_review_fix_bolt_2_strategist
+        landscape_review_fix_bolt_2_strategist --> landscape_review_fix_bolt_2_feedback_assessor : fix.advance
+        landscape_review_fix_bolt_2_feedback_assessor --> landscape_review_fix_bolt_2_validated : fix.advance
+        landscape_review_fix_bolt_2_validated --> [*]
+      }
+      landscape_review_fix_bolt_2 --> landscape_review_fix_done : feedback.closed
+      landscape_review_fix_bolt_2 --> landscape_review_fix_bolt_3 : feedback.open
+      state landscape_review_fix_bolt_3 {
+        [*] --> landscape_review_fix_bolt_3_strategist
+        landscape_review_fix_bolt_3_strategist --> landscape_review_fix_bolt_3_feedback_assessor : fix.advance
+        landscape_review_fix_bolt_3_feedback_assessor --> landscape_review_fix_bolt_3_validated : fix.advance
+        landscape_review_fix_bolt_3_validated --> [*]
+      }
+      landscape_review_fix_bolt_3 --> landscape_review_fix_done : feedback.closed
+      landscape_review_fix_bolt_3 --> landscape_review_fix_escalated : feedback.open
+      landscape_review_fix_done --> [*]
+      landscape_review_fix_escalated --> [*]
+    }
+    landscape_review_fix --> landscape_gate
+    landscape_gate --> [*]
+  }
+
+  state options {
+    [*] --> options_start_stage
+    options_start_stage --> options_elaborate : tick
+    options_elaborate --> options_execute : elaborate.advance
+    options_elaborate --> options_review_fix : feedback.pending
+    state options_execute {
+      [*] --> options_execute_ideator
+      options_execute_ideator --> options_execute_modeler : hat.advance
+      options_execute_modeler --> options_execute_verifier : hat.advance
+      options_execute_modeler --> options_execute_ideator : hat.reject
+      options_execute_verifier --> options_execute_done : hat.advance
+      options_execute_verifier --> options_execute_modeler : hat.reject
+      options_execute_done --> [*]
+    }
+    options_execute --> options_review
+    options_review --> options_gate : review.clean
+    options_review --> options_review_fix : review.findings
+    state options_review_fix {
+      [*] --> options_review_fix_bolt_1
+      state options_review_fix_bolt_1 {
+        [*] --> options_review_fix_bolt_1_ideator
+        options_review_fix_bolt_1_ideator --> options_review_fix_bolt_1_feedback_assessor : fix.advance
+        options_review_fix_bolt_1_feedback_assessor --> options_review_fix_bolt_1_validated : fix.advance
+        options_review_fix_bolt_1_validated --> [*]
+      }
+      options_review_fix_bolt_1 --> options_review_fix_done : feedback.closed
+      options_review_fix_bolt_1 --> options_review_fix_bolt_2 : feedback.open
+      state options_review_fix_bolt_2 {
+        [*] --> options_review_fix_bolt_2_ideator
+        options_review_fix_bolt_2_ideator --> options_review_fix_bolt_2_feedback_assessor : fix.advance
+        options_review_fix_bolt_2_feedback_assessor --> options_review_fix_bolt_2_validated : fix.advance
+        options_review_fix_bolt_2_validated --> [*]
+      }
+      options_review_fix_bolt_2 --> options_review_fix_done : feedback.closed
+      options_review_fix_bolt_2 --> options_review_fix_bolt_3 : feedback.open
+      state options_review_fix_bolt_3 {
+        [*] --> options_review_fix_bolt_3_ideator
+        options_review_fix_bolt_3_ideator --> options_review_fix_bolt_3_feedback_assessor : fix.advance
+        options_review_fix_bolt_3_feedback_assessor --> options_review_fix_bolt_3_validated : fix.advance
+        options_review_fix_bolt_3_validated --> [*]
+      }
+      options_review_fix_bolt_3 --> options_review_fix_done : feedback.closed
+      options_review_fix_bolt_3 --> options_review_fix_escalated : feedback.open
+      options_review_fix_done --> [*]
+      options_review_fix_escalated --> [*]
+    }
+    options_review_fix --> options_gate
+    options_gate --> [*]
+  }
+
+  state evaluate {
+    [*] --> evaluate_start_stage
+    evaluate_start_stage --> evaluate_elaborate : tick
+    evaluate_elaborate --> evaluate_execute : elaborate.advance
+    evaluate_elaborate --> evaluate_review_fix : feedback.pending
+    state evaluate_execute {
+      [*] --> evaluate_execute_evaluator
+      evaluate_execute_evaluator --> evaluate_execute_risk_analyst : hat.advance
+      evaluate_execute_risk_analyst --> evaluate_execute_verifier : hat.advance
+      evaluate_execute_risk_analyst --> evaluate_execute_evaluator : hat.reject
+      evaluate_execute_verifier --> evaluate_execute_done : hat.advance
+      evaluate_execute_verifier --> evaluate_execute_risk_analyst : hat.reject
+      evaluate_execute_done --> [*]
+    }
+    evaluate_execute --> evaluate_review
+    evaluate_review --> evaluate_gate : review.clean
+    evaluate_review --> evaluate_review_fix : review.findings
+    state evaluate_review_fix {
+      [*] --> evaluate_review_fix_bolt_1
+      state evaluate_review_fix_bolt_1 {
+        [*] --> evaluate_review_fix_bolt_1_evaluator
+        evaluate_review_fix_bolt_1_evaluator --> evaluate_review_fix_bolt_1_feedback_assessor : fix.advance
+        evaluate_review_fix_bolt_1_feedback_assessor --> evaluate_review_fix_bolt_1_validated : fix.advance
+        evaluate_review_fix_bolt_1_validated --> [*]
+      }
+      evaluate_review_fix_bolt_1 --> evaluate_review_fix_done : feedback.closed
+      evaluate_review_fix_bolt_1 --> evaluate_review_fix_bolt_2 : feedback.open
+      state evaluate_review_fix_bolt_2 {
+        [*] --> evaluate_review_fix_bolt_2_evaluator
+        evaluate_review_fix_bolt_2_evaluator --> evaluate_review_fix_bolt_2_feedback_assessor : fix.advance
+        evaluate_review_fix_bolt_2_feedback_assessor --> evaluate_review_fix_bolt_2_validated : fix.advance
+        evaluate_review_fix_bolt_2_validated --> [*]
+      }
+      evaluate_review_fix_bolt_2 --> evaluate_review_fix_done : feedback.closed
+      evaluate_review_fix_bolt_2 --> evaluate_review_fix_bolt_3 : feedback.open
+      state evaluate_review_fix_bolt_3 {
+        [*] --> evaluate_review_fix_bolt_3_evaluator
+        evaluate_review_fix_bolt_3_evaluator --> evaluate_review_fix_bolt_3_feedback_assessor : fix.advance
+        evaluate_review_fix_bolt_3_feedback_assessor --> evaluate_review_fix_bolt_3_validated : fix.advance
+        evaluate_review_fix_bolt_3_validated --> [*]
+      }
+      evaluate_review_fix_bolt_3 --> evaluate_review_fix_done : feedback.closed
+      evaluate_review_fix_bolt_3 --> evaluate_review_fix_escalated : feedback.open
+      evaluate_review_fix_done --> [*]
+      evaluate_review_fix_escalated --> [*]
+    }
+    evaluate_review_fix --> evaluate_gate
+    evaluate_gate --> [*]
+  }
+
+  state decide {
+    [*] --> decide_start_stage
+    decide_start_stage --> decide_elaborate : tick
+    decide_elaborate --> decide_execute : elaborate.advance
+    decide_elaborate --> decide_review_fix : feedback.pending
+    state decide_execute {
+      [*] --> decide_execute_advisor
+      decide_execute_advisor --> decide_execute_facilitator : hat.advance
+      decide_execute_facilitator --> decide_execute_verifier : hat.advance
+      decide_execute_facilitator --> decide_execute_advisor : hat.reject
+      decide_execute_verifier --> decide_execute_done : hat.advance
+      decide_execute_verifier --> decide_execute_facilitator : hat.reject
+      decide_execute_done --> [*]
+    }
+    decide_execute --> decide_review
+    decide_review --> decide_gate : review.clean
+    decide_review --> decide_review_fix : review.findings
+    state decide_review_fix {
+      [*] --> decide_review_fix_bolt_1
+      state decide_review_fix_bolt_1 {
+        [*] --> decide_review_fix_bolt_1_advisor
+        decide_review_fix_bolt_1_advisor --> decide_review_fix_bolt_1_feedback_assessor : fix.advance
+        decide_review_fix_bolt_1_feedback_assessor --> decide_review_fix_bolt_1_validated : fix.advance
+        decide_review_fix_bolt_1_validated --> [*]
+      }
+      decide_review_fix_bolt_1 --> decide_review_fix_done : feedback.closed
+      decide_review_fix_bolt_1 --> decide_review_fix_bolt_2 : feedback.open
+      state decide_review_fix_bolt_2 {
+        [*] --> decide_review_fix_bolt_2_advisor
+        decide_review_fix_bolt_2_advisor --> decide_review_fix_bolt_2_feedback_assessor : fix.advance
+        decide_review_fix_bolt_2_feedback_assessor --> decide_review_fix_bolt_2_validated : fix.advance
+        decide_review_fix_bolt_2_validated --> [*]
+      }
+      decide_review_fix_bolt_2 --> decide_review_fix_done : feedback.closed
+      decide_review_fix_bolt_2 --> decide_review_fix_bolt_3 : feedback.open
+      state decide_review_fix_bolt_3 {
+        [*] --> decide_review_fix_bolt_3_advisor
+        decide_review_fix_bolt_3_advisor --> decide_review_fix_bolt_3_feedback_assessor : fix.advance
+        decide_review_fix_bolt_3_feedback_assessor --> decide_review_fix_bolt_3_validated : fix.advance
+        decide_review_fix_bolt_3_validated --> [*]
+      }
+      decide_review_fix_bolt_3 --> decide_review_fix_done : feedback.closed
+      decide_review_fix_bolt_3 --> decide_review_fix_escalated : feedback.open
+      decide_review_fix_done --> [*]
+      decide_review_fix_escalated --> [*]
+    }
+    decide_review_fix --> decide_gate
+    decide_gate --> [*]
+  }
+
+  state communicate {
+    [*] --> communicate_start_stage
+    communicate_start_stage --> communicate_elaborate : tick
+    communicate_elaborate --> communicate_execute : elaborate.advance
+    communicate_elaborate --> communicate_review_fix : feedback.pending
+    state communicate_execute {
+      [*] --> communicate_execute_communicator
+      communicate_execute_communicator --> communicate_execute_planner : hat.advance
+      communicate_execute_planner --> communicate_execute_verifier : hat.advance
+      communicate_execute_planner --> communicate_execute_communicator : hat.reject
+      communicate_execute_verifier --> communicate_execute_done : hat.advance
+      communicate_execute_verifier --> communicate_execute_planner : hat.reject
+      communicate_execute_done --> [*]
+    }
+    communicate_execute --> communicate_review
+    communicate_review --> communicate_gate : review.clean
+    communicate_review --> communicate_review_fix : review.findings
+    state communicate_review_fix {
+      [*] --> communicate_review_fix_bolt_1
+      state communicate_review_fix_bolt_1 {
+        [*] --> communicate_review_fix_bolt_1_communicator
+        communicate_review_fix_bolt_1_communicator --> communicate_review_fix_bolt_1_feedback_assessor : fix.advance
+        communicate_review_fix_bolt_1_feedback_assessor --> communicate_review_fix_bolt_1_validated : fix.advance
+        communicate_review_fix_bolt_1_validated --> [*]
+      }
+      communicate_review_fix_bolt_1 --> communicate_review_fix_done : feedback.closed
+      communicate_review_fix_bolt_1 --> communicate_review_fix_bolt_2 : feedback.open
+      state communicate_review_fix_bolt_2 {
+        [*] --> communicate_review_fix_bolt_2_communicator
+        communicate_review_fix_bolt_2_communicator --> communicate_review_fix_bolt_2_feedback_assessor : fix.advance
+        communicate_review_fix_bolt_2_feedback_assessor --> communicate_review_fix_bolt_2_validated : fix.advance
+        communicate_review_fix_bolt_2_validated --> [*]
+      }
+      communicate_review_fix_bolt_2 --> communicate_review_fix_done : feedback.closed
+      communicate_review_fix_bolt_2 --> communicate_review_fix_bolt_3 : feedback.open
+      state communicate_review_fix_bolt_3 {
+        [*] --> communicate_review_fix_bolt_3_communicator
+        communicate_review_fix_bolt_3_communicator --> communicate_review_fix_bolt_3_feedback_assessor : fix.advance
+        communicate_review_fix_bolt_3_feedback_assessor --> communicate_review_fix_bolt_3_validated : fix.advance
+        communicate_review_fix_bolt_3_validated --> [*]
+      }
+      communicate_review_fix_bolt_3 --> communicate_review_fix_done : feedback.closed
+      communicate_review_fix_bolt_3 --> communicate_review_fix_escalated : feedback.open
+      communicate_review_fix_done --> [*]
+      communicate_review_fix_escalated --> [*]
+    }
+    communicate_review_fix --> communicate_gate
+    communicate_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

@@ -14,17 +14,17 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Import the prompt registry BEFORE side-effect imports
+// Import the prompt registry. The legacy side-effect imports
+// (prompts/core, prompts/complex, prompts/simple) are gone — the
+// files were marker stubs after the migration to skills, deleted in
+// the dead-code sweep. The skill-bridge registers the only live
+// prompt (haiku:status) — we don't import it here so the registry
+// stays empty for these tests.
 import {
 	completeArgument,
 	getPrompt,
 	listPrompts,
 } from "../src/prompts/index.ts"
-
-// Side-effect imports — these used to register prompts but no longer do
-import "../src/prompts/core.ts"
-import "../src/prompts/complex.ts"
-import "../src/prompts/simple.ts"
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 

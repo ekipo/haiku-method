@@ -14,8 +14,8 @@
  * this pane.
  */
 
-import type { AnnotationPin } from "../../components/AnnotationCanvas"
-import type { InlineCommentEntry } from "../../components/InlineComments"
+import type { AnnotationPin } from "../../organisms/AnnotationCanvas"
+import type { InlineCommentEntry } from "../../organisms/InlineComments"
 import type { ReviewAnnotations } from "../../types"
 import { IntentReview } from "./intent/IntentReview"
 import type { ReviewPageSessionData } from "./shared/session-data"

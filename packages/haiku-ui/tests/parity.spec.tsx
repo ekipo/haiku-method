@@ -126,10 +126,24 @@ describe("DOM parity — rendered app matches committed snapshot per fixture", (
 	beforeEach(() => {
 		// Reset any test-to-test DOM leakage before each render
 		document.body.innerHTML = ""
+		// useFeedback bypasses ApiClient for /api/feedback-intent reads. Stub
+		// global fetch so jsdom (no base URL) doesn't throw "Failed to parse
+		// URL" and render an error state into the snapshot.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				async () =>
+					new Response(JSON.stringify({ items: [], count: 0 }), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					}),
+			),
+		)
 	})
 
 	afterEach(() => {
 		cleanup()
+		vi.unstubAllGlobals()
 	})
 
 	for (const fx of FIXTURES) {
@@ -224,13 +238,11 @@ function assertStructuralMarkers(
 	expect(rendered).toContain('id="feedback-live-polite"')
 	expect(rendered).toContain('id="feedback-live-assertive"')
 
-	// The review page is a full-bleed app (per canonical review UI mockup)
-	// and intentionally does NOT render the "Powered by" ShellLayout footer
-	// or a role="contentinfo" landmark. The non-review pages still do.
-	if (fxName !== "review") {
-		expect(rendered).toContain("Powered by")
-		expect(rendered).toContain('role="contentinfo"')
-	}
+	// All session pages (review, question, direction) are full-bleed apps
+	// per the canonical review-UI mockup — they intentionally do NOT
+	// render the legacy "Powered by" ShellLayout footer or a
+	// role="contentinfo" landmark. Question + direction were brought in
+	// line with review's chrome via SessionShell.
 
 	if (fxName === "review") {
 		const r = session as ReviewSessionPayload

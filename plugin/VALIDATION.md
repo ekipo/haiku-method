@@ -12,7 +12,7 @@ These must ALWAYS be true regardless of studio, stage, or user action.
 - [ ] Unit state lives in `unit-*.md` frontmatter (`bolt`, `hat`, `status`, `started_at`, `completed_at`)
 - [ ] Stage state lives in `stages/{stage}/state.json` (`phase`, `status`, `started_at`, `completed_at`, `gate_entered_at`, `gate_outcome`)
 - [ ] No lifecycle state is stored in `state/iteration.json` (deprecated)
-- [ ] Stage/intent lifecycle transitions are performed by the `haiku_run_next` FSM driver — the agent never mutates stage or intent state directly. Intent creation goes through `haiku_intent_create`. Unit-level writes go through `haiku_unit_start`, `haiku_unit_advance_hat`, `haiku_unit_reject_hat`, `haiku_unit_increment_bolt`, and `haiku_unit_set`. Exception: hooks may write directly for auto-reconciliation (post-merge, auto-complete)
+- [ ] Stage/intent lifecycle transitions are performed by the `haiku_run_next` workflow driver — the agent never mutates stage or intent state directly. Intent creation goes through `haiku_intent_create`. Unit-level writes go through `haiku_unit_start`, `haiku_unit_advance_hat`, `haiku_unit_reject_hat`, `haiku_unit_increment_bolt`, and `haiku_unit_set`. Exception: hooks may write directly for auto-reconciliation (post-merge, auto-complete)
 - [ ] Lifecycle transitions (stage start/complete, unit start/complete) are committed to git automatically. Incremental updates (hat advance, bolt increment, phase set) are committed by the agent as part of its workflow.
 
 ### Orchestration
@@ -36,8 +36,8 @@ These must ALWAYS be true regardless of studio, stage, or user action.
 ### Visual Review Enforcement (RFC 2119)
 
 - [ ] Elaboration plan MUST be presented via review UI — never as plain conversation text
-- [ ] FSM handles this internally via `haiku_run_next` (blocks until user responds)
-- [ ] Gates are handled by the FSM — `haiku_run_next` opens review UI, blocks, returns decision (`advance_stage` or `changes_requested`)
+- [ ] The workflow engine handles this internally via `haiku_run_next` (blocks until user responds)
+- [ ] Gates are handled by the workflow engine — `haiku_run_next` opens review UI, blocks, returns decision (`advance_stage` or `changes_requested`)
 - [ ] Rich content during elaboration (specs, wireframes, comparisons) MUST use `ask_user_visual_question`
 - [ ] Design direction choices MUST use `pick_design_direction`
 - [ ] Plain conversation text is ONLY for simple clarification questions — MUST NOT present plans or reviews as text
@@ -89,7 +89,7 @@ These must ALWAYS be true regardless of studio, stage, or user action.
 
 2. **First `/haiku:pickup`:**
    - [ ] `haiku_run_next` returns `start_stage` with stage: inception, hats: [architect, elaborator]
-   - [ ] Orchestrator performs FSM side effects: writes `state.json` (status: active, phase: elaborate), sets `active_stage`, creates intent branch
+   - [ ] Orchestrator performs workflow side effects: writes `state.json` (status: active, phase: elaborate), sets `active_stage`, creates intent branch
    - [ ] Agent follows the returned action
 
 3. **Elaboration:**
@@ -183,7 +183,7 @@ These must ALWAYS be true regardless of studio, stage, or user action.
 **Trigger:** Stage has `review: external` (e.g., product stage).
 
 - [ ] `haiku_run_next` returns `gate_external` — orchestrator enters the gate (sets gate_entered_at)
-- [ ] FSM returns `external_review_requested` — agent/user submits for review through their project's process
+- [ ] The workflow engine returns `external_review_requested` — agent/user submits for review through their project's process
 - [ ] Intent blocks until external review resolves
 
 ---
@@ -294,7 +294,7 @@ These must ALWAYS be true regardless of studio, stage, or user action.
 ### PreToolUse
 - [ ] `redirect-plan-mode`: blocks EnterPlanMode, suggests `/haiku:start`
 - [ ] `inject-state-file`: injects `state_file` arg into `haiku_` MCP tool calls
-- [ ] `guard-fsm-fields`: blocks direct edits to FSM-controlled fields in haiku state files
+- [ ] `guard-workflow-fields`: blocks direct edits to workflow-controlled fields in haiku state files
 - [ ] `prompt-guard`: warns on injection patterns in `.haiku/` file writes
 - [ ] `workflow-guard`: warns on edits outside active hat scope
 - [ ] `subagent-hook`: injects H·AI·K·U context into Agent/Task/Skill calls
@@ -408,7 +408,7 @@ packages/
 
 | Tool | Purpose |
 |------|---------|
-| `haiku_run_next` | Get next orchestrator action (FSM driver) |
+| `haiku_run_next` | Get next orchestrator action (workflow driver) |
 | `haiku_revisit` | Revisit an earlier stage or phase |
 | `haiku_intent_create` | Create a new intent (with elicitation) |
 
@@ -452,12 +452,12 @@ Every MCP state transition emits its OTEL event — no manual calls needed:
 | Source | Event |
 |--------|-------|
 | `haiku_intent_create` | `haiku.intent.created` |
-| `haiku_run_next` (FSM: start_stage) | `haiku.stage.started` |
-| `haiku_run_next` (FSM: complete_stage) | `haiku.stage.completed` |
-| `haiku_run_next` (FSM: advance_phase) | `haiku.stage.phase` |
-| `haiku_run_next` (FSM: gate_ask/external/await) | `haiku.gate.entered` |
-| `haiku_run_next` (FSM: gate resolved) | `haiku.gate.resolved` |
-| `haiku_run_next` (FSM: intent_complete) | `haiku.intent.completed` |
+| `haiku_run_next` (workflow: start_stage) | `haiku.stage.started` |
+| `haiku_run_next` (workflow: complete_stage) | `haiku.stage.completed` |
+| `haiku_run_next` (workflow: advance_phase) | `haiku.stage.phase` |
+| `haiku_run_next` (workflow: gate_ask/external/await) | `haiku.gate.entered` |
+| `haiku_run_next` (workflow: gate resolved) | `haiku.gate.resolved` |
+| `haiku_run_next` (workflow: intent_complete) | `haiku.intent.completed` |
 | `haiku_run_next` | `haiku.orchestrator.action` |
 | `haiku_revisit` | `haiku.revisit.stage` / `haiku.revisit.phase` |
 | `haiku_unit_start` | `haiku.unit.started` |
@@ -488,7 +488,7 @@ Systematic validation of every critical behavior. Status: PASS/FAIL/PARTIAL.
 
 ### Gate Enforcement
 
-- [ ] **Pre-execution review gate** — FSM blocks elaborate→execute until user approves (PASS: gate_review enforced)
+- [ ] **Pre-execution review gate** — Workflow engine blocks elaborate→execute until user approves (PASS: gate_review enforced)
 - [ ] **Inter-stage gating by mode** — auto advances in continuous, pauses in discrete, ask/external open review (PASS)
 - [ ] **Changes routing** — changes_requested stays in current phase, loops back (PASS)
 - [ ] **External review tracking** — URL stored and checked on resume (PARTIAL: field exists but not populated by gate flow)

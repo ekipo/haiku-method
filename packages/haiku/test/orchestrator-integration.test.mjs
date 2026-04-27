@@ -14,7 +14,7 @@ import {
 } from "node:fs"
 
 // Helper: extract subagent prompt_file paths from an orchestrator response
-// and concatenate their contents. The FSM now writes subagent prompts to
+// and concatenate their contents. The workflow engine now writes subagent prompts to
 // tmpfiles and the response only carries <subagent prompt_file="..."> refs.
 function expandPromptFiles(responseText) {
 	const re = /<subagent[^>]*\bprompt_file="([^"]+)"/g
@@ -485,7 +485,7 @@ try {
 		process.chdir(projDir)
 		const result = runNext(slug)
 
-		// FSM should advance to gate and return the review action
+		// workflow engine should advance to gate and return the review action
 		assert.strictEqual(result.action, "review")
 
 		// Now test the instruction builder by calling handleOrchestratorTool

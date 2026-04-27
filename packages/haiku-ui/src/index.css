@@ -304,7 +304,7 @@ pre {
 
    FB-34 alignment: the `dialog.feedback-sheet` selector below is tightly
    coupled to the React component root rendered by
-   `packages/haiku-ui/src/components/feedback/FeedbackSheet.tsx`, which
+   `packages/haiku-ui/src/organisms/FeedbackSheet.tsx`, which
    is a native `<dialog className="feedback-sheet">` — NOT a
    `<div role="dialog">`. Regression coverage lives in
    `FeedbackSheet.test.tsx` ("renders as a native <dialog ...> root

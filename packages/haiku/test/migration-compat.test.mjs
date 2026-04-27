@@ -338,7 +338,7 @@ try {
 		const result = runNext(slug)
 
 		// Iteration === 1 + completed units on disk = iterative re-entry mode.
-		// The FSM emits `elaborate` (iterative=true) so the agent can decide
+		// The workflow emits `elaborate` (iterative=true) so the agent can decide
 		// whether new/modified units are needed. Previously this path fell
 		// through to `elaboration_insufficient` via the turn-count check;
 		// either action indicates "don't advance past elaborate" which is

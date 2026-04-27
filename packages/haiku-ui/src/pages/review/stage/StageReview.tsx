@@ -23,16 +23,20 @@
 import { MarkdownViewer } from "@haiku/shared"
 import DOMPurify from "dompurify"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArtifactAnnotator } from "../../../components/ArtifactAnnotator"
-import { Card, SectionHeading } from "../../../components/Card"
+import { Card, SectionHeading } from "../../../atoms/Card"
+import { type TabDef, Tabs } from "../../../molecules/Tabs"
+import { UnitMetaPanel } from "../../../molecules/UnitMetaPanel"
+import { ArtifactAnnotator } from "../../../organisms/ArtifactAnnotator"
 import {
 	type InlineCommentEntry,
 	InlineComments,
-} from "../../../components/InlineComments"
-import { type TabDef, Tabs } from "../../../components/Tabs"
+} from "../../../organisms/InlineComments"
 import type { ParsedUnit } from "../../../parsed"
 import type { FeedbackItemData } from "../../../types"
-import { markdownToSimpleHtml } from "../shared/section-helpers"
+import {
+	markdownToSimpleHtml,
+	stripFrontmatter,
+} from "../shared/section-helpers"
 import type { ReviewPageSessionData } from "../shared/session-data"
 import type { ReviewDetailKind, ReviewTab } from "../shared/stage-tabs"
 import {
@@ -1251,6 +1255,11 @@ function UnitDetailView({
 		type?: string
 		description?: string
 		model?: string
+		inputs?: string[]
+		outputs?: string[]
+		depends_on?: string[]
+		hat?: string
+		bolt?: number
 	}
 	const type = fm.type ?? fm.discipline ?? ""
 	const typeCls = type
@@ -1316,31 +1325,42 @@ function UnitDetailView({
 					)}
 				</div>
 				<div className="px-4 py-3">
+					<UnitMetaPanel
+						inputs={fm.inputs as string[] | undefined}
+						outputs={fm.outputs as string[] | undefined}
+						dependsOn={fm.depends_on as string[] | undefined}
+						hat={fm.hat}
+						bolt={fm.bolt}
+					/>
 					{current.rawContent &&
-						(onInlineCommentsChange ? (
-							<InlineComments
-								htmlContent={markdownToSimpleHtml(current.rawContent)}
-								rawContent={current.rawContent}
-								location={`Unit: ${current.title || current.slug}`}
-								filePath={
-									intentSlug
-										? `.haiku/intents/${intentSlug}/stages/${stageId}/units/${current.slug}.md`
-										: undefined
-								}
-								existingAnchors={deriveExistingAnchorsForUnit(
-									current.slug,
-									cardFeedback,
-								)}
-								onCommentsChange={onInlineCommentsChange}
-								onSaveInline={onSaveInline}
-								flashAnchor={flashAnchor ?? null}
-								onFlashCommentConsumed={onFlashCommentConsumed}
-							/>
-						) : (
-							<MarkdownViewer id={`unit-${current.slug}`}>
-								{current.rawContent}
-							</MarkdownViewer>
-						))}
+						(() => {
+							const body = stripFrontmatter(current.rawContent)
+							if (!body.trim()) return null
+							return onInlineCommentsChange ? (
+								<InlineComments
+									htmlContent={markdownToSimpleHtml(body)}
+									rawContent={body}
+									location={`Unit: ${current.title || current.slug}`}
+									filePath={
+										intentSlug
+											? `.haiku/intents/${intentSlug}/stages/${stageId}/units/${current.slug}.md`
+											: undefined
+									}
+									existingAnchors={deriveExistingAnchorsForUnit(
+										current.slug,
+										cardFeedback,
+									)}
+									onCommentsChange={onInlineCommentsChange}
+									onSaveInline={onSaveInline}
+									flashAnchor={flashAnchor ?? null}
+									onFlashCommentConsumed={onFlashCommentConsumed}
+								/>
+							) : (
+								<MarkdownViewer id={`unit-${current.slug}`}>
+									{body}
+								</MarkdownViewer>
+							)
+						})()}
 				</div>
 			</div>
 		</>
@@ -1849,12 +1869,11 @@ function ArtifactThumbnail({
 		const safe = DOMPurify.sanitize(artifact.body, {
 			USE_PROFILES: { svg: true, svgFilters: true },
 		})
-		// audit-allow: DOMPurify-sanitized SVG render path — same contract as the detail view at line 1713
 		return (
 			<div
 				aria-hidden="true"
 				className="shrink-0 w-24 h-16 rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 overflow-hidden flex items-center justify-center p-1 [&>svg]:max-w-full [&>svg]:max-h-full"
-				// biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify svg profile above — same contract as SvgPreview
+				// biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify svg profile — same contract as SvgPreview / detail view // audit-allow: DOMPurify-sanitized SVG render path
 				dangerouslySetInnerHTML={{ __html: safe }}
 			/>
 		)
@@ -1894,11 +1913,10 @@ function SvgPreview({ body }: { body: string }) {
 			}),
 		[body],
 	)
-	// audit-allow: DOMPurify-sanitized SVG render path
 	return (
 		<div
 			className="relative bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-800 rounded-md p-4 overflow-auto max-h-96"
-			// biome-ignore lint/security/noDangerouslySetInnerHtml: body is sanitized via DOMPurify with the svg profile — same contract as shared/section-helpers.ts::markdownToSimpleHtml
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized via DOMPurify svg profile — same contract as shared/section-helpers.ts::markdownToSimpleHtml // audit-allow: DOMPurify-sanitized SVG render path
 			dangerouslySetInnerHTML={{ __html: safe }}
 		/>
 	)

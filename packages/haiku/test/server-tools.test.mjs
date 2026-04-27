@@ -200,11 +200,11 @@ test("haiku_unit_set requires intent, stage, unit, field, value", () => {
 
 test("haiku_run_next: intent is optional (auto-resolved from branch or sole active intent)", () => {
 	const tool = orchestratorToolDefs.find((t) => t.name === "haiku_run_next")
-	// `required` should be absent OR not include "intent" — the FSM resolves it.
+	// `required` should be absent OR not include "intent" — the workflow engine resolves it.
 	const required = tool.inputSchema.required ?? []
 	assert.ok(
 		!required.includes("intent"),
-		"intent should not be required — FSM auto-resolves from current git branch or sole active intent",
+		"intent should not be required — workflow auto-resolves from current git branch or sole active intent",
 	)
 	assert.ok(
 		"intent" in tool.inputSchema.properties,
@@ -351,7 +351,6 @@ const DesignArchetypeSchema = z.object({
 	name: z.string(),
 	description: z.string(),
 	preview_html: z.string(),
-	default_parameters: z.record(z.number()),
 })
 
 test("DesignArchetypeSchema accepts valid archetype", () => {
@@ -359,27 +358,18 @@ test("DesignArchetypeSchema accepts valid archetype", () => {
 		name: "Minimal",
 		description: "Clean and simple",
 		preview_html: "<div>Preview</div>",
-		default_parameters: { spacing: 1.5, font_size: 16 },
 	})
 	assert.strictEqual(result.name, "Minimal")
-	assert.strictEqual(result.default_parameters.spacing, 1.5)
-})
-
-test("DesignArchetypeSchema rejects non-numeric parameters", () => {
-	assert.throws(() =>
-		DesignArchetypeSchema.parse({
-			name: "Bad",
-			description: "Bad",
-			preview_html: "<div/>",
-			default_parameters: { spacing: "big" },
-		}),
-	)
 })
 
 test("DesignArchetypeSchema rejects missing fields", () => {
 	assert.throws(() => DesignArchetypeSchema.parse({ name: "Incomplete" }))
 })
 
+// Legacy DesignParameterSchema — placeholder kept so the inline copy
+// of PickDesignDirectionInput below mirrors any future shape evolution
+// in one place. The real input schema dropped `parameters` /
+// `parameters_file` when the slider tuning model was removed.
 const DesignParameterSchema = z.object({
 	name: z.string(),
 	label: z.string(),
@@ -442,8 +432,6 @@ const PickDesignDirectionInput = z.object({
 	intent_slug: z.string(),
 	archetypes: z.array(DesignArchetypeSchema).optional(),
 	archetypes_file: z.string().optional(),
-	parameters: z.array(DesignParameterSchema).optional(),
-	parameters_file: z.string().optional(),
 	title: z.string().optional(),
 })
 
@@ -461,34 +449,18 @@ test("PickDesignDirectionInput accepts inline archetypes", () => {
 				name: "Minimal",
 				description: "Clean",
 				preview_html: "<div/>",
-				default_parameters: { x: 1 },
-			},
-		],
-		parameters: [
-			{
-				name: "x",
-				label: "X",
-				description: "X factor",
-				min: 0,
-				max: 10,
-				step: 1,
-				default: 5,
-				labels: { low: "Low", high: "High" },
 			},
 		],
 	})
 	assert.strictEqual(result.archetypes.length, 1)
-	assert.strictEqual(result.parameters.length, 1)
 })
 
-test("PickDesignDirectionInput accepts file paths", () => {
+test("PickDesignDirectionInput accepts archetypes_file path", () => {
 	const result = PickDesignDirectionInput.parse({
 		intent_slug: "feat",
 		archetypes_file: "/tmp/archetypes.json",
-		parameters_file: "/tmp/parameters.json",
 	})
 	assert.strictEqual(result.archetypes_file, "/tmp/archetypes.json")
-	assert.strictEqual(result.parameters_file, "/tmp/parameters.json")
 })
 
 test("PickDesignDirectionInput rejects missing intent_slug", () => {
@@ -557,7 +529,7 @@ test("string properties use type 'string'", () => {
 // ── haiku-api contract invariants ──────────────────────────────────────────
 //
 // These are cheap structural checks that catch drift in the wire contract.
-// If any route drops the `transport: 'loopback'` annotation the FSM refuses
+// If any route drops the `transport: 'loopback'` annotation the workflow engine refuses
 // to start — this test fails loudly at the same level.
 
 console.log("\n=== haiku-api contract invariants ===")

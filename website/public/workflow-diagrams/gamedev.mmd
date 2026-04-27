@@ -1,0 +1,280 @@
+stateDiagram-v2
+  %% Auto-generated from StudioConfig for: gamedev
+  %% Do not edit by hand — regenerate via export-mermaid.ts.
+
+  [*] --> select_studio
+  select_studio --> concept : studio.selected
+  concept --> prototype
+  prototype --> production
+  production --> polish
+  polish --> release
+  release --> intent_completion_review
+  intent_completion_review --> intent_completion_gate : review.clean
+  intent_completion_review --> intent_completion_fix : review.findings
+  intent_completion_fix --> intent_completion_gate : feedback.closed
+  intent_completion_fix --> intent_completion_fix : feedback.open
+  intent_completion_gate --> complete : gate.approved
+  intent_completion_gate --> release : gate.changes_requested
+
+  state concept {
+    [*] --> concept_start_stage
+    concept_start_stage --> concept_elaborate : tick
+    concept_elaborate --> concept_execute : elaborate.advance
+    concept_elaborate --> concept_review_fix : feedback.pending
+    state concept_execute {
+      [*] --> concept_execute_game_designer
+      concept_execute_game_designer --> concept_execute_creative_director : hat.advance
+      concept_execute_creative_director --> concept_execute_distiller : hat.advance
+      concept_execute_creative_director --> concept_execute_game_designer : hat.reject
+      concept_execute_distiller --> concept_execute_verifier : hat.advance
+      concept_execute_distiller --> concept_execute_creative_director : hat.reject
+      concept_execute_verifier --> concept_execute_done : hat.advance
+      concept_execute_verifier --> concept_execute_distiller : hat.reject
+      concept_execute_done --> [*]
+    }
+    concept_execute --> concept_review
+    concept_review --> concept_gate : review.clean
+    concept_review --> concept_review_fix : review.findings
+    state concept_review_fix {
+      [*] --> concept_review_fix_bolt_1
+      state concept_review_fix_bolt_1 {
+        [*] --> concept_review_fix_bolt_1_game_designer
+        concept_review_fix_bolt_1_game_designer --> concept_review_fix_bolt_1_feedback_assessor : fix.advance
+        concept_review_fix_bolt_1_feedback_assessor --> concept_review_fix_bolt_1_validated : fix.advance
+        concept_review_fix_bolt_1_validated --> [*]
+      }
+      concept_review_fix_bolt_1 --> concept_review_fix_done : feedback.closed
+      concept_review_fix_bolt_1 --> concept_review_fix_bolt_2 : feedback.open
+      state concept_review_fix_bolt_2 {
+        [*] --> concept_review_fix_bolt_2_game_designer
+        concept_review_fix_bolt_2_game_designer --> concept_review_fix_bolt_2_feedback_assessor : fix.advance
+        concept_review_fix_bolt_2_feedback_assessor --> concept_review_fix_bolt_2_validated : fix.advance
+        concept_review_fix_bolt_2_validated --> [*]
+      }
+      concept_review_fix_bolt_2 --> concept_review_fix_done : feedback.closed
+      concept_review_fix_bolt_2 --> concept_review_fix_bolt_3 : feedback.open
+      state concept_review_fix_bolt_3 {
+        [*] --> concept_review_fix_bolt_3_game_designer
+        concept_review_fix_bolt_3_game_designer --> concept_review_fix_bolt_3_feedback_assessor : fix.advance
+        concept_review_fix_bolt_3_feedback_assessor --> concept_review_fix_bolt_3_validated : fix.advance
+        concept_review_fix_bolt_3_validated --> [*]
+      }
+      concept_review_fix_bolt_3 --> concept_review_fix_done : feedback.closed
+      concept_review_fix_bolt_3 --> concept_review_fix_escalated : feedback.open
+      concept_review_fix_done --> [*]
+      concept_review_fix_escalated --> [*]
+    }
+    concept_review_fix --> concept_gate
+    concept_gate --> [*]
+  }
+
+  state prototype {
+    [*] --> prototype_start_stage
+    prototype_start_stage --> prototype_elaborate : tick
+    prototype_elaborate --> prototype_execute : elaborate.advance
+    prototype_elaborate --> prototype_review_fix : feedback.pending
+    state prototype_execute {
+      [*] --> prototype_execute_prototype_engineer
+      prototype_execute_prototype_engineer --> prototype_execute_game_designer : hat.advance
+      prototype_execute_game_designer --> prototype_execute_playtester : hat.advance
+      prototype_execute_game_designer --> prototype_execute_prototype_engineer : hat.reject
+      prototype_execute_playtester --> prototype_execute_verifier : hat.advance
+      prototype_execute_playtester --> prototype_execute_game_designer : hat.reject
+      prototype_execute_verifier --> prototype_execute_done : hat.advance
+      prototype_execute_verifier --> prototype_execute_playtester : hat.reject
+      prototype_execute_done --> [*]
+    }
+    prototype_execute --> prototype_review
+    prototype_review --> prototype_gate : review.clean
+    prototype_review --> prototype_review_fix : review.findings
+    state prototype_review_fix {
+      [*] --> prototype_review_fix_bolt_1
+      state prototype_review_fix_bolt_1 {
+        [*] --> prototype_review_fix_bolt_1_prototype_engineer
+        prototype_review_fix_bolt_1_prototype_engineer --> prototype_review_fix_bolt_1_feedback_assessor : fix.advance
+        prototype_review_fix_bolt_1_feedback_assessor --> prototype_review_fix_bolt_1_validated : fix.advance
+        prototype_review_fix_bolt_1_validated --> [*]
+      }
+      prototype_review_fix_bolt_1 --> prototype_review_fix_done : feedback.closed
+      prototype_review_fix_bolt_1 --> prototype_review_fix_bolt_2 : feedback.open
+      state prototype_review_fix_bolt_2 {
+        [*] --> prototype_review_fix_bolt_2_prototype_engineer
+        prototype_review_fix_bolt_2_prototype_engineer --> prototype_review_fix_bolt_2_feedback_assessor : fix.advance
+        prototype_review_fix_bolt_2_feedback_assessor --> prototype_review_fix_bolt_2_validated : fix.advance
+        prototype_review_fix_bolt_2_validated --> [*]
+      }
+      prototype_review_fix_bolt_2 --> prototype_review_fix_done : feedback.closed
+      prototype_review_fix_bolt_2 --> prototype_review_fix_bolt_3 : feedback.open
+      state prototype_review_fix_bolt_3 {
+        [*] --> prototype_review_fix_bolt_3_prototype_engineer
+        prototype_review_fix_bolt_3_prototype_engineer --> prototype_review_fix_bolt_3_feedback_assessor : fix.advance
+        prototype_review_fix_bolt_3_feedback_assessor --> prototype_review_fix_bolt_3_validated : fix.advance
+        prototype_review_fix_bolt_3_validated --> [*]
+      }
+      prototype_review_fix_bolt_3 --> prototype_review_fix_done : feedback.closed
+      prototype_review_fix_bolt_3 --> prototype_review_fix_escalated : feedback.open
+      prototype_review_fix_done --> [*]
+      prototype_review_fix_escalated --> [*]
+    }
+    prototype_review_fix --> prototype_gate
+    prototype_gate --> [*]
+  }
+
+  state production {
+    [*] --> production_start_stage
+    production_start_stage --> production_elaborate : tick
+    production_elaborate --> production_execute : elaborate.advance
+    production_elaborate --> production_review_fix : feedback.pending
+    state production_execute {
+      [*] --> production_execute_gameplay_engineer
+      production_execute_gameplay_engineer --> production_execute_content_author : hat.advance
+      production_execute_content_author --> production_execute_systems_designer : hat.advance
+      production_execute_content_author --> production_execute_gameplay_engineer : hat.reject
+      production_execute_systems_designer --> production_execute_reviewer : hat.advance
+      production_execute_systems_designer --> production_execute_content_author : hat.reject
+      production_execute_reviewer --> production_execute_done : hat.advance
+      production_execute_reviewer --> production_execute_systems_designer : hat.reject
+      production_execute_done --> [*]
+    }
+    production_execute --> production_review
+    production_review --> production_gate : review.clean
+    production_review --> production_review_fix : review.findings
+    state production_review_fix {
+      [*] --> production_review_fix_bolt_1
+      state production_review_fix_bolt_1 {
+        [*] --> production_review_fix_bolt_1_gameplay_engineer
+        production_review_fix_bolt_1_gameplay_engineer --> production_review_fix_bolt_1_feedback_assessor : fix.advance
+        production_review_fix_bolt_1_feedback_assessor --> production_review_fix_bolt_1_validated : fix.advance
+        production_review_fix_bolt_1_validated --> [*]
+      }
+      production_review_fix_bolt_1 --> production_review_fix_done : feedback.closed
+      production_review_fix_bolt_1 --> production_review_fix_bolt_2 : feedback.open
+      state production_review_fix_bolt_2 {
+        [*] --> production_review_fix_bolt_2_gameplay_engineer
+        production_review_fix_bolt_2_gameplay_engineer --> production_review_fix_bolt_2_feedback_assessor : fix.advance
+        production_review_fix_bolt_2_feedback_assessor --> production_review_fix_bolt_2_validated : fix.advance
+        production_review_fix_bolt_2_validated --> [*]
+      }
+      production_review_fix_bolt_2 --> production_review_fix_done : feedback.closed
+      production_review_fix_bolt_2 --> production_review_fix_bolt_3 : feedback.open
+      state production_review_fix_bolt_3 {
+        [*] --> production_review_fix_bolt_3_gameplay_engineer
+        production_review_fix_bolt_3_gameplay_engineer --> production_review_fix_bolt_3_feedback_assessor : fix.advance
+        production_review_fix_bolt_3_feedback_assessor --> production_review_fix_bolt_3_validated : fix.advance
+        production_review_fix_bolt_3_validated --> [*]
+      }
+      production_review_fix_bolt_3 --> production_review_fix_done : feedback.closed
+      production_review_fix_bolt_3 --> production_review_fix_escalated : feedback.open
+      production_review_fix_done --> [*]
+      production_review_fix_escalated --> [*]
+    }
+    production_review_fix --> production_gate
+    production_gate --> [*]
+  }
+
+  state polish {
+    [*] --> polish_start_stage
+    polish_start_stage --> polish_elaborate : tick
+    polish_elaborate --> polish_execute : elaborate.advance
+    polish_elaborate --> polish_review_fix : feedback.pending
+    state polish_execute {
+      [*] --> polish_execute_gameplay_engineer
+      polish_execute_gameplay_engineer --> polish_execute_tuner : hat.advance
+      polish_execute_tuner --> polish_execute_performance_engineer : hat.advance
+      polish_execute_tuner --> polish_execute_gameplay_engineer : hat.reject
+      polish_execute_performance_engineer --> polish_execute_qa : hat.advance
+      polish_execute_performance_engineer --> polish_execute_tuner : hat.reject
+      polish_execute_qa --> polish_execute_done : hat.advance
+      polish_execute_qa --> polish_execute_performance_engineer : hat.reject
+      polish_execute_done --> [*]
+    }
+    polish_execute --> polish_review
+    polish_review --> polish_gate : review.clean
+    polish_review --> polish_review_fix : review.findings
+    state polish_review_fix {
+      [*] --> polish_review_fix_bolt_1
+      state polish_review_fix_bolt_1 {
+        [*] --> polish_review_fix_bolt_1_gameplay_engineer
+        polish_review_fix_bolt_1_gameplay_engineer --> polish_review_fix_bolt_1_feedback_assessor : fix.advance
+        polish_review_fix_bolt_1_feedback_assessor --> polish_review_fix_bolt_1_validated : fix.advance
+        polish_review_fix_bolt_1_validated --> [*]
+      }
+      polish_review_fix_bolt_1 --> polish_review_fix_done : feedback.closed
+      polish_review_fix_bolt_1 --> polish_review_fix_bolt_2 : feedback.open
+      state polish_review_fix_bolt_2 {
+        [*] --> polish_review_fix_bolt_2_gameplay_engineer
+        polish_review_fix_bolt_2_gameplay_engineer --> polish_review_fix_bolt_2_feedback_assessor : fix.advance
+        polish_review_fix_bolt_2_feedback_assessor --> polish_review_fix_bolt_2_validated : fix.advance
+        polish_review_fix_bolt_2_validated --> [*]
+      }
+      polish_review_fix_bolt_2 --> polish_review_fix_done : feedback.closed
+      polish_review_fix_bolt_2 --> polish_review_fix_bolt_3 : feedback.open
+      state polish_review_fix_bolt_3 {
+        [*] --> polish_review_fix_bolt_3_gameplay_engineer
+        polish_review_fix_bolt_3_gameplay_engineer --> polish_review_fix_bolt_3_feedback_assessor : fix.advance
+        polish_review_fix_bolt_3_feedback_assessor --> polish_review_fix_bolt_3_validated : fix.advance
+        polish_review_fix_bolt_3_validated --> [*]
+      }
+      polish_review_fix_bolt_3 --> polish_review_fix_done : feedback.closed
+      polish_review_fix_bolt_3 --> polish_review_fix_escalated : feedback.open
+      polish_review_fix_done --> [*]
+      polish_review_fix_escalated --> [*]
+    }
+    polish_review_fix --> polish_gate
+    polish_gate --> [*]
+  }
+
+  state release {
+    [*] --> release_start_stage
+    release_start_stage --> release_elaborate : tick
+    release_elaborate --> release_execute : elaborate.advance
+    release_elaborate --> release_review_fix : feedback.pending
+    state release_execute {
+      [*] --> release_execute_release_engineer
+      release_execute_release_engineer --> release_execute_platform_cert_specialist : hat.advance
+      release_execute_platform_cert_specialist --> release_execute_verifier : hat.advance
+      release_execute_platform_cert_specialist --> release_execute_release_engineer : hat.reject
+      release_execute_verifier --> release_execute_done : hat.advance
+      release_execute_verifier --> release_execute_platform_cert_specialist : hat.reject
+      release_execute_done --> [*]
+    }
+    release_execute --> release_review
+    release_review --> release_gate : review.clean
+    release_review --> release_review_fix : review.findings
+    state release_review_fix {
+      [*] --> release_review_fix_bolt_1
+      state release_review_fix_bolt_1 {
+        [*] --> release_review_fix_bolt_1_release_engineer
+        release_review_fix_bolt_1_release_engineer --> release_review_fix_bolt_1_feedback_assessor : fix.advance
+        release_review_fix_bolt_1_feedback_assessor --> release_review_fix_bolt_1_validated : fix.advance
+        release_review_fix_bolt_1_validated --> [*]
+      }
+      release_review_fix_bolt_1 --> release_review_fix_done : feedback.closed
+      release_review_fix_bolt_1 --> release_review_fix_bolt_2 : feedback.open
+      state release_review_fix_bolt_2 {
+        [*] --> release_review_fix_bolt_2_release_engineer
+        release_review_fix_bolt_2_release_engineer --> release_review_fix_bolt_2_feedback_assessor : fix.advance
+        release_review_fix_bolt_2_feedback_assessor --> release_review_fix_bolt_2_validated : fix.advance
+        release_review_fix_bolt_2_validated --> [*]
+      }
+      release_review_fix_bolt_2 --> release_review_fix_done : feedback.closed
+      release_review_fix_bolt_2 --> release_review_fix_bolt_3 : feedback.open
+      state release_review_fix_bolt_3 {
+        [*] --> release_review_fix_bolt_3_release_engineer
+        release_review_fix_bolt_3_release_engineer --> release_review_fix_bolt_3_feedback_assessor : fix.advance
+        release_review_fix_bolt_3_feedback_assessor --> release_review_fix_bolt_3_validated : fix.advance
+        release_review_fix_bolt_3_validated --> [*]
+      }
+      release_review_fix_bolt_3 --> release_review_fix_done : feedback.closed
+      release_review_fix_bolt_3 --> release_review_fix_escalated : feedback.open
+      release_review_fix_done --> [*]
+      release_review_fix_escalated --> [*]
+    }
+    release_review_fix --> release_gate
+    release_gate --> [*]
+  }
+
+  complete --> [*]
+  error --> [*]
+  escalate --> [*]
+  blocked --> [*]

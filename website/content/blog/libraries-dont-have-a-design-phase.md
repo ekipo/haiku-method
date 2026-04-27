@@ -36,7 +36,7 @@ A game is not an app that happens to be fun. It's an experience whose validation
 
 A hardware product is not a software product with a casing. It's a one-shot manufacturing commitment with regulatory constraints that touch every layer. Its lifecycle has to front-load compliance because retrofits cost 10x.
 
-Different lifecycles. Same orchestration machinery underneath — same FSM, same review gates, same quality enforcement, same persistence. But the stage sequence, the artifacts produced at each stage, the review agents, the review-gate shapes: those come from the artifact, not the tooling.
+Different lifecycles. Same orchestration machinery underneath — same workflow engine, same review gates, same quality enforcement, same persistence. But the stage sequence, the artifacts produced at each stage, the review agents, the review-gate shapes: those come from the artifact, not the tooling.
 
 ## Four studios, not one
 
@@ -53,7 +53,7 @@ The existing `software` directory stays put on disk. Intents with `studio: softw
 
 Here's the takeaway, if you're designing AI-assisted workflows of your own:
 
-**Don't force one lifecycle on every product shape.** Specialization in AI-assisted work happens at the lifecycle layer, not the role layer. The same orchestration machinery can drive every studio — same FSM, same gates, same quality enforcement. What changes is the *sequence* and the *artifacts* each stage produces, because those come from the thing you're building, not the tools you're using.
+**Don't force one lifecycle on every product shape.** Specialization in AI-assisted work happens at the lifecycle layer, not the role layer. The same orchestration machinery can drive every studio — same workflow engine, same gates, same quality enforcement. What changes is the *sequence* and the *artifacts* each stage produces, because those come from the thing you're building, not the tools you're using.
 
 When your template starts needing "skip this phase" instructions, the template is telling you something. Libraries don't have a design phase. Games don't have a development-that-ends-at-deploy phase. Hardware doesn't have an operations phase at the end. Build each lifecycle for what it actually is.
 

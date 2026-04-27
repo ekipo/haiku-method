@@ -2,7 +2,7 @@
 //
 // Instead of embedding the full prompt inline in the `haiku_run_next` response
 // (which forces the parent to copy N kb of text verbatim into the Agent tool
-// call, and leaks prompt specifics into parent context), the FSM writes the
+// call, and leaks prompt specifics into parent context), the workflow engine writes the
 // complete prompt to a tmpfile and the parent only tells the subagent to read
 // that file.
 //
@@ -118,13 +118,13 @@ export function writeSubagentPrompt(opts: {
 	atomicWrite(path, content)
 	maybePeriodicOwnSessionCleanup(dir)
 
-	const parentInstruction = `Read the file at \`${path}\` and execute its instructions exactly. The file is the complete, canonical subagent prompt authored by the FSM — do not paraphrase or skip any of it.`
+	const parentInstruction = `Read the file at \`${path}\` and execute its instructions exactly. The file is the complete, canonical subagent prompt authored by the workflow engine — do not paraphrase or skip any of it.`
 
 	return { path, parentInstruction }
 }
 
 /**
- * Result path for the FSM response tmpfile. advance_hat/reject_hat write
+ * Result path for the workflow response tmpfile. advance_hat/reject_hat write
  * their JSON response here; the subagent's final message is just a path line.
  * The parent reads this file instead of parsing prose.
  */

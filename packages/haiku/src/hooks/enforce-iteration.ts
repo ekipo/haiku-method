@@ -2,7 +2,7 @@
 //
 // Secondary guard for the "parent stops after subagent returns" bug.
 // When the parent agent tries to end but the active stage still has work,
-// emit a blocking JSON decision and push the agent back into the FSM.
+// emit a blocking JSON decision and push the agent back into the workflow.
 //
 // Behavior:
 //   - stop_hook_active retry -> no-op (prevents infinite loops)
@@ -18,14 +18,15 @@
 //   - Work remains           -> BLOCK and inject `haiku_run_next` instruction
 //
 // The injected reason tells the parent to call `haiku_run_next` and follow
-// the returned action — NOT to stop until the FSM advances past the stage.
+// the returned action — NOT to stop until the the workflow engine advances past the stage.
 //
 // Legitimate wait states MUST be detected first — otherwise a stage sitting
 // in `external_review` or `ask` gate would loop forever with the hook trying
-// to force a run_next call while the FSM correctly refuses to advance.
+// to force a run_next call while the workflow engine correctly refuses to advance.
 
 import { existsSync, readdirSync } from "node:fs"
 import { basename, join } from "node:path"
+import { defineHook } from "./define.js"
 import {
 	checkIntentCriteria,
 	findActiveIntent,
@@ -80,7 +81,7 @@ export async function enforceIteration(
 	const stageStatus = (stageState.status as string) ?? ""
 	if (stageStatus === "completed" || stageStatus === "blocked") return
 
-	// Legitimate wait states — FSM correctly refuses to advance and a blocking
+	// Legitimate wait states — workflow engine correctly refuses to advance and a blocking
 	// loop here would spin forever against the user. Detect and allow stop.
 	const phase = (stageState.phase as string) ?? ""
 	if (phase === "gate" || phase === "gate_review") return
@@ -141,12 +142,12 @@ export async function enforceIteration(
 	// Don't force a loop; let the agent stop so the user sees the blockers.
 	if (readyCount === 0 && inProgressCount === 0) return
 
-	// Work remains in the active stage. Block the stop and push back into FSM.
+	// Work remains in the active stage. Block the stop and push back into the workflow.
 	const reason = [
 		`H·AI·K·U: stage '${activeStage}' is not complete.`,
 		`Intent '${intentSlug}' has ${inProgressCount} unit(s) in progress and ${readyCount} ready.`,
 		`Call \`haiku_run_next { intent: "${intentSlug}" }\` now and follow the returned action.`,
-		"Drive forward on every subagent return — do NOT stop until the FSM advances past this stage.",
+		"Drive forward on every subagent return — do NOT stop until the the workflow engine advances past this stage.",
 	].join(" ")
 
 	emitBlock(reason)
@@ -157,7 +158,7 @@ export async function enforceIteration(
 	}
 
 	// Report the iteration miss to Sentry so we can track how often the
-	// primary drive-forward mechanism (FSM Result relay → run_next) fails
+	// primary drive-forward mechanism (Workflow Result relay → run_next) fails
 	// and the Stop hook has to rescue the loop. High miss counts signal
 	// the MCP-level pattern needs tightening. Best-effort; never blocks.
 	try {
@@ -179,3 +180,12 @@ export async function enforceIteration(
 		/* best-effort telemetry */
 	}
 }
+
+export default defineHook({
+	name: "enforce-iteration",
+	description:
+		"Stop hook: block parent-agent stop while the active stage still has work; re-inject haiku_run_next.",
+	async handle(input, ctx) {
+		await enforceIteration(input, ctx.pluginRoot)
+	},
+})

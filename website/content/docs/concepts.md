@@ -153,7 +153,7 @@ All four execution hats read relevant knowledge artifacts, so the fifth intent i
 
 ### Design Direction
 
-For greenfield or early-stage projects, inception includes a **Design Direction** phase where the team selects a visual archetype and tunes parameters. The available archetypes (Brutalist, Editorial, Dense/Utilitarian, Playful/Warm) and tunable parameters (density, border treatment, color temperature, typographic contrast) produce a **design blueprint** that:
+For greenfield or early-stage projects, inception includes a **Design Direction** phase where the team picks a rendered archetype as the final direction (or asks the agent to regenerate variants, optionally keeping a subset and steering the next batch with comments). The available archetypes (Brutalist, Editorial, Dense/Utilitarian, Playful/Warm) produce a **design blueprint** that:
 
 - Seeds the `design` knowledge artifact for the project
 - Guides wireframe generation during inception

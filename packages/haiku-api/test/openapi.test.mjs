@@ -76,7 +76,6 @@ describe("openapi.ts — buildOpenApi()", () => {
 			"PostReviewDecideResponse",
 			"PostQuestionAnswerRequest",
 			"PostDirectionSelectRequest",
-			"GetReviewCurrentResponse",
 			"GetSessionResponse",
 		]
 		const missing = expected.filter((k) => !(k in doc.components.schemas))

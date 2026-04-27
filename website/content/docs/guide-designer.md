@@ -278,7 +278,7 @@ Be explicit about what NOT to do:
 
 ## Design Direction (Greenfield Projects)
 
-When starting a new project (or one without established design patterns), elaboration includes a **Design Direction** step. A visual picker presents design archetypes and tunable parameters:
+When starting a new project (or one without established design patterns), elaboration includes a **Design Direction** step. A visual picker presents rendered design archetypes — pick one as the final direction or ask the AI to regenerate variants (keep the ones you like, comment to steer the next batch):
 
 **Archetypes:**
 - **Brutalist** - High contrast, raw borders, asymmetric grids, monospace type
@@ -286,10 +286,9 @@ When starting a new project (or one without established design patterns), elabor
 - **Dense/Utilitarian** - Compact layouts, data-rich, efficient use of space
 - **Playful/Warm** - Rounded elements, vibrant colors, friendly typography
 
-**Tunable Parameters:**
-- Density, border treatment, color temperature, typographic contrast, and more
+**Annotation:** the chosen archetype's preview can be annotated with the same pencil tool the review pages use — strokes are screen-captured and shipped back to the agent as image content blocks for pointed visual feedback.
 
-The selection produces a **design blueprint** that:
+The final selection produces a **design blueprint** that:
 - Seeds the project's design knowledge artifact (persists across all intents)
 - Guides wireframe generation during elaboration
 - Provides design context to all execution hats

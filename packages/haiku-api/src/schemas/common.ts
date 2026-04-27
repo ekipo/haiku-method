@@ -51,10 +51,11 @@ export type FeedbackStatus = z.infer<typeof FeedbackStatusSchema>
  *  agent — set this to steer the router: a question skips the fix
  *  loop entirely, an inline fix runs a single bolt of the stage's
  *  fix_hats against the one finding, a stage revisit re-loops the
- *  whole stage (today's default), an upstream rewind routes the
- *  finding to the agent's `upstream_finding_surfaced` path. */
+ *  whole stage (today's default). Cross-stage routing is handled by
+ *  relocating the FB via `haiku_feedback_move`, not by a resolution
+ *  hint. */
 export const FeedbackResolutionSchema = z
-	.enum(["question", "inline_fix", "stage_revisit", "upstream_rewind"])
+	.enum(["question", "inline_fix", "stage_revisit"])
 	.describe(
 		"Routing hint for the FSM's feedback resolver. null = caller has no preference, router defaults to stage_revisit.",
 	)
@@ -145,10 +146,65 @@ export const ReviewAnnotationsSchema = z
 	.describe("Annotations attached to a review decision")
 export type ReviewAnnotations = z.infer<typeof ReviewAnnotationsSchema>
 
-/** Question-session annotation bundle. */
+/** Question-session annotation bundle. `pins` carries visual-pin
+ *  annotations dropped on `image_paths` provided to the question; the
+ *  index in `pins[].image_index` selects which image the pin belongs to
+ *  (matches the question session's `image_urls[]` order). */
+export const QuestionPinSchema = z
+	.object({
+		x: z.number().describe("Pin x-coordinate (0..1 relative to image width)"),
+		y: z.number().describe("Pin y-coordinate (0..1 relative to image height)"),
+		text: z
+			.string()
+			.max(1_000)
+			.describe("Pin comment body (capped at 1,000 chars)"),
+		image_index: z
+			.number()
+			.int()
+			.nonnegative()
+			.describe(
+				"Index into the question's image_urls[] — which reference image this pin sits on",
+			),
+	})
+	.describe("Per-image pin annotation on a question session")
+export type QuestionPin = z.infer<typeof QuestionPinSchema>
+
+/** One reviewer annotation pass over a specific question reference
+ *  image. Mirrors the direction-page screenshot annotation: a comment
+ *  + a screenshot of the captured surface (image + composited
+ *  strokes). The MCP tool unpacks the data URL into an MCP image
+ *  content block on the response so Claude sees the actual surface. */
+export const QuestionScreenshotAnnotationSchema = z
+	.object({
+		comment: z
+			.string()
+			.max(10_000)
+			.describe("Reviewer's note on this annotation pass"),
+		screenshot_data_url: z
+			.string()
+			.max(1_500_000)
+			.describe(
+				"`data:image/png;base64,...` URL of the captured surface + composited strokes (1.5 MB cap)",
+			),
+		image_index: z
+			.number()
+			.int()
+			.nonnegative()
+			.describe(
+				"Index into the question's image_urls[] this annotation was captured on",
+			),
+	})
+	.describe("One reviewer annotation pass over a question reference image")
+export type QuestionScreenshotAnnotation = z.infer<
+	typeof QuestionScreenshotAnnotationSchema
+>
+
 export const QuestionAnnotationsSchema = z
 	.object({
 		comments: z.array(InlineCommentSchema).optional(),
+		pins: z.array(QuestionPinSchema).optional(),
+		/** Per-pass screenshot annotations from ArtifactAnnotator. */
+		screenshots: z.array(QuestionScreenshotAnnotationSchema).max(20).optional(),
 	})
 	.describe("Annotations attached to a question answer")
 export type QuestionAnnotations = z.infer<typeof QuestionAnnotationsSchema>
@@ -222,6 +278,11 @@ export const FEEDBACK_BODY_MAX_BYTES = 131_072 as const
  *  plus the text fields. Updates/deletes still use the tighter cap. */
 export const FEEDBACK_CREATE_MAX_BYTES = 8_388_608 as const
 
+/** Cap for question/direction submit routes carrying ArtifactAnnotator
+ *  screenshot bundles. Schemas allow up to 20 × 1.5 MB screenshot data URLs
+ *  plus text fields — round to 32 MiB to accommodate base64 overhead. */
+export const SESSION_ANSWER_MAX_BYTES = 33_554_432 as const
+
 /** Per-route body-size caps. Routes not listed default to DEFAULT_BODY_MAX_BYTES.
  *  The http.ts bridge enforces the default at the server level; the handler
  *  enforces the per-route cap before schema parse. */
@@ -229,4 +290,5 @@ export const ROUTE_BODY_LIMITS = {
 	default: DEFAULT_BODY_MAX_BYTES,
 	feedback: FEEDBACK_BODY_MAX_BYTES,
 	feedbackCreate: FEEDBACK_CREATE_MAX_BYTES,
+	sessionAnswer: SESSION_ANSWER_MAX_BYTES,
 } as const

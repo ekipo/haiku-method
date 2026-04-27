@@ -7,11 +7,9 @@
  */
 
 import { useMemo, useState } from "react"
-import {
-	FeedbackList,
-	type FeedbackStatus,
-	FeedbackSummaryBar,
-} from "../../components/feedback"
+import type { FeedbackStatus } from "../../atoms/feedback-tokens"
+import { FeedbackSummaryBar } from "../../molecules/FeedbackSummaryBar"
+import { FeedbackList } from "../../organisms/FeedbackList"
 import type { FeedbackItemData } from "../../types"
 
 export interface FeedbackPanelBodyProps {

@@ -20,17 +20,15 @@
 import { MarkdownViewer } from "@haiku/shared"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Header as HeaderLandmark, Main } from "../../a11y"
-import type { AnnotationPin } from "../../components/AnnotationCanvas"
-import {
-	FeedbackFloatingButton,
-	FeedbackSheet,
-} from "../../components/feedback"
-import type { InlineCommentEntry } from "../../components/InlineComments"
-import { StageProgressStrip } from "../../components/StageProgressStrip"
-import { SubmitSuccess } from "../../components/SubmitSuccess"
-import { ThemeToggle } from "../../components/ThemeToggle"
+import { ThemeToggle } from "../../atoms/ThemeToggle"
 import { FeedbackProvider } from "../../hooks/FeedbackContext"
 import { useFeedback } from "../../hooks/useFeedback"
+import { StageProgressStrip } from "../../molecules/StageProgressStrip"
+import { SubmitSuccess } from "../../molecules/SubmitSuccess"
+import type { AnnotationPin } from "../../organisms/AnnotationCanvas"
+import { FeedbackFloatingButton } from "../../organisms/FeedbackFloatingButton"
+import { FeedbackSheet } from "../../organisms/FeedbackSheet"
+import type { InlineCommentEntry } from "../../organisms/InlineComments"
 import type { ReviewAnnotations } from "../../types"
 import { ArtifactsPane } from "./ArtifactsPane"
 import { FeedbackPanelBody } from "./FeedbackPanelBody"
@@ -120,7 +118,7 @@ function gateBadgeCopy(mode: GateMode): { label: string; classes: string } {
 
 /**
  * Derive the "what phase/gate is active for this stage right now" label.
- * The FSM exposes `phase` on stage_state; we map it to the canonical
+ * The workflow engine exposes `phase` on stage_state; we map it to the canonical
  * mockup's gate-phase nouns: "Final Review Gate" when the stage is at
  * its close-out review, "In Review" for mid-review, etc.
  */

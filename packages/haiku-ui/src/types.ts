@@ -17,7 +17,6 @@
 export type { CriterionItem, MockupInfo } from "@haiku/shared"
 export type {
 	DesignArchetypeData,
-	DesignParameterData,
 	FeedbackItem as FeedbackItemData,
 	FeedbackListResponse,
 	KnowledgeFile,

@@ -182,36 +182,29 @@ export const DesignArchetypeDataSchema = z.object({
 	name: z.string(),
 	description: z.string(),
 	preview_html: z.string(),
-	default_parameters: z.record(z.number()),
 })
 export type DesignArchetypeData = z.infer<typeof DesignArchetypeDataSchema>
-
-export const DesignParameterDataSchema = z.object({
-	name: z.string(),
-	label: z.string(),
-	description: z.string(),
-	min: z.number(),
-	max: z.number(),
-	step: z.number(),
-	default: z.number(),
-	labels: z.object({ low: z.string(), high: z.string() }),
-})
-export type DesignParameterData = z.infer<typeof DesignParameterDataSchema>
 
 export const DirectionSelectionSchema = z
 	.object({
 		archetype: z.string(),
-		parameters: z.record(z.number()),
 		comments: z.string().optional(),
 		annotations: z
 			.object({
-				screenshot: z.string().optional(),
 				pins: z
 					.array(
 						z.object({
 							x: z.number(),
 							y: z.number(),
 							text: z.string(),
+						}),
+					)
+					.optional(),
+				screenshots: z
+					.array(
+						z.object({
+							comment: z.string(),
+							screenshot_data_url: z.string(),
 						}),
 					)
 					.optional(),
@@ -229,7 +222,6 @@ export const DirectionSessionPayloadSchema = z
 		title: z.string().optional(),
 		intent_slug: z.string().optional(),
 		archetypes: z.array(DesignArchetypeDataSchema).optional(),
-		parameters: z.array(DesignParameterDataSchema).optional(),
 		selection: DirectionSelectionSchema.nullable().optional(),
 	})
 	.describe(

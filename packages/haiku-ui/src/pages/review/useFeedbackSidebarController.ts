@@ -18,7 +18,7 @@
 
 import { useCallback } from "react"
 import { useAnnounce } from "../../a11y"
-import type { FeedbackStatus } from "../../components/feedback"
+import type { FeedbackStatus } from "../../atoms/feedback-tokens"
 import { useFeedbackContext } from "../../hooks/FeedbackContext"
 import type { FeedbackItemData } from "../../types"
 

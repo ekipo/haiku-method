@@ -2,6 +2,7 @@
 
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
+import { defineHook } from "./define.js"
 
 function findActiveIntent(): string | null {
 	const intentsDir = join(process.cwd(), ".haiku", "intents")
@@ -33,3 +34,12 @@ export async function workflowGuard(
 		`⚠️ WORKFLOW GUARD: Editing ${filePath} — ensure this is within an active hat's scope.\n`,
 	)
 }
+
+export default defineHook({
+	name: "workflow-guard",
+	description:
+		"PreToolUse Write/Edit: warn when editing outside the active hat's scope.",
+	async handle(input, ctx) {
+		await workflowGuard(input, ctx.pluginRoot)
+	},
+})

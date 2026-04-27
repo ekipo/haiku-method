@@ -14,9 +14,9 @@ The key words "MUST", "MUST NOT", "SHALL", "SHALL NOT", "REQUIRED" in this secti
 During elaboration, the agent **MUST** create **multiple low-fidelity wireframe variants** and present them for the user to choose a direction:
 
 1. The agent **MUST** generate 2-3 distinct design approaches as HTML wireframe snippets (different layouts, interaction patterns, or visual hierarchies)
-2. The agent **MUST** call `pick_design_direction` with the variants as `archetypes` — each with a `name`, `description`, `preview_html` (the rendered wireframe), and `default_parameters` (tunable values like spacing, column count, etc.)
-3. The user selects their preferred direction and adjusts parameters
-4. The agent **MUST** use the selected direction to create the final wireframes saved to `stages/design/artifacts/`
+2. The agent **MUST** call `pick_design_direction` with the variants as `archetypes` — each with a `name`, `description`, and `preview_html` (the rendered wireframe).
+3. The user either picks one as the final direction (optionally annotating it via the pencil tool — strokes are screen-captured and returned to the agent as image content blocks) **or** asks the agent to regenerate variants — keeping a subset of the current archetypes and steering the next batch via comments. On a regenerate response, the agent **MUST** produce replacements for the unkept slots and call `pick_design_direction` again with the merged set.
+4. The agent **MUST** use the final selected direction to create the wireframes saved to `stages/design/artifacts/`
 5. The agent **MUST NOT** produce ASCII art wireframes — all wireframes **MUST** be HTML or design provider files
 6. If a design provider MCP is available (Pencil, OpenPencil, Figma), the agent **SHOULD** use it instead of raw HTML
 

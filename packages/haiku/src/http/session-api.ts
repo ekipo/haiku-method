@@ -64,7 +64,6 @@ export function respondSessionApi(reply: FastifyReply, sessionId: string): void 
 		data.title = "Design Direction"
 		data.intent_slug = session.intent_slug
 		data.archetypes = session.archetypes
-		data.parameters = session.parameters
 		data.selection = session.selection
 	}
 	reply.send(data)

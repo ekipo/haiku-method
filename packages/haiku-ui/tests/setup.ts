@@ -57,4 +57,19 @@ if (typeof window !== "undefined") {
 			value: ResizeObserverStub,
 		})
 	}
+
+	// `tryCloseTab` schedules a `window.close()` 200ms after a successful
+	// submit. In a real browser this is a no-op for tabs the script
+	// didn't open, but in jsdom it tears down the document — when the
+	// test that triggered the submit ends in <200ms, the timer fires
+	// during a LATER test and nukes `document.body`. Stub it out so the
+	// helper is a true no-op under vitest. Real browser behavior is
+	// covered by the integration suite.
+	Object.defineProperty(window, "close", {
+		writable: true,
+		configurable: true,
+		value: () => {
+			/* no-op under jsdom */
+		},
+	})
 }

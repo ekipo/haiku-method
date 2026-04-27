@@ -154,10 +154,7 @@ export function registerSessionRoutes(instance: FastifyInstance): void {
 		if (!parsed.ok) return
 		updateDesignDirectionSession(req.params.sessionId, {
 			status: "answered",
-			selection: {
-				archetype: parsed.data.archetype,
-				parameters: parsed.data.parameters,
-			},
+			selection: parsed.data,
 		})
 		const payload: DirectionSelectResponse = { ok: true }
 		reply.send(payload)

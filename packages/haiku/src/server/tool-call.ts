@@ -29,11 +29,7 @@ import {
 } from "../index.js"
 import { handleOrchestratorTool } from "../orchestrator.js"
 import { isSentryConfigured, reportFeedback } from "../sentry.js"
-import type {
-	DesignArchetypeData,
-	DesignParameterData,
-	QuestionDef,
-} from "../sessions.js"
+import type { DesignArchetypeData, QuestionDef } from "../sessions.js"
 import {
 	clearHeartbeat,
 	createDesignDirectionSession,
@@ -102,25 +98,6 @@ const DesignArchetypeSchema = z.object({
 	name: z.string().describe("Archetype name"),
 	description: z.string().describe("Brief description of this archetype"),
 	preview_html: z.string().describe("HTML snippet to render as a preview"),
-	default_parameters: z
-		.record(z.number())
-		.describe("Default parameter values for this archetype"),
-})
-
-const DesignParameterSchema = z.object({
-	name: z.string().describe("Parameter key name"),
-	label: z.string().describe("Human-readable label"),
-	description: z
-		.string()
-		.describe("Description of what this parameter controls"),
-	min: z.number().describe("Minimum value"),
-	max: z.number().describe("Maximum value"),
-	step: z.number().describe("Step increment"),
-	default: z.number().describe("Default value"),
-	labels: z.object({
-		low: z.string().describe("Label for the low end"),
-		high: z.string().describe("Label for the high end"),
-	}),
 })
 
 const PickDesignDirectionInput = z.object({
@@ -134,16 +111,6 @@ const PickDesignDirectionInput = z.object({
 		.optional()
 		.describe(
 			"Path to a JSON file containing the archetypes array (alternative to inline archetypes)",
-		),
-	parameters: z
-		.array(DesignParameterSchema)
-		.optional()
-		.describe("Inline array of tunable parameters"),
-	parameters_file: z
-		.string()
-		.optional()
-		.describe(
-			"Path to a JSON file containing the parameters array (alternative to inline parameters)",
 		),
 	title: z
 		.string()
@@ -659,29 +626,10 @@ export async function handleToolCall(
 			}
 		}
 
-		// Resolve parameters: inline or from file
-		let parameters: DesignParameterData[]
-		if (input.parameters) {
-			parameters = input.parameters
-		} else if (input.parameters_file) {
-			const raw = await readFile(resolve(input.parameters_file), "utf-8")
-			parameters = z.array(DesignParameterSchema).parse(JSON.parse(raw))
-		} else {
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: "Error: provide either parameters or parameters_file",
-					},
-				],
-			}
-		}
-
 		// Create design direction session
 		const session = createDesignDirectionSession({
 			intent_slug: input.intent_slug,
 			archetypes,
-			parameters,
 		})
 		bindSessionCancellation(session.session_id, signal)
 
@@ -732,8 +680,28 @@ export async function handleToolCall(
 			updatedDirectionSession.status === "answered" &&
 			updatedDirectionSession.selection
 		) {
-			// Persist design_direction_selected to stage state so the orchestrator
-			// knows to advance — the agent doesn't need to relay this flag.
+			const sel = updatedDirectionSession.selection
+
+			// Regenerate path — user wants more / different variants. Don't
+			// flip the stage flag; the agent should produce replacements for
+			// the unkept slots and call pick_design_direction again.
+			if (sel.mode === "regenerate") {
+				const parts: string[] = [
+					sel.keep.length > 0
+						? `The user wants more variants. They'd like to keep: **${sel.keep.join("**, **")}**.`
+						: `The user wants more variants. None of the current archetypes are keepers.`,
+					`Generate ${input.archetypes ? Math.max(0, input.archetypes.length - sel.keep.length) : "fresh"} replacement archetype(s) for the dropped slot(s) and call \`pick_design_direction\` again with the merged set.`,
+				]
+				if (sel.comments) {
+					parts.push(`\nSteering notes from the user: ${sel.comments}`)
+				}
+				return {
+					content: [{ type: "text" as const, text: parts.join("\n") }],
+				}
+			}
+
+			// Select path — final selection. Persist design_direction_selected
+			// to stage state so the orchestrator knows to advance.
 			try {
 				const root = findHaikuRoot()
 				const intentFile = join(root, "intents", input.intent_slug, "intent.md")
@@ -757,14 +725,9 @@ export async function handleToolCall(
 					const ssData = readJson(ssPath)
 					ssData.design_direction_selected = true
 					ssData.design_direction = {
-						archetype: updatedDirectionSession.selection.archetype,
-						parameters: updatedDirectionSession.selection.parameters,
-						...(updatedDirectionSession.selection.comments
-							? { comments: updatedDirectionSession.selection.comments }
-							: {}),
-						...(updatedDirectionSession.selection.annotations
-							? { annotations: updatedDirectionSession.selection.annotations }
-							: {}),
+						archetype: sel.archetype,
+						...(sel.comments ? { comments: sel.comments } : {}),
+						...(sel.annotations ? { annotations: sel.annotations } : {}),
 					}
 					writeJson(ssPath, ssData)
 				}
@@ -773,7 +736,6 @@ export async function handleToolCall(
 			}
 
 			// Return conversational context only — no action directives
-			const sel = updatedDirectionSession.selection
 			const parts: string[] = [
 				`The user selected the **${sel.archetype}** direction.`,
 			]

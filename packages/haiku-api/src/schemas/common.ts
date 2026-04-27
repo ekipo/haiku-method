@@ -145,10 +145,33 @@ export const ReviewAnnotationsSchema = z
 	.describe("Annotations attached to a review decision")
 export type ReviewAnnotations = z.infer<typeof ReviewAnnotationsSchema>
 
-/** Question-session annotation bundle. */
+/** Question-session annotation bundle. `pins` carries visual-pin
+ *  annotations dropped on `image_paths` provided to the question; the
+ *  index in `pins[].image_index` selects which image the pin belongs to
+ *  (matches the question session's `image_urls[]` order). */
+export const QuestionPinSchema = z
+	.object({
+		x: z.number().describe("Pin x-coordinate (0..1 relative to image width)"),
+		y: z.number().describe("Pin y-coordinate (0..1 relative to image height)"),
+		text: z
+			.string()
+			.max(1_000)
+			.describe("Pin comment body (capped at 1,000 chars)"),
+		image_index: z
+			.number()
+			.int()
+			.nonnegative()
+			.describe(
+				"Index into the question's image_urls[] — which reference image this pin sits on",
+			),
+	})
+	.describe("Per-image pin annotation on a question session")
+export type QuestionPin = z.infer<typeof QuestionPinSchema>
+
 export const QuestionAnnotationsSchema = z
 	.object({
 		comments: z.array(InlineCommentSchema).optional(),
+		pins: z.array(QuestionPinSchema).optional(),
 	})
 	.describe("Annotations attached to a question answer")
 export type QuestionAnnotations = z.infer<typeof QuestionAnnotationsSchema>

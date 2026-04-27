@@ -21,13 +21,19 @@
  */
 
 import { MarkdownViewer } from "@haiku/shared"
-import { paths, type QuestionDef, type QuestionSessionPayload } from "haiku-api"
+import {
+	paths,
+	type QuestionAnnotations,
+	type QuestionDef,
+	type QuestionPin,
+	type QuestionSessionPayload,
+} from "haiku-api"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { focusRingClass, touchTargetClass, useAnnounce } from "../../a11y"
 import { useApiClient } from "../../api/context"
 import { Card, SectionHeading } from "../../atoms/Card"
-import { SubmitSuccess } from "../../molecules/SubmitSuccess"
 import { tryCloseTab } from "../../lib/tryCloseTab"
+import { SubmitSuccess } from "../../molecules/SubmitSuccess"
 
 interface Props {
 	session: QuestionSessionPayload
@@ -64,6 +70,7 @@ export function QuestionPage({
 			freeText: "",
 		})),
 	)
+	const [pins, setPins] = useState<QuestionPin[]>([])
 	const [submitting, setSubmitting] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | null>(null)
 	const [done, setDone] = useState(false)
@@ -118,13 +125,22 @@ export function QuestionPage({
 			}
 		})
 
+		const annotations: QuestionAnnotations | undefined =
+			pins.length > 0 ? { pins } : undefined
+
 		try {
-			await client.submitAnswer(sessionId, { answers: requestAnswers })
+			await client.submitAnswer(sessionId, {
+				answers: requestAnswers,
+				...(annotations ? { annotations } : {}),
+			})
 			announce("polite", "Answer submitted")
 			setDone(true)
 			tryCloseTab({
 				url: paths.questionAnswer(sessionId),
-				body: { answers: requestAnswers },
+				body: {
+					answers: requestAnswers,
+					...(annotations ? { annotations } : {}),
+				},
 			})
 		} catch (err) {
 			const message =
@@ -149,13 +165,25 @@ export function QuestionPage({
 			)}
 
 			{imageUrls.length >= 2 ? (
-				<QuestionCarousel images={imageUrls} />
+				<QuestionCarousel
+					images={imageUrls}
+					pins={pins}
+					onPinsChange={setPins}
+					disabled={submitting}
+				/>
 			) : imageUrls.length === 1 ? (
 				<Card>
-					<img
-						src={imageUrls[0]}
-						alt="Question reference"
-						className="w-full rounded-lg border border-stone-200 dark:border-stone-700"
+					<SectionHeading>Reference image</SectionHeading>
+					<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
+						Click the image to drop a pin and add a comment for pointed
+						feedback.
+					</p>
+					<ImagePinSurface
+						url={imageUrls[0]}
+						imageIndex={0}
+						pins={pins}
+						onPinsChange={setPins}
+						disabled={submitting}
 					/>
 				</Card>
 			) : null}
@@ -209,11 +237,19 @@ export function QuestionPage({
 
 // ── Carousel ────────────────────────────────────────────────────────────────
 
+interface QuestionCarouselProps {
+	images: string[]
+	pins: QuestionPin[]
+	onPinsChange: (pins: QuestionPin[]) => void
+	disabled: boolean
+}
+
 function QuestionCarousel({
 	images,
-}: {
-	images: string[]
-}): React.ReactElement {
+	pins,
+	onPinsChange,
+	disabled,
+}: QuestionCarouselProps): React.ReactElement {
 	const [active, setActive] = useState(0)
 	const regionRef = useRef<HTMLDivElement | null>(null)
 	const announce = useAnnounce()
@@ -254,6 +290,10 @@ function QuestionCarousel({
 	return (
 		<Card>
 			<SectionHeading>Reference images</SectionHeading>
+			<p className="text-sm text-stone-600 dark:text-stone-300 mb-3">
+				Click any image to drop a pin and add a comment for pointed
+				feedback.
+			</p>
 			<CarouselRegion
 				regionRef={regionRef}
 				onKeyDown={handleKeyDown}
@@ -261,6 +301,9 @@ function QuestionCarousel({
 				active={active}
 				onPrev={() => go(-1)}
 				onNext={() => go(1)}
+				pins={pins}
+				onPinsChange={onPinsChange}
+				disabled={disabled}
 			/>
 		</Card>
 	)
@@ -275,6 +318,9 @@ interface CarouselRegionProps {
 	active: number
 	onPrev: () => void
 	onNext: () => void
+	pins: QuestionPin[]
+	onPinsChange: (pins: QuestionPin[]) => void
+	disabled: boolean
 }
 
 function CarouselRegion({
@@ -284,6 +330,9 @@ function CarouselRegion({
 	active,
 	onPrev,
 	onNext,
+	pins,
+	onPinsChange,
+	disabled,
 }: CarouselRegionProps): React.ReactElement {
 	// Per FB-73, Prev/Next controls live INSIDE the role="region" container
 	// so a keyboard user who reaches the region also reaches the controls,
@@ -306,6 +355,9 @@ function CarouselRegion({
 						index={i}
 						total={images.length}
 						isActive={i === active}
+						pins={pins}
+						onPinsChange={onPinsChange}
+						disabled={disabled}
 					/>
 				))}
 			</div>
@@ -340,6 +392,9 @@ interface CarouselSlideProps {
 	index: number
 	total: number
 	isActive: boolean
+	pins: QuestionPin[]
+	onPinsChange: (pins: QuestionPin[]) => void
+	disabled: boolean
 }
 
 function CarouselSlide({
@@ -347,6 +402,9 @@ function CarouselSlide({
 	index,
 	total,
 	isActive,
+	pins,
+	onPinsChange,
+	disabled,
 }: CarouselSlideProps): React.ReactElement {
 	// Inactive slides are hidden via display:none (`.hidden`) AND
 	// `aria-hidden="true"` — some SRs buffer display:none content differently,
@@ -359,12 +417,168 @@ function CarouselSlide({
 			aria-hidden={isActive ? undefined : "true"}
 			className={isActive ? "block" : "hidden"}
 		>
-			<img
-				src={url}
-				alt={`Reference ${index + 1} of ${total}`}
-				className="w-full rounded-lg border border-stone-200 dark:border-stone-700"
+			<ImagePinSurface
+				url={url}
+				imageIndex={index}
+				pins={pins}
+				onPinsChange={onPinsChange}
+				disabled={disabled}
+				altText={`Reference ${index + 1} of ${total}`}
 			/>
 		</div>
+	)
+}
+
+// ── Image pin surface — visual annotation overlay on a single image ────────
+
+interface ImagePinSurfaceProps {
+	url: string
+	imageIndex: number
+	pins: QuestionPin[]
+	onPinsChange: (pins: QuestionPin[]) => void
+	disabled: boolean
+	altText?: string
+}
+
+function ImagePinSurface({
+	url,
+	imageIndex,
+	pins,
+	onPinsChange,
+	disabled,
+	altText,
+}: ImagePinSurfaceProps): React.ReactElement {
+	const wrapperRef = useRef<HTMLDivElement | null>(null)
+	const [pendingPin, setPendingPin] = useState<{ x: number; y: number } | null>(
+		null,
+	)
+	const [pendingText, setPendingText] = useState("")
+
+	function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+		if (disabled) return
+		const wrapper = wrapperRef.current
+		if (!wrapper) return
+		const rect = wrapper.getBoundingClientRect()
+		const x = ((e.clientX - rect.left) / rect.width) * 100
+		const y = ((e.clientY - rect.top) / rect.height) * 100
+		setPendingPin({ x, y })
+		setPendingText("")
+	}
+
+	function commitPin() {
+		if (!pendingPin) return
+		const text = pendingText.trim()
+		if (text.length === 0) {
+			setPendingPin(null)
+			return
+		}
+		onPinsChange([
+			...pins,
+			{
+				x: pendingPin.x,
+				y: pendingPin.y,
+				text,
+				image_index: imageIndex,
+			},
+		])
+		setPendingPin(null)
+		setPendingText("")
+	}
+
+	function cancelPendingPin() {
+		setPendingPin(null)
+		setPendingText("")
+	}
+
+	function removePinAt(globalIdx: number) {
+		onPinsChange(pins.filter((_, i) => i !== globalIdx))
+	}
+
+	const pinsForThisImage = pins
+		.map((pin, i) => ({ pin, i }))
+		.filter(({ pin }) => pin.image_index === imageIndex)
+
+	return (
+		<>
+			<div
+				ref={wrapperRef}
+				className="relative rounded-lg overflow-hidden border border-stone-200 dark:border-stone-700"
+				onClick={handleClick}
+			>
+				<img
+					src={url}
+					alt={altText ?? "Question reference"}
+					className="w-full block pointer-events-none"
+				/>
+				{pinsForThisImage.map(({ pin, i }, displayIdx) => (
+					<button
+						key={`${pin.x}-${pin.y}-${i}`}
+						type="button"
+						aria-label={`Pin ${displayIdx + 1}: ${pin.text}`}
+						title={pin.text}
+						onClick={(e) => {
+							e.stopPropagation()
+							removePinAt(i)
+						}}
+						style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+						className={`absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-teal-700 text-white text-xs font-bold flex items-center justify-center shadow-md hover:bg-red-600 ${focusRingClass}`}
+					>
+						{displayIdx + 1}
+					</button>
+				))}
+				{pendingPin && (
+					<div
+						style={{ left: `${pendingPin.x}%`, top: `${pendingPin.y}%` }}
+						className="absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center shadow-md ring-2 ring-amber-300 animate-pulse"
+					>
+						?
+					</div>
+				)}
+			</div>
+			{pendingPin && (
+				<div className="mt-3 p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800">
+					<label
+						htmlFor={`pending-pin-${imageIndex}`}
+						className="block text-sm font-medium text-stone-900 dark:text-stone-100 mb-2"
+					>
+						What about this spot?
+					</label>
+					<textarea
+						id={`pending-pin-${imageIndex}`}
+						className={`w-full p-2 border border-stone-300 dark:border-stone-600 rounded-md bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 resize-y text-sm ${focusRingClass}`}
+						rows={2}
+						value={pendingText}
+						onChange={(e) => setPendingText(e.target.value)}
+						placeholder="Describe what catches your eye here..."
+						autoFocus
+					/>
+					<div className="mt-2 flex gap-2">
+						<button
+							type="button"
+							onClick={commitPin}
+							disabled={pendingText.trim().length === 0}
+							className={`px-3 py-1 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded ${focusRingClass} disabled:bg-stone-300 disabled:text-stone-500 disabled:cursor-not-allowed`}
+						>
+							Add pin
+						</button>
+						<button
+							type="button"
+							onClick={cancelPendingPin}
+							className={`px-3 py-1 text-sm border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 rounded hover:bg-stone-100 dark:hover:bg-stone-700 ${focusRingClass}`}
+						>
+							Cancel
+						</button>
+					</div>
+				</div>
+			)}
+			{pinsForThisImage.length > 0 && (
+				<p className="mt-2 text-xs text-stone-600 dark:text-stone-300">
+					{pinsForThisImage.length} pin
+					{pinsForThisImage.length === 1 ? "" : "s"} on this image — click a
+					pin to remove it.
+				</p>
+			)}
+		</>
 	)
 }
 

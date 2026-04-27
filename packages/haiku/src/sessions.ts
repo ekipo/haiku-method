@@ -208,6 +208,7 @@ export interface QuestionAnswer {
 
 export interface QuestionAnnotations {
 	comments?: Array<{ selectedText: string; comment: string; paragraph: number }>
+	pins?: Array<{ x: number; y: number; text: string; image_index: number }>
 }
 
 export interface QuestionSession {
@@ -228,36 +229,33 @@ export interface DesignArchetypeData {
 	name: string
 	description: string
 	preview_html: string
-	default_parameters: Record<string, number>
 }
 
-export interface DesignParameterData {
-	name: string
-	label: string
-	description: string
-	min: number
-	max: number
-	step: number
-	default: number
-	labels: { low: string; high: string }
-}
+/** A user's response to a design-direction picker. Either a final
+ *  selection (`mode: "select"`) or a regenerate request asking the
+ *  agent for more variants (`mode: "regenerate"`). */
+export type DirectionSelection =
+	| {
+			mode: "select"
+			archetype: string
+			comments?: string
+			annotations?: {
+				pins?: Array<{ x: number; y: number; text: string }>
+			}
+	  }
+	| {
+			mode: "regenerate"
+			keep: string[]
+			comments?: string
+	  }
 
 export interface DesignDirectionSession {
 	session_type: "design_direction"
 	session_id: string
 	intent_slug: string
 	archetypes: DesignArchetypeData[]
-	parameters: DesignParameterData[]
 	status: "pending" | "answered"
-	selection: {
-		archetype: string
-		parameters: Record<string, number>
-		comments?: string
-		annotations?: {
-			screenshot?: string
-			pins?: Array<{ x: number; y: number; text: string }>
-		}
-	} | null
+	selection: DirectionSelection | null
 }
 
 const sessions = new Map<

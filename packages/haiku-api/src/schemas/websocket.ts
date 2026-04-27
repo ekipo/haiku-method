@@ -52,15 +52,23 @@ export const WsAnswerMessageSchema = z
 	.describe("Question answer frame (session_type=question)")
 export type WsAnswerMessage = z.infer<typeof WsAnswerMessageSchema>
 
+/** Design-direction frame. The `mode` field steers the workflow:
+ *   - `select`     — final selection: `archetype` carries the chosen name; pins/comments optional.
+ *   - `regenerate` — ask the agent for more variants; `keep[]` lists archetypes to preserve.
+ *
+ *  Both fields are typed optional at the schema level so this can sit
+ *  inside the outer `z.discriminatedUnion("type", …)` (which requires a
+ *  plain ZodObject — `.refine()` would wrap it in ZodEffects). The
+ *  handler narrows on `mode` and asserts the right fields are present. */
 export const WsSelectMessageSchema = z
 	.object({
 		type: z.literal("select"),
-		archetype: z.string().max(64),
-		parameters: z.record(z.number()),
+		mode: z.enum(["select", "regenerate"]),
+		archetype: z.string().max(64).optional(),
+		keep: z.array(z.string().max(64)).max(50).optional(),
 		comments: z.string().max(10_000).optional(),
 		annotations: z
 			.object({
-				screenshot: z.string().max(65_536).optional(),
 				pins: z
 					.array(
 						z.object({
@@ -73,7 +81,9 @@ export const WsSelectMessageSchema = z
 			})
 			.optional(),
 	})
-	.describe("Design-direction select frame (session_type=design_direction)")
+	.describe(
+		"Design-direction frame (session_type=design_direction) — mode='select' finalizes a choice, mode='regenerate' asks the agent for more variants",
+	)
 export type WsSelectMessage = z.infer<typeof WsSelectMessageSchema>
 
 /** Shared frame-size refinement. Computed on the parsed value; since every WS

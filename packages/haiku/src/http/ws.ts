@@ -217,20 +217,24 @@ export function handleWebSocketMessage(sessionId: string, raw: string): void {
 			} satisfies WsServerMessage)
 			return
 		}
-		const annotations = msg.annotations as
-			| {
-					screenshot?: string
-					pins?: Array<{ x: number; y: number; text: string }>
-			  }
-			| undefined
+		const selection =
+			msg.mode === "regenerate"
+				? {
+						mode: "regenerate" as const,
+						keep: msg.keep ?? [],
+						...(msg.comments ? { comments: msg.comments } : {}),
+					}
+				: {
+						mode: "select" as const,
+						// The schema's refinement guarantees archetype is a
+						// non-empty string when mode === "select".
+						archetype: msg.archetype as string,
+						...(msg.comments ? { comments: msg.comments } : {}),
+						...(msg.annotations ? { annotations: msg.annotations } : {}),
+					}
 		updateDesignDirectionSession(sessionId, {
 			status: "answered",
-			selection: {
-				archetype: msg.archetype,
-				parameters: msg.parameters,
-				comments: msg.comments,
-				annotations,
-			},
+			selection,
 		})
 		sendToWebSocket(sessionId, {
 			type: "ack",

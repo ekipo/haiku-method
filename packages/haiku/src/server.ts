@@ -129,9 +129,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 			name: "pick_design_direction",
 			description:
 				"Open a browser-based visual picker for choosing a design direction. " +
-				"Presents archetype cards with preview HTML and tunable parameter sliders. " +
-				"The user's selection is pushed back as a channel event. " +
-				"Archetypes and parameters can be provided inline or as paths to JSON files on disk.",
+				"Presents archetype cards with preview HTML — the user picks one, marks " +
+				"some to keep and asks for new variants for the rest, or rejects them all " +
+				"and asks for a fresh batch. Visual annotations (pins) can be attached to " +
+				"the selected direction for pointed feedback. " +
+				"Archetypes can be provided inline or as a path to a JSON file on disk.",
 			inputSchema: {
 				type: "object" as const,
 				properties: {
@@ -153,18 +155,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 									type: "string",
 									description: "HTML preview snippet",
 								},
-								default_parameters: {
-									type: "object",
-									additionalProperties: { type: "number" },
-									description: "Default parameter values",
-								},
 							},
-							required: [
-								"name",
-								"description",
-								"preview_html",
-								"default_parameters",
-							],
+							required: ["name", "description", "preview_html"],
 						},
 						description: "Inline design archetypes to choose from",
 					},
@@ -172,48 +164,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 						type: "string",
 						description:
 							"Path to a JSON file containing the archetypes array (alternative to inline archetypes)",
-					},
-					parameters: {
-						type: "array",
-						items: {
-							type: "object",
-							properties: {
-								name: { type: "string", description: "Parameter key" },
-								label: { type: "string", description: "Display label" },
-								description: {
-									type: "string",
-									description: "What this controls",
-								},
-								min: { type: "number" },
-								max: { type: "number" },
-								step: { type: "number" },
-								default: { type: "number" },
-								labels: {
-									type: "object",
-									properties: {
-										low: { type: "string" },
-										high: { type: "string" },
-									},
-									required: ["low", "high"],
-								},
-							},
-							required: [
-								"name",
-								"label",
-								"description",
-								"min",
-								"max",
-								"step",
-								"default",
-								"labels",
-							],
-						},
-						description: "Inline tunable parameters",
-					},
-					parameters_file: {
-						type: "string",
-						description:
-							"Path to a JSON file containing the parameters array (alternative to inline parameters)",
 					},
 					title: {
 						type: "string",

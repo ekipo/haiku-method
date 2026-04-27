@@ -31,7 +31,6 @@
 		"haiku-api": "*",
 		"localtunnel": "^2.0.2",
 		"marked": "^17.0.5",
-		"xstate": "^5.30.0",
 		"zod": "^3.23.0"
 	},
 	"devDependencies": {

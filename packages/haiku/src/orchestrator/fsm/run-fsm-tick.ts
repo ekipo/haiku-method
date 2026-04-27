@@ -1,24 +1,20 @@
-// orchestrator/fsm/run-fsm-tick.ts — Integration glue: take an
-// intent slug, derive its FSM state from disk, run a machine tick,
-// return the resolved state path + context updates.
+// orchestrator/fsm/run-fsm-tick.ts — Workflow-engine tick. Read disk
+// → derive current state → run pre-tick consistency repair → dispatch
+// the per-state handler → return the action.
 //
-// The action emission flows through the per-state registry in
-// native-emit/. Each registered state has its own file owning its
-// emission (and any side effects). When an emitter returns null —
-// either the state isn't registered or the registered emitter
-// deferred a sub-case — the wrapper falls back to runNext until that
-// sub-case ports.
+// This is the runtime entry point for the H·AI·K·U workflow engine.
+// State of record is on disk (intent.md frontmatter + per-stage
+// state.json files); each tick is a fresh derive-from-disk →
+// dispatch → emit cycle. There is no in-memory state machine, no
+// long-lived actor — the durability + replayability comes from the
+// fact that every tick reads its own truth.
 //
-// As more states port to native-emit/, more entries appear in
-// XSTATE_NATIVE_STATES, and the corresponding runNext branches get
-// deleted. The registry IS the source of truth for migration
-// progress; this file does not maintain a parallel switch.
+// Per-state handlers live in `native-emit/{state}.ts`. The registry
+// in `native-emit/index.ts` maps state names to handlers. Adding a
+// new state name = adding the entry to the registry + the file.
 
-import { createActor, type AnyActorRef } from "xstate"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
-import { buildStudioConfig } from "./build-studio-config.js"
-import { createMachineForStudio } from "./create-machine-for-studio.js"
 import {
 	type DerivedState,
 	deriveCurrentState,
@@ -30,42 +26,43 @@ import {
 import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 
-/** Re-export of the per-state registry's key set for callers that
- *  want to test "is this state migrated?" without importing the
- *  registry directly. Kept for back-compat with tests. */
+/** Set of state names with a registered handler. Currently every
+ *  derive-state output has one. Kept as a public re-export for
+ *  back-compat with tests that probed registry membership during the
+ *  migration. */
 export const XSTATE_NATIVE_STATES: ReadonlySet<StateName> = REGISTRY_KEYS
 
-/** Re-export of the registry-backed emitter. Kept for back-compat
- *  with tests + external callers that still import this name. */
+/** The dispatch function. Look up a state's handler in the registry
+ *  and run it. Re-exported so callers can invoke a handler directly
+ *  (mostly used by tests verifying handler-level behavior). */
 export const emitNativeAction = registryEmit
 
-/** Result of a single tick. The `action` field is the
- *  OrchestratorAction the agent should follow when driver ===
- *  "xstate"; runNext-driven results carry null and the caller falls
- *  back to runNext(slug). */
+/** Result of a single workflow tick. The `action` field is the
+ *  OrchestratorAction the agent should follow. `driver` is always
+ *  "xstate" today (back-compat field name; the runtime is our own
+ *  dispatch loop, not xstate — see CLAUDE.md notes on the rip). */
 export interface FsmTickResult {
 	readonly state: StateName
 	readonly context: DerivedState["context"]
 	readonly driver: "xstate" | "runNext"
 	readonly action: OrchestratorAction | null
-	/** xstate snapshot when driver === "xstate", null otherwise. */
-	readonly snapshot: ReturnType<AnyActorRef["getSnapshot"]> | null
+	readonly snapshot: null
 }
 
-/** Run one FSM tick for an intent. Reads disk, derives state, and —
- *  if the state has a per-state emitter registered — runs the
- *  emitter to produce the OrchestratorAction. Spins up the studio
- *  machine briefly to capture a snapshot for telemetry. */
+/** Run one workflow tick for an intent. Steps:
+ *
+ *   1. Pre-tick consistency repair (may mutate disk, may short-circuit
+ *      with a safe_intent_repair action).
+ *   2. Derive the current state from disk.
+ *   3. Tamper detection (refuse to advance on integrity-violated
+ *      intents).
+ *   4. Look up the handler for the derived state and run it.
+ *
+ *  Returns null only when the intent doesn't exist on disk. */
 export function runFsmTick(
 	slug: string,
 	root?: string,
 ): FsmTickResult | null {
-	// Cross-cutting consistency pre-pass: synthesize completion records
-	// for empty prior stages, regress phase when units lack inputs,
-	// reset active_stage backwards if the active stage is empty. May
-	// short-circuit the tick with a safe_intent_repair action; otherwise
-	// mutations land on disk and derive-state sees the consistent
-	// intent on the read below.
 	const repair = preTickConsistency(slug, root)
 
 	const derived = deriveCurrentState(slug, root)
@@ -81,11 +78,6 @@ export function runFsmTick(
 		}
 	}
 
-	// Tamper detection: verify FSM state wasn't modified via direct file
-	// writes. Only active for hookless harnesses (Claude Code/Kiro have
-	// a guard hook). Must run BEFORE native-emit dispatches so the
-	// integrity contract holds for every path, not just the runNext
-	// fallback.
 	const tamperError = verifyIntentState(slug)
 	if (tamperError) {
 		return {
@@ -97,48 +89,13 @@ export function runFsmTick(
 		}
 	}
 
-	if (!XSTATE_NATIVE_STATES.has(derived.state)) {
-		return {
-			state: derived.state,
-			context: derived.context,
-			driver: "runNext",
-			action: null,
-			snapshot: null,
-		}
-	}
-
 	const action = emitNativeAction(derived.state, derived.context, root)
-
-	const studio = derived.context.studio
-	let snapshot: ReturnType<AnyActorRef["getSnapshot"]> | null = null
-	if (studio) {
-		const studioConfig = buildStudioConfig(studio)
-		if (studioConfig) {
-			const studioMachine = createMachineForStudio(studioConfig)
-			const actor = createActor(studioMachine.machine, {
-				input: derived.context as never,
-			})
-			actor.start()
-			snapshot = actor.getSnapshot()
-			actor.stop()
-		}
-	}
-
-	if (!action) {
-		return {
-			state: derived.state,
-			context: derived.context,
-			driver: "runNext",
-			action: null,
-			snapshot,
-		}
-	}
 
 	return {
 		state: derived.state,
 		context: derived.context,
-		driver: "xstate",
+		driver: action ? "xstate" : "runNext",
 		action,
-		snapshot,
+		snapshot: null,
 	}
 }

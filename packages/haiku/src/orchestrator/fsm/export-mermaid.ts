@@ -1,13 +1,13 @@
-// orchestrator/fsm/export-mermaid.ts — Render a StudioMachine
-// config as a Mermaid stateDiagram-v2 source string.
+// orchestrator/fsm/export-mermaid.ts — Render a StudioConfig as a
+// Mermaid stateDiagram-v2 source string.
 //
 // Why Mermaid? Two reasons:
 // 1. Static export — drops straight into markdown / the website
 //    docs / prototype-stage-flow.html without any runtime JS.
 // 2. The architecture-prototype-sync rule (in CLAUDE.md) calls out
-//    that the prototype is hand-maintained today. The xstate
-//    config + this exporter together close that sync gap: every
-//    studio change regenerates its diagram automatically.
+//    that the prototype is hand-maintained today. The StudioConfig
+//    + this exporter together close that sync gap: every studio
+//    change regenerates its diagram automatically.
 //
 // What's preserved in the diagram:
 // - Top-level state nodes (one per stage + setup + terminals)
@@ -21,10 +21,10 @@
 // - Final-state markers ([*] arrows + the `final` keyword)
 //
 // What's elided to keep the diagram readable:
-// - Action names on transitions (would clutter — the per-action
-//   files document them)
+// - Action names on transitions (would clutter — the per-state
+//   handler files in native-emit/ document them)
 // - Meta fields (gate type, hat lists — visible via the per-state
-//   comments in state-builders.ts)
+//   handler comments)
 
 import type { StudioConfig } from "./studio-config.js"
 

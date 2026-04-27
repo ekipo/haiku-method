@@ -98,8 +98,7 @@ test("complete state routes to xstate driver + emits action", () => {
 	assert.ok(result)
 	assert.strictEqual(result.state, "complete")
 	assert.strictEqual(result.driver, "xstate")
-	assert.ok(result.snapshot, "xstate path should produce a snapshot")
-	assert.ok(result.action, "xstate path should emit an action")
+	assert.ok(result.action, "should emit an action")
 	assert.strictEqual(result.action.action, "complete")
 	assert.strictEqual(
 		result.action.message,
@@ -179,20 +178,19 @@ test("registry does NOT contain terminal-emit-only states", () => {
 	}
 })
 
-console.log("\n=== Snapshot shape ===")
+console.log("\n=== Tick result shape ===")
 
-test("xstate snapshot reports the initial machine state", () => {
+test("snapshot field is always null after xstate runtime removal", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
 		status: "completed",
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
-	const snapshot = result.snapshot
-	// Initial state of every studio machine is select_studio. Once
-	// per-state migration ports the FSM to drive from derived state,
-	// this assertion will change to expect snapshot.value === derived.
-	assert.strictEqual(snapshot.value, "select_studio")
+	// xstate was ripped out; snapshot is permanently null. Field
+	// retained for back-compat with existing telemetry consumers
+	// until they're updated.
+	assert.strictEqual(result.snapshot, null)
 })
 
 test("xstate driver carries context but skips runNext fallback", () => {

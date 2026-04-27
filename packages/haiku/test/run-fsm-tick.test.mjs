@@ -74,22 +74,17 @@ test("missing intent returns null", () => {
 })
 
 test("non-xstate-native state routes to runNext driver", () => {
-	// Use a stage state in the gate phase — `gate_review` isn't yet
-	// in the native-emit registry, so the driver falls back to runNext.
-	const { haikuRoot, cleanup } = fixture(
-		"test",
-		{
-			studio: "software",
-			active_stage: "development",
-		},
-		{
-			development: { status: "active", phase: "gate" },
-		},
-	)
+	// intent.phase = "intent_completion" with no completion_review_dispatched
+	// flag → derive-state returns "intent_completion_review", which isn't
+	// yet in the native-emit registry, so the driver falls back to runNext.
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		phase: "intent_completion",
+	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.ok(result)
-	assert.strictEqual(result.state, "gate_review")
+	assert.strictEqual(result.state, "intent_completion_review")
 	assert.strictEqual(result.driver, "runNext")
 })
 
@@ -173,7 +168,12 @@ test("registry contains the migrated states", () => {
 })
 
 test("registry does NOT contain stage-active states (still on runNext)", () => {
-	for (const name of ["escalate", "blocked", "gate_review"]) {
+	for (const name of [
+		"escalate",
+		"blocked",
+		"intent_completion_review",
+		"intent_completion_fix",
+	]) {
 		assert.ok(
 			!XSTATE_NATIVE_STATES.has(name),
 			`registry should NOT include unmigrated '${name}' yet`,
@@ -200,16 +200,14 @@ test("xstate snapshot reports the initial machine state", () => {
 test("runNext-driven results carry context but no snapshot", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
-		active_stage: "development",
-	}, {
-		development: { status: "active", phase: "gate" },
+		phase: "intent_completion",
 	})
 	const result = runFsmTick("test", haikuRoot)
 	cleanup()
 	assert.strictEqual(result.driver, "runNext")
 	assert.strictEqual(result.snapshot, null)
-	assert.strictEqual(result.context.currentStage, "development")
-	assert.strictEqual(result.context.currentPhase, "gate")
+	// intent-level phase has no active stage
+	assert.strictEqual(result.context.currentStage, "")
 })
 
 console.log("\n=== Parity vs runNext (complete state) ===")

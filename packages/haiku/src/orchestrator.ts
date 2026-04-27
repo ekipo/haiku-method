@@ -308,7 +308,7 @@ export function buildGuardResponse(
 	}
 }
 
-function maybeEscalate(
+export function maybeEscalate(
 	slug: string,
 	stage: string,
 	iter: {
@@ -796,7 +796,7 @@ export function checkExternalState(url: string): ExternalReviewState {
  * Creates a feedback file, rolls the FSM back to elaborate, emits telemetry,
  * and returns the orchestrator action.
  */
-function handleExternalChangesRequested(
+export function handleExternalChangesRequested(
 	slug: string,
 	currentStage: string,
 	externalUrl: string,
@@ -1612,7 +1612,7 @@ export function fsmAdvanceStage(
 	sealIntentState(slug)
 }
 
-function fsmGateAsk(slug: string, stage: string): void {
+export function fsmGateAsk(slug: string, stage: string): void {
 	const path = stageStatePath(slug, stage)
 	const data = readJson(path)
 	data.phase = "gate"
@@ -4397,7 +4397,7 @@ interface FeedbackClassification {
 	needsTriage: FeedbackItem[] // null resolution — agent decides
 }
 
-function classifyPendingForRevisit(
+export function classifyPendingForRevisit(
 	items: FeedbackItem[],
 ): FeedbackClassification {
 	const out: FeedbackClassification = {
@@ -4644,7 +4644,7 @@ function uncompleteIntent(slug: string, intentFile: string): void {
 	}
 }
 
-function revisitCurrentStage(
+export function revisitCurrentStage(
 	slug: string,
 	iDir: string,
 	intentFile: string,

@@ -1,0 +1,598 @@
+// orchestrator/fsm/native-emit/gate.ts — Emit for the `gate_review`
+// state.
+//
+// Owns the gate-phase emission chain at orchestrator.ts:3414-4030.
+// Sub-cases handled (in branch order):
+//
+//   1. Fix-chain worktree reconciliation (closed → merge, conflict →
+//      integrator dispatch, exhausted → escalate, open → reap).
+//   2. Pending feedback routing:
+//        a. Cross-stage upstream findings → upstream_finding_surfaced
+//        b. Human-authored items needing triage → gate_review (ask)
+//        c. Auto-dispatch resolutions:
+//             - stage_revisit → revisitCurrentStage delegate
+//             - upstream_rewind → upstream_finding_surfaced
+//        d. fix_hats fix loop → review_fix (or escalate / error)
+//        e. Legacy revisit → feedback_revisit (or escalate)
+//   3. External review reconciliation (only when stage already
+//      completed+blocked): branch-merge or CLI signal → advance,
+//      changes_requested → delegate, otherwise → awaiting_external_review.
+//   4. Auto gate → advance_stage (with fsmAdvanceStage) or
+//      completeOrReviewIntent.
+//   5. Non-auto gate → gate_review (with fsmGateAsk).
+//
+// Side effects: feedback frontmatter writes (integrator_attempts),
+// stage state writes (gate_outcome, pre-review reset on revisit),
+// fsmGateAsk, fsmAdvanceStage, fsmCompleteStage, gitCommitState
+// commits keyed off each sub-path.
+
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import {
+	checkExternalState,
+	classifyPendingForRevisit,
+	completeOrReviewIntent,
+	fsmAdvanceStage,
+	fsmCompleteStage,
+	fsmGateAsk,
+	handleExternalChangesRequested,
+	maybeEscalate,
+	resolveStageReview,
+	resolveStudioStages,
+	resolveIntentStages,
+	revisitCurrentStage,
+	summarizeFeedback,
+	type ExternalReviewState,
+} from "../../../orchestrator.js"
+import {
+	cleanupFixChainWorktree,
+	createFixChainWorktree,
+	fixChainBranchName,
+	fixChainWorktreePath,
+	isBranchMerged,
+	mergeFixChainWorktree,
+} from "../../../git-worktree.js"
+import {
+	appendStageIteration,
+	countPendingFeedback,
+	gitCommitState,
+	incrementFeedbackBolt,
+	isGitRepo,
+	MAX_FIX_LOOP_BOLTS,
+	MAX_INTEGRATOR_ATTEMPTS,
+	parseFrontmatter,
+	readFeedbackFiles,
+	readJson,
+	setFrontmatterField,
+	stageStatePath,
+	writeJson,
+} from "../../../state-tools.js"
+import { readHatDefs } from "../../../studio-reader.js"
+import { emitTelemetry } from "../../../telemetry.js"
+import type { NativeEmitter } from "./_types.js"
+
+// Inline copy of resolveStageFixHats (private in orchestrator). The
+// fix-hats list is read directly from STAGE.md frontmatter so we
+// avoid a circular export. Mirrors orchestrator.ts:491.
+function resolveStageFixHatsInline(studio: string, stage: string): string[] {
+	// Use the same studio search paths as resolveStageHats. Re-import
+	// lazily through a local helper to keep the import surface small.
+	const { studioSearchPaths } = require("../../../studio-reader.js") as {
+		studioSearchPaths: () => string[]
+	}
+	for (const base of studioSearchPaths()) {
+		const stageFile = join(base, studio, "stages", stage, "STAGE.md")
+		if (!existsSync(stageFile)) continue
+		const { data: fm } = parseFrontmatter(readFileSync(stageFile, "utf8"))
+		const fixHats = (fm.fix_hats as string[]) || []
+		return fixHats
+	}
+	return []
+}
+
+const emit: NativeEmitter = (ctx) => {
+	const slug = ctx.slug
+	const studio = ctx.studio
+	const intent = ctx.intent
+	const currentStage = ctx.currentStage
+	const iDir = ctx.intentDirPath
+	const intentFile = join(iDir, "intent.md")
+
+	// Intent-level phases (intent_review, intent_completion) also
+	// surface as gate_review from derive-state. Only handle the
+	// stage-scoped variant here; defer the others to runNext until
+	// their per-state ports land.
+	if (!currentStage) return null
+	if (ctx.currentPhase !== "gate") return null
+
+	const stageState: Record<string, unknown> = { ...ctx.stageState }
+	const stageStatus = (stageState.status as string) || "pending"
+	const studioStages = resolveIntentStages(intent, studio)
+
+	// ── Fix-chain worktree reconciliation ─────────────────────────────
+	const pendingIntegration: Array<{
+		feedback_id: string
+		feedback_title: string
+		feedback_file: string
+		worktree: string
+		branch: string
+		conflict_files: string[]
+		attempt: number
+	}> = []
+	const exhaustedIntegration: Array<{
+		feedback_id: string
+		title: string
+		attempts: number
+	}> = []
+	if (isGitRepo()) {
+		const allFeedback = readFeedbackFiles(slug, currentStage)
+		for (const fb of allFeedback) {
+			const wtPath = fixChainWorktreePath(slug, currentStage, fb.id)
+			if (!existsSync(wtPath)) continue
+			const isClosed =
+				fb.status === "closed" ||
+				fb.status === "addressed" ||
+				fb.status === "rejected" ||
+				!!fb.closed_by
+			if (!isClosed) {
+				cleanupFixChainWorktree(slug, currentStage, fb.id)
+				emitTelemetry("haiku.fix_chain.cleaned", {
+					intent: slug,
+					stage: currentStage,
+					feedback_id: fb.id,
+				})
+				continue
+			}
+
+			const res = mergeFixChainWorktree(slug, currentStage, fb.id)
+			if (res.success) {
+				emitTelemetry("haiku.fix_chain.merged", {
+					intent: slug,
+					stage: currentStage,
+					feedback_id: fb.id,
+				})
+				continue
+			}
+
+			if (!res.isConflict) {
+				console.error(
+					`[haiku] fix-chain merge failed for ${fb.id}: ${res.message}. Leaving worktree in place; next tick will retry.`,
+				)
+				continue
+			}
+
+			const fbAbsPath = join(process.cwd(), fb.file)
+			const { data: fbFM } = parseFrontmatter(readFileSync(fbAbsPath, "utf8"))
+			const prevAttempts = Number(
+				(fbFM as { integrator_attempts?: number }).integrator_attempts ?? 0,
+			)
+			const nextAttempt = prevAttempts + 1
+			setFrontmatterField(fbAbsPath, "integrator_attempts", nextAttempt)
+			if (nextAttempt > MAX_INTEGRATOR_ATTEMPTS) {
+				exhaustedIntegration.push({
+					feedback_id: fb.id,
+					title: fb.title,
+					attempts: nextAttempt - 1,
+				})
+				emitTelemetry("haiku.integrator.exhausted", {
+					intent: slug,
+					stage: currentStage,
+					feedback_id: fb.id,
+					attempts: String(nextAttempt - 1),
+				})
+			} else {
+				pendingIntegration.push({
+					feedback_id: fb.id,
+					feedback_title: fb.title,
+					feedback_file: fb.file,
+					worktree: wtPath,
+					branch: fixChainBranchName(slug, currentStage, fb.id),
+					conflict_files: res.conflictFiles || [],
+					attempt: nextAttempt,
+				})
+				emitTelemetry("haiku.integrator.dispatched", {
+					intent: slug,
+					stage: currentStage,
+					feedback_id: fb.id,
+					attempt: String(nextAttempt),
+				})
+			}
+		}
+	}
+
+	if (exhaustedIntegration.length > 0) {
+		const target = exhaustedIntegration[0]
+		return {
+			action: "escalate",
+			intent: slug,
+			stage: currentStage,
+			reason: "integrator_cap_exceeded",
+			iteration: target.attempts,
+			max_iterations: MAX_INTEGRATOR_ATTEMPTS,
+			message: `Fix-chain for ${target.feedback_id} ("${target.title}") still has unresolved merge conflicts after ${target.attempts} integrator attempt(s). Automated conflict resolution failed. ${exhaustedIntegration.length - 1 > 0 ? `${exhaustedIntegration.length - 1} other chain(s) are also exhausted. ` : ""}Resolve the conflicts manually inside the fix-chain worktrees (listed below), commit, then run \`haiku_run_next\` — the merge will retry.`,
+			pending_items: exhaustedIntegration.map((e) => ({
+				feedback_id: e.feedback_id,
+				title: e.title,
+			})),
+		}
+	}
+
+	if (pendingIntegration.length > 0) {
+		gitCommitState(
+			`haiku: integrate_fix_chains dispatch ${pendingIntegration.length} conflict(s) in ${currentStage}`,
+		)
+		return {
+			action: "integrate_fix_chains",
+			intent: slug,
+			studio,
+			stage: currentStage,
+			scope: currentStage,
+			max_attempts: MAX_INTEGRATOR_ATTEMPTS,
+			items: pendingIntegration,
+			message: `Fix-chain merges hit conflicts on ${pendingIntegration.length} finding(s) in stage '${currentStage}'. Dispatching the integrator subagent per chain to resolve in-place.`,
+		}
+	}
+
+	// ── Pending feedback check ────────────────────────────────────────
+	const pendingCount = countPendingFeedback(slug, currentStage)
+	if (pendingCount > 0) {
+		const pendingItems = readFeedbackFiles(slug, currentStage).filter(
+			(item) => {
+				if (item.closed_by) return false
+				return (
+					item.status !== "closed" &&
+					item.status !== "addressed" &&
+					item.status !== "rejected"
+				)
+			},
+		)
+
+		// Cross-stage findings
+		const upstreamItems = pendingItems.filter(
+			(item) =>
+				item.upstream_stage !== null && item.upstream_stage !== currentStage,
+		)
+		if (upstreamItems.length > 0) {
+			emitTelemetry("haiku.gate.upstream_finding_surfaced", {
+				intent: slug,
+				stage: currentStage,
+				count: String(upstreamItems.length),
+			})
+			return {
+				action: "upstream_finding_surfaced",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				upstream_items: upstreamItems.map((item) => ({
+					...summarizeFeedback(item),
+					upstream_stage: item.upstream_stage as string,
+				})),
+				message: `Stage '${currentStage}' has ${upstreamItems.length} cross-stage finding(s) whose root cause is in a DIFFERENT stage. These will NOT be auto-fixed by this stage's hats. Present them to the user and ask how to proceed — revisit the upstream stage via \`haiku_revisit\`, reject the finding with \`haiku_feedback_reject\`, or accept as-is. Do NOT call \`haiku_run_next\` until the user decides.`,
+			}
+		}
+
+		const needsHumanReview = pendingItems.some(
+			(item) =>
+				item.author_type === "human" &&
+				(!(item as { resolution?: string | null }).resolution ||
+					(item as { resolution?: string | null }).resolution === null),
+		)
+		if (needsHumanReview) {
+			const stageIdxForGate = studioStages.indexOf(currentStage)
+			const nextStageForGate =
+				stageIdxForGate >= 0 && stageIdxForGate < studioStages.length - 1
+					? studioStages[stageIdxForGate + 1]
+					: null
+			fsmGateAsk(slug, currentStage)
+			return {
+				action: "gate_review",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				next_stage: nextStageForGate,
+				gate_type: "ask",
+				gate_context: "stage_gate",
+				message: `Stage '${currentStage}' has ${pendingItems.length} pending feedback item(s), including human-authored comments awaiting triage. Open the review UI so the reviewer can classify each (reply, inline fix, stage revisit, upstream rewind) before the agent dispatches.`,
+			}
+		}
+
+		const gateClassification = classifyPendingForRevisit(pendingItems)
+		if (gateClassification.stageRevisits.length > 0) {
+			const revisitIds = gateClassification.stageRevisits
+				.map((it) => it.id)
+				.join(", ")
+			emitTelemetry("haiku.gate.auto_revisit", {
+				intent: slug,
+				stage: currentStage,
+				feedback_ids: revisitIds,
+			})
+			return revisitCurrentStage(slug, iDir, intentFile, currentStage)
+		}
+		if (gateClassification.upstreamRewinds.length > 0) {
+			emitTelemetry("haiku.gate.upstream_rewind_surfaced", {
+				intent: slug,
+				stage: currentStage,
+				count: String(gateClassification.upstreamRewinds.length),
+			})
+			return {
+				action: "upstream_finding_surfaced",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				upstream_items:
+					gateClassification.upstreamRewinds.map(summarizeFeedback),
+				message: `Stage '${currentStage}' has ${gateClassification.upstreamRewinds.length} finding(s) tagged \`upstream_rewind\`. Present them to the user and ask which upstream stage to revisit (or whether to reject / accept as-is). Do NOT call \`haiku_run_next\` until the user decides.`,
+			}
+		}
+
+		// fix_hats route
+		const fixHats = resolveStageFixHatsInline(studio, currentStage)
+		if (fixHats.length > 0 && pendingItems.length > 0) {
+			const hatDefs = readHatDefs(studio, currentStage)
+			const missing = fixHats.filter((h) => !hatDefs[h])
+			if (missing.length > 0) {
+				return {
+					action: "error",
+					intent: slug,
+					message: `Stage '${currentStage}' declares fix_hats: [${fixHats.join(", ")}] but [${missing.join(", ")}] have no mandate file in plugin/studios/<studio>/stages/${currentStage}/hats/. Create the missing files or remove them from fix_hats.`,
+				}
+			}
+
+			const sorted = [...pendingItems].sort((a, b) => a.num - b.num)
+			const eligibleItems = sorted.filter((i) => i.bolt < MAX_FIX_LOOP_BOLTS)
+			const escalatedItems = sorted.filter(
+				(i) => i.bolt >= MAX_FIX_LOOP_BOLTS,
+			)
+
+			if (eligibleItems.length === 0 && escalatedItems.length > 0) {
+				const target = escalatedItems[0]
+				emitTelemetry("haiku.feedback.fix_loop_escalate", {
+					intent: slug,
+					stage: currentStage,
+					feedback_id: target.id,
+					bolt: String(target.bolt),
+				})
+				return {
+					action: "escalate",
+					intent: slug,
+					stage: currentStage,
+					reason: "fix_loop_cap_exceeded",
+					iteration: target.bolt,
+					max_iterations: MAX_FIX_LOOP_BOLTS,
+					message:
+						`Feedback ${target.id} ("${target.title}") has exceeded the fix-loop cap of ${MAX_FIX_LOOP_BOLTS} bolts. The fix hats cannot resolve this finding autonomously — the finding itself, the spec it's flagging, or the hat mandates likely need human intervention. Present the finding to the user; they can revisit upstream, reject the finding, edit the spec, or mark it resolved manually. ${escalatedItems.length - 1 > 0 ? `${escalatedItems.length - 1} other finding(s) are also blocked at the cap.` : ""}`.trim(),
+					pending_items: escalatedItems.map(summarizeFeedback),
+				}
+			}
+
+			const dispatched: {
+				feedback_id: string
+				feedback_file: string
+				feedback_title: string
+				bolt: number
+				worktree: string | null
+				branch: string | null
+			}[] = []
+			for (const item of eligibleItems) {
+				const bumped = incrementFeedbackBolt(slug, currentStage, item.id)
+				if (!bumped) continue
+				const wt = createFixChainWorktree(slug, currentStage, item.id)
+				dispatched.push({
+					feedback_id: item.id,
+					feedback_file: item.file,
+					feedback_title: item.title,
+					bolt: bumped.bolt,
+					worktree: wt,
+					branch: wt ? fixChainBranchName(slug, currentStage, item.id) : null,
+				})
+			}
+
+			if (dispatched.length === 0) {
+				return {
+					action: "error",
+					intent: slug,
+					message: `Failed to increment fix-loop bolts on any of ${eligibleItems.length} eligible finding(s) — feedback files may have been deleted mid-tick.`,
+				}
+			}
+
+			gitCommitState(
+				`haiku: review_fix dispatch ${dispatched.length} finding(s) in ${currentStage}`,
+			)
+			emitTelemetry("haiku.gate.review_fix", {
+				intent: slug,
+				stage: currentStage,
+				count: String(dispatched.length),
+				escalated: String(escalatedItems.length),
+			})
+			return {
+				action: "review_fix",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				fix_hats: fixHats,
+				max_bolts: MAX_FIX_LOOP_BOLTS,
+				items: dispatched,
+				total_pending: pendingItems.length,
+				escalated_count: escalatedItems.length,
+				message: `Dispatching fix loop for ${dispatched.length} finding(s) in parallel — stage '${currentStage}'. Per-finding hat sequence: ${fixHats.join(" → ")} (serial within chain). Chains run in parallel across findings.${escalatedItems.length > 0 ? ` ${escalatedItems.length} additional finding(s) are at the bolt cap and will escalate after these complete.` : ""}`,
+			}
+		}
+
+		// Legacy feedback_revisit
+		const statePath = stageStatePath(slug, currentStage)
+		const iterResult = appendStageIteration(
+			slug,
+			currentStage,
+			{
+				trigger: "feedback",
+				reason: `${pendingCount} pending feedback item(s)`,
+				feedbackTitles: pendingItems.map((i) => i.title),
+			},
+			"feedback-revisit",
+		)
+		emitTelemetry("haiku.gate.feedback_revisit", {
+			intent: slug,
+			stage: currentStage,
+			pending_count: String(pendingCount),
+			iteration: String(iterResult.count),
+		})
+		const escalation = maybeEscalate(
+			slug,
+			currentStage,
+			iterResult,
+			"feedback",
+			pendingItems.map((i) => ({
+				feedback_id: i.id,
+				title: i.title,
+			})),
+		)
+		if (escalation) {
+			gitCommitState(
+				`haiku: feedback_revisit escalated in ${currentStage} (${pendingCount} pending, iteration ${iterResult.count})`,
+			)
+			return escalation
+		}
+
+		const gateState = readJson(statePath)
+		gateState.phase = "elaborate"
+		gateState.pre_review_dispatched = false
+		gateState.pre_review_dispatched_at = null
+		gateState.pre_review_skipped_no_agents = false
+		gateState.pre_review_reviewers_acknowledged = false
+		gateState.pre_review_reviewers_acknowledged_at = null
+		writeJson(statePath, gateState)
+		gitCommitState(
+			`haiku: feedback_revisit in ${currentStage} (${pendingCount} pending, iteration ${iterResult.count})`,
+		)
+		return {
+			action: "feedback_revisit",
+			intent: slug,
+			studio,
+			stage: currentStage,
+			pending_count: pendingCount,
+			iteration: iterResult.count,
+			visits: iterResult.count,
+			pending_items: pendingItems.map(summarizeFeedback),
+			message: `${pendingCount} pending feedback item(s) found — rolling back to elaborate (iteration ${iterResult.count}). YOU MUST read every feedback file at pending_items[].file in full before elaborating — the body carries the requirements. Address all pending feedback before the gate can advance.`,
+		}
+	}
+
+	// ── External review reconciliation ─────────────────────────────────
+	const gateOutcomeInGate = (stageState.gate_outcome as string) || ""
+	if (stageStatus === "completed" && gateOutcomeInGate === "blocked") {
+		let extApproved = false
+		let externalState: ExternalReviewState = { status: "unknown" }
+		const externalUrl = (stageState.external_review_url as string) || ""
+
+		if (isGitRepo()) {
+			const stageBranch = `haiku/${slug}/${currentStage}`
+			const mainline = `haiku/${slug}/main`
+			if (isBranchMerged(stageBranch, mainline)) {
+				extApproved = true
+			}
+		}
+
+		if (!extApproved && externalUrl) {
+			externalState = checkExternalState(externalUrl)
+			if (externalState.status === "approved") {
+				extApproved = true
+			}
+		}
+
+		if (extApproved) {
+			const statePath = stageStatePath(slug, currentStage)
+			const stateData = readJson(statePath)
+			stateData.gate_outcome = "advanced"
+			writeJson(statePath, stateData)
+			emitTelemetry("haiku.gate.resolved", {
+				intent: slug,
+				stage: currentStage,
+				gate_type: "external",
+				outcome: "approved",
+			})
+		} else if (externalState.status === "changes_requested") {
+			return handleExternalChangesRequested(
+				slug,
+				currentStage,
+				externalUrl,
+				externalState.provider,
+			)
+		} else if (externalUrl) {
+			return {
+				action: "awaiting_external_review",
+				intent: slug,
+				stage: currentStage,
+				external_review_url: externalUrl,
+				message: `Stage '${currentStage}' is awaiting external review at: ${externalUrl}. Neither branch merge detection nor CLI-based check detected approval yet. Run /haiku:pickup after the review is approved.`,
+			}
+		}
+	}
+
+	const rawReviewType = resolveStageReview(studio, currentStage)
+	const autopilot = intent.autopilot === true
+	const reviewType =
+		autopilot && rawReviewType === "ask" ? "auto" : rawReviewType
+	const stageIdx = studioStages.indexOf(currentStage)
+	const nextStage =
+		stageIdx < studioStages.length - 1 ? studioStages[stageIdx + 1] : null
+
+	const gitAvailable = isGitRepo()
+
+	if (reviewType === "auto") {
+		emitTelemetry("haiku.gate.auto_advanced", {
+			intent: slug,
+			stage: currentStage,
+			gate_context: "stage_gate",
+		})
+		if (nextStage) {
+			fsmAdvanceStage(slug, currentStage, nextStage)
+			return {
+				action: "advance_stage",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				next_stage: nextStage,
+				gate_outcome: "advanced",
+				message: `Auto-gate passed — advancing to '${nextStage}'. Call haiku_run_next { intent: "${slug}" } immediately.`,
+			}
+		}
+		fsmCompleteStage(slug, currentStage, "advanced")
+		return completeOrReviewIntent(
+			slug,
+			studio,
+			`Auto-gate passed — all stages complete for intent '${slug}'.`,
+		)
+	}
+
+	let effectiveGateType: string
+	if (!gitAvailable && reviewType.includes("external")) {
+		const remaining = reviewType
+			.split(",")
+			.filter((t) => t !== "external")
+			.join(",")
+		effectiveGateType = remaining || "ask"
+	} else if (reviewType === "ask") {
+		effectiveGateType = "ask"
+	} else if (reviewType === "await") {
+		effectiveGateType = "external"
+	} else {
+		effectiveGateType = reviewType
+	}
+
+	fsmGateAsk(slug, currentStage)
+	return {
+		action: "gate_review",
+		intent: slug,
+		studio,
+		stage: currentStage,
+		next_stage: nextStage,
+		gate_type: effectiveGateType,
+		message: `Stage '${currentStage}' complete — opening review`,
+	}
+}
+
+// resolveStudioStages is referenced by upstream-rewind classification
+// indirectly (via resolveIntentStages); ensure import retention.
+void resolveStudioStages
+
+export default emit

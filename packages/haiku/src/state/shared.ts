@@ -49,7 +49,22 @@ export function _resetIsGitRepoForTests(): void {
 
 // ── Path resolution ────────────────────────────────────────────────────────
 
+/** Test-only override for findHaikuRoot. Set via setHaikuRootForTests
+ *  before exercising native-emit handlers (or any code path that calls
+ *  fsmStartStage / fsmGateAsk / etc.) with a tmpdir intent fixture.
+ *  Without this, side-effecting handlers find the parent repo's
+ *  .haiku/ and pollute it with stray branches and stage-state files. */
+let _haikuRootOverride: string | null = null
+
+/** Pin findHaikuRoot to a specific path (typically a tmpdir's
+ *  `<root>/.haiku`). Pass null to clear. Tests must call this before
+ *  triggering native-emit handlers and clear it in cleanup. */
+export function setHaikuRootForTests(path: string | null): void {
+	_haikuRootOverride = path
+}
+
 export function findHaikuRoot(): string {
+	if (_haikuRootOverride) return _haikuRootOverride
 	// Walk up from cwd looking for .haiku/
 	let dir = process.cwd()
 	for (let i = 0; i < 20; i++) {

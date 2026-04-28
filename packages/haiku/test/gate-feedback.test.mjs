@@ -194,6 +194,8 @@ function createFeedbackFile(intentDirPath, _slug, stage, title, opts = {}) {
 	const triagedAtLine =
 		triagedAt === null ? "triaged_at: null" : `triaged_at: "${triagedAt}"`
 
+	const resolutionLine =
+		opts.resolution !== undefined ? `\nresolution: ${opts.resolution}` : ""
 	writeFileSync(
 		join(feedbackDirPath, `${nn}-${fileSlug}.md`),
 		`---
@@ -206,7 +208,7 @@ created_at: "2026-04-15T21:15:00Z"
 visit: ${opts.visit || 0}
 source_ref: null
 closed_by: null
-${triagedAtLine}
+${triagedAtLine}${resolutionLine}
 ---
 
 ${opts.body || `Finding: ${title}`}
@@ -493,6 +495,66 @@ try {
 		assert.strictEqual(state.started_at, "2026-04-15T10:00:00Z")
 		assert.strictEqual(state.status, "active")
 		assert.strictEqual(state.elaboration_turns, 3)
+	})
+
+	test("elaborate phase with leftover human FB routes to feedback_dispatch (NOT gate_review)", () => {
+		// Reproduces the bug the prior fix missed: after a Request Changes
+		// on the spec gate, the stage stays in `elaborate` phase with a
+		// triaged human FB sitting on it. The next `haiku_run_next` tick
+		// would re-emit `gate_review` from `elaborate.ts` (the `gate.ts`
+		// fix only covered the post-execute stage gate). Pre-tick triage
+		// gate now intercepts these and emits `feedback_dispatch` so the
+		// review UI never re-pops on unaddressed feedback.
+		//
+		// Drives TWO ticks back-to-back (without the agent doing any
+		// work between them) to guard against an infinite re-dispatch
+		// loop. Both ticks must return `feedback_dispatch` — and
+		// neither tick may produce a side effect (state mutation /
+		// commit storm) that compounds across calls.
+		const { projDir, intentDirPath, slug } = createProject("gate-fb-elaborate-replay", {
+			active_stage: "plan",
+			stageConfig: { plan: { review: "ask" } },
+		})
+		createStageState(intentDirPath, "plan", {
+			phase: "elaborate",
+			pre_review_dispatched: true,
+			pre_review_skipped_no_agents: true,
+			gate_outcome: "changes_requested",
+		})
+		createFeedbackFile(intentDirPath, slug, "plan", "Reviewer concern", {
+			origin: "user-chat",
+			author: "user",
+			author_type: "human",
+		})
+
+		process.chdir(projDir)
+		const tick1 = runNext(slug)
+		assert.strictEqual(
+			tick1.action,
+			"feedback_dispatch",
+			`Tick 1: expected feedback_dispatch; got ${tick1.action}.`,
+		)
+		assert.strictEqual(tick1.stage, "plan")
+
+		// Snapshot the state.json before tick 2 so we can assert no
+		// mutation happens — the pre-tick gate is read-only here.
+		const stateBefore = readJson(
+			join(intentDirPath, "stages", "plan", "state.json"),
+		)
+		const tick2 = runNext(slug)
+		assert.strictEqual(
+			tick2.action,
+			"feedback_dispatch",
+			`Tick 2: expected feedback_dispatch (no loop); got ${tick2.action}.`,
+		)
+		const stateAfter = readJson(
+			join(intentDirPath, "stages", "plan", "state.json"),
+		)
+		assert.deepStrictEqual(
+			stateAfter,
+			stateBefore,
+			"pre-tick feedback_dispatch must not mutate state.json across ticks",
+		)
 	})
 
 	test("human-authored pending feedback routes to feedback_dispatch (no UI re-open)", () => {

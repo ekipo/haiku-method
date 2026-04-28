@@ -2,7 +2,7 @@
 title: >-
   Baseline-update contract for non-terminal classification outcomes is
   unresolved — risks steady-state drift loop
-status: fixing
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T14:37:05Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-03:bolt-1'
 bolt: 1
 triaged_at: '2026-04-28T14:37:05Z'
 resolution: null

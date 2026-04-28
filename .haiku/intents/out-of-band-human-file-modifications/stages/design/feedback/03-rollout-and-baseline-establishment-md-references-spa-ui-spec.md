@@ -2,7 +2,7 @@
 title: >-
   ROLLOUT-AND-BASELINE-ESTABLISHMENT.md references SPA-UI-SPECS.md which is not
   in the design artifact set
-status: pending
+status: rejected
 origin: adversarial-review
 author: design-reviewer
 author_type: agent

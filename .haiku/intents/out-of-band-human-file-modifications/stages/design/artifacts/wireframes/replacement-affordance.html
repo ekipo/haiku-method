@@ -18,7 +18,8 @@
       --color-drift-revisit-bg: oklch(97% 0.04 10);       /* rose-50 family */
 
       /* Upload affordance tokens (§1.3.4) */
-      --color-upload-affordance-fg: oklch(62% 0.14 185);
+      --color-upload-affordance-fg: oklch(62% 0.14 185);                                                /* teal-500 family — UI-component scope (border, icon); WCAG 1.4.11 3:1 threshold */
+      --color-upload-affordance-label-fg: oklch(48% 0.16 185);                                          /* teal-700 family — TEXT scope (label); WCAG 1.4.3 4.5:1 threshold; ~5.2:1 against white */
       --color-upload-affordance-bg-resting: transparent;
       --color-upload-affordance-bg-hover: color-mix(in oklch, oklch(62% 0.14 185), transparent 92%);
       --color-upload-affordance-bg-dragover: color-mix(in oklch, oklch(62% 0.14 185), transparent 85%);
@@ -42,6 +43,18 @@
 
       /* Focus ring */
       --focus-ring-color: oklch(62% 0.14 185);
+
+      /* KIND_BADGE palette (canonical — mirrors KIND_BADGE in StageReview.tsx
+         per DESIGN-BRIEF.md Screen 3 line 357 and §line 365: "Reuse KIND_BADGE
+         palette from StageReview.tsx"). The kind-chip in this wireframe shows
+         a unit/artifact kind ("wireframe"), which maps to violet-50/700 per
+         the KIND_BADGE map. Implementer SHOULD render as Tailwind utilities
+         `bg-violet-50 text-violet-700` per DESIGN-TOKENS §1.4 (existing
+         palette utilities are the consumption layer). */
+      --color-kind-stage-bg: oklch(96.9% 0.016 293.756);     /* violet-50 */
+      --color-kind-stage-fg: oklch(49.1% 0.27 292.581);      /* violet-700 */
+      --color-kind-intent-bg: oklch(97.7% 0.013 236.62);     /* sky-50 */
+      --color-kind-intent-fg: oklch(50% 0.134 242.749);      /* sky-700 */
     }
 
     @media (prefers-color-scheme: dark) {
@@ -55,6 +68,7 @@
         --color-drift-revisit-fg: oklch(78% 0.12 10);
         --color-drift-revisit-bg: oklch(24% 0.06 10 / 0.4);
         --color-upload-affordance-fg: oklch(72% 0.12 185);
+        --color-upload-affordance-label-fg: oklch(82% 0.11 185);                                          /* teal-300 family — TEXT scope on dark surface; ~5.4:1 against --surface-bg */
         --color-upload-affordance-bg-hover: color-mix(in oklch, oklch(72% 0.12 185), transparent 92%);
         --color-upload-affordance-bg-dragover: color-mix(in oklch, oklch(72% 0.12 185), transparent 85%);
         --surface-bg: oklch(18% 0.01 0);
@@ -62,6 +76,13 @@
         --surface-text: oklch(90% 0.01 0);
         --surface-muted: oklch(60% 0.01 0);
         --surface-hover: oklch(24% 0.01 0);
+
+        /* Dark-mode KIND_BADGE — mirrors `dark:bg-{hue}-900/20 dark:text-{hue}-400`
+           from StageReview.tsx KIND_BADGE entries. */
+        --color-kind-stage-bg: oklch(28.1% 0.141 291.089 / 0.2);  /* violet-900/20 */
+        --color-kind-stage-fg: oklch(70.6% 0.213 293.541);        /* violet-400 */
+        --color-kind-intent-bg: oklch(29.3% 0.066 243.157 / 0.2); /* sky-900/20 */
+        --color-kind-intent-fg: oklch(74.6% 0.16 232.661);        /* sky-400 */
       }
     }
 
@@ -169,8 +190,11 @@
       font-weight: 600;
       padding: 2px 6px;
       border-radius: 9999px;
-      background: oklch(95% 0.02 270);
-      color: oklch(50% 0.12 270);
+      /* KIND_BADGE — wireframe/artifact kind (DESIGN-BRIEF Screen 3 line 365:
+         "Reuse KIND_BADGE palette from StageReview.tsx" → violet-50/700).
+         Implementer: render as `bg-violet-50 text-violet-700` per DESIGN-TOKENS §1.4. */
+      background: var(--color-kind-stage-bg);
+      color: var(--color-kind-stage-fg);
       white-space: nowrap;
     }
     .card-title {
@@ -417,7 +441,7 @@
       border-color: var(--color-feedback-pending-fg);
     }
     .dz-icon { color: var(--color-upload-affordance-fg); font-size: 22px; }
-    .dz-label { font-size: 13px; font-weight: 500; color: var(--color-upload-affordance-fg); }
+    .dz-label { font-size: 13px; font-weight: 500; color: var(--color-upload-affordance-label-fg); }
     .dz-hint { font-size: 11px; color: var(--surface-muted); }
 
     /* Mime mismatch warning */
@@ -433,11 +457,31 @@
       border: 1px solid var(--color-feedback-pending-fg);
     }
 
+    /* Mime override action button — sibling of .mime-warning, NOT nested inside the live region.
+       Live region carries status text only (ARIA 1.2: no interactive elements inside role="alert"
+       /aria-live="assertive"). Action button lives as a separate, keyboard-reachable control. */
+    .mime-override-btn {
+      align-self: flex-start;
+      margin-top: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--accent-review);
+      font-size: 12px;
+      padding: 0;
+      text-decoration: underline;
+      /* touch-target: visual is text-sized, hit area expanded to 44×44 via .touch-target--hit-area::after */
+    }
+    .mime-override-btn:focus-visible {
+      outline: 3px solid var(--focus-ring-color);
+      outline-offset: 2px;
+    }
+
     /* Note textarea */
     .note-label { font-size: 12px; color: var(--surface-muted); margin-bottom: 4px; }
     .note-textarea {
       width: 100%;
-      min-height: 72px;
+      min-height: 80px;
       border: 1px solid var(--surface-border);
       border-radius: 6px;
       padding: 8px;
@@ -731,7 +775,7 @@
             class="modal-drop-zone"
             role="button"
             tabindex="0"
-            aria-label="Upload knowledge file"
+            aria-label="Drop replacement file for hero-mockup.html"
           >
             <span class="dz-icon" aria-hidden="true">☁</span>
             <span class="dz-label">drop a file matching text/html</span>
@@ -792,14 +836,16 @@
           class="modal-drop-zone modal-drop-zone--mime-error"
           role="button"
           tabindex="0"
-          aria-label="Upload knowledge file"
+          aria-label="Drop replacement file for hero-mockup.html"
         >
           <span class="dz-icon" aria-hidden="true" style="color:var(--color-feedback-pending-fg);">⚠</span>
           <span class="dz-label" style="color:var(--color-feedback-pending-fg);">hero-v4.png staged</span>
           <span class="dz-hint">+140 KB vs original</span>
         </div>
 
-        <!-- Mime mismatch warning: aria-live="assertive" (blocking) -->
+        <!-- Mime mismatch warning: aria-live="assertive" (blocking).
+             Live region carries status text only — interactive controls live OUTSIDE
+             (ARIA 1.2: do not nest interactive elements inside role="alert"/aria-live regions). -->
         <div
           class="mime-warning"
           role="alert"
@@ -807,9 +853,20 @@
         >
           <span aria-hidden="true">⚠</span>
           <span>Type mismatch: original is <strong>text/html</strong>, dropped <strong>image/png</strong>.
-            Pick a matching file, or <button style="background:none;border:none;cursor:pointer;color:var(--accent-review);font-size:12px;padding:0;text-decoration:underline;">override type ▾</button>
-          </span>
+            Pick a matching file, or use the override action below.</span>
         </div>
+
+        <!-- Override action: sibling of the live region, not nested inside it.
+             Hit area expanded to 44×44 via .touch-target--hit-area; focus ring via .mime-override-btn:focus-visible. -->
+        <button
+          type="button"
+          class="mime-override-btn touch-target touch-target--hit-area"
+          aria-label="Override mime type and accept image/png as replacement for text/html"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >
+          override type ▾
+        </button>
 
         <div class="info-notice">
           <span class="info-icon" aria-hidden="true">ℹ</span>
@@ -883,7 +940,7 @@
             class="modal-drop-zone"
             role="button"
             tabindex="0"
-            aria-label="Upload knowledge file"
+            aria-label="Drop replacement file for hero-mockup.html"
             style="min-height:80px;"
           >
             <span class="dz-icon" aria-hidden="true">☁</span>

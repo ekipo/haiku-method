@@ -2,7 +2,7 @@
 title: >-
   DISCOVERY.md competitive analysis lacks per-product "what they do well" +
   "gap" pairs for all products
-status: fixing
+status: rejected
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -28,3 +28,7 @@ The competitive landscape section lists seven products under "Specific products 
 The spirit of the completeness mandate is that design-stage consumers can understand both where to draw from (competitive strengths as inspiration) and where H·AI·K·U differentiates (gaps). For Devin and Cody/Continue in particular, the "what they do well" is not captured anywhere in the document.
 
 **What needs to change:** Either expand the "What they do well" section to explicitly include Devin (PR-comment model creates audit trail; restart-on-intervention is predictable) and Cody/Continue (zero-ceremony re-read model is right for simple cases), or restructure the analysis to provide per-product what/gap pairs inline. The gap for all three products is already addressed in the "Gaps and opportunities" aggregation.
+
+---
+
+**Rejection reason:** stale — the file the reviewer flagged no longer exists in that form. The original DISCOVERY.md (commit 54965492) had a flat product bullet list followed by aggregate "What they do well" (5 products) and "Gaps and opportunities" (4 thematic bullets) sections, where Devin, Cody/Continue, and Figma+Code Connect were absent from the strengths aggregation. Commit f792ab70 already restructured the section to inline per-product *What they do well:* + *Gap:* pairs for all seven products (Cursor 59-60, Aider 63-64, GitHub Copilot Workspace 67-68, Devin 71-72, Figma+Code Connect 75-76, Notion/Coda 79-80, Cody/Continue 83-84). The aggregate sections are gone; the per-product structure the FB explicitly named as one of the two acceptable remediations is in place.

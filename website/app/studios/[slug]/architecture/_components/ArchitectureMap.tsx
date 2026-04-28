@@ -27,6 +27,7 @@ import {
 	branchName,
 	demoWavesAndUnits,
 	effectiveMode,
+	escHTML,
 	formatInputs,
 	gateClass,
 	gateFromReview,
@@ -49,6 +50,8 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 	const [matchedArtifact, setMatchedArtifact] = useState<string | null>(null)
 	const mainRef = useRef<HTMLDivElement>(null)
 
+	// Fetch the bundle ONCE — it's a static JSON containing every studio.
+	// Studio switching is a pure state change after this; no refetch.
 	useEffect(() => {
 		let cancelled = false
 		fetch("/prototype-stage-content.json")
@@ -56,15 +59,22 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 			.then((data: StudioContentBundle) => {
 				if (cancelled) return
 				setBundle(data)
-				if (!data.studios?.[activeStudio]) {
-					setActiveStudio(data.defaultStudio || Object.keys(data.studios || {})[0] || "software")
-				}
 			})
 			.catch((err) => console.warn("studio content fetch failed", err))
 		return () => {
 			cancelled = true
 		}
-	}, [activeStudio])
+	}, [])
+
+	// Once the bundle loads (or the active studio drifts to something the
+	// bundle doesn't recognize), fall back to defaultStudio / first available.
+	useEffect(() => {
+		if (!bundle) return
+		if (bundle.studios?.[activeStudio]) return
+		const fallback =
+			bundle.defaultStudio || Object.keys(bundle.studios || {})[0] || "software"
+		setActiveStudio(fallback)
+	}, [bundle, activeStudio])
 
 	const studioContent: StudioContentEntry | null = bundle?.studios?.[activeStudio] ?? null
 
@@ -1801,7 +1811,7 @@ function renderMdFile(file: { frontmatter?: Record<string, unknown>; content?: s
 		? `<div class="fm-panel">${fmEntries
 				.map(
 					([k, v]) =>
-						`<div class="fm-row"><span class="fm-key">${k}</span><span class="fm-val">${renderInline(
+						`<div class="fm-row"><span class="fm-key">${escHTML(k)}</span><span class="fm-val">${renderInline(
 							typeof v === "string" ? v : JSON.stringify(v),
 						)}</span></div>`,
 				)

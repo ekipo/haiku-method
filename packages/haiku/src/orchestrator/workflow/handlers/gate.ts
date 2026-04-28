@@ -9,11 +9,18 @@
 //   2. Pending feedback routing (cross-stage findings are pre-relocated
 //      by run-tick.ts's pre-tick triage gate, so by the time we get
 //      here every pending FB is in-scope for the current stage):
-//        a. Human-authored items needing triage → gate_review (ask)
-//        b. Auto-dispatch resolutions:
+//        a. Auto-dispatch resolutions:
 //             - stage_revisit → revisitCurrentStage delegate
+//        b. Human-authored needsTriage / question items → feedback_dispatch
+//             (no UI re-pop — agent triages / replies inline; was the
+//              source of the gate-review loop fixed 2026-04-27).
 //        c. fix_hats fix loop → review_fix (or escalate / error)
-//        d. Legacy revisit → feedback_revisit (or escalate)
+//        d. Legacy revisit → feedback_revisit (or escalate). NOTE: agent-
+//           authored needsTriage items with no `fix_hats` declared on
+//           STAGE.md fall through here too, which means a full stage
+//           rollback. If that's surfaced as a problem, route them
+//           through feedback_dispatch first or require fix_hats on
+//           stages that emit agent FBs.
 //   3. External review reconciliation (only when stage already
 //      completed+blocked): branch-merge or CLI signal → advance,
 //      changes_requested → delegate, otherwise → awaiting_external_review.

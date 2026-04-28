@@ -2,7 +2,7 @@
 title: >-
   ARCHITECTURE.md §7.3 still references "Run now" button after SPA-UI-SPECS
   removed it
-status: fixing
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T20:25:48Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-07:bolt-3'
 bolt: 3
 triaged_at: '2026-04-28T20:25:48Z'
 resolution: null

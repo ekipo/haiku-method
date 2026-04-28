@@ -8,9 +8,9 @@ outputs:
   - .haiku/intents/out-of-band-human-file-modifications/knowledge/DISCOVERY.md
 status: active
 bolt: 1
-hat: distiller
+hat: verifier
 started_at: '2026-04-28T14:12:36Z'
-hat_started_at: '2026-04-28T14:15:16Z'
+hat_started_at: '2026-04-28T14:17:10Z'
 iterations:
   - hat: researcher
     started_at: '2026-04-28T14:12:36Z'
@@ -18,6 +18,10 @@ iterations:
     result: advance
   - hat: distiller
     started_at: '2026-04-28T14:15:16Z'
+    completed_at: '2026-04-28T14:17:10Z'
+    result: advance
+  - hat: verifier
+    started_at: '2026-04-28T14:17:10Z'
     completed_at: null
     result: null
 ---

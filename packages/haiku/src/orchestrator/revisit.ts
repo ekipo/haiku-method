@@ -112,8 +112,12 @@ export function classifyPendingForRevisit(
  *  a stage rollback. Each bucket becomes a block of instructions
  *  keyed off the feedback id, so the agent can dispatch them
  *  serially. Returned only when every pending item routes through one
- *  of the non-revisit paths. */
-function buildFeedbackDispatchAction(
+ *  of the non-revisit paths.
+ *
+ *  Exported so `gate.ts` can dispatch the same action when it sees
+ *  pending feedback that still needs triage or replies — keeping the
+ *  user out of the review UI while open feedback is unaddressed. */
+export function buildFeedbackDispatchAction(
 	slug: string,
 	stage: string,
 	classification: FeedbackClassification,

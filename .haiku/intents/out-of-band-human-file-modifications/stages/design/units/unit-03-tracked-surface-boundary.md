@@ -17,15 +17,19 @@ status: pending
 
 Define which files inside an intent are part of the "tracked surface" — the set the pre-tick drift gate baselines and watches. Inception's DISCOVERY.md flagged this as a deliberate open question for design. Without a precise boundary, drift detection is either too narrow (misses real edits) or too broad (generates false positives on workflow-internal churn). Output: a boundary spec the architecture and development units consume.
 
+## Path-naming reconciliation (READ FIRST)
+
+The `software` studio's STAGE.md files use **one canonical output directory per stage**, declared via STAGE.md's `outputs:` field. Across the codebase this is most often `stages/{stage}/artifacts/` (e.g. `inception/artifacts/`, `design/artifacts/`). Some prior intents and the design DESIGN-BRIEF.md sketch screens that reference `stages/{stage}/outputs/...` as a hypothetical replaceable-output area. **For this intent's purposes, the canonical name is `artifacts/`.** Anywhere DESIGN-BRIEF.md or DISCOVERY.md uses `outputs/`, the implementation maps to `artifacts/`. The boundary spec MUST use `artifacts/` consistently and explicitly note the alias.
+
 ## Scope
 
 The TRACKED-SURFACE-BOUNDARY.md must specify, with explicit include/exclude rules:
 
 - **In-scope (tracked, drift-checked)**:
   - Stage knowledge artifacts: `stages/{stage}/knowledge/**` and the intent-scope `knowledge/**`
-  - Stage outputs: `stages/{stage}/artifacts/**` and any other stage-output paths declared in `STAGE.md`'s `outputs:` field
+  - Stage outputs (canonical): `stages/{stage}/artifacts/**` and any other paths declared in `STAGE.md`'s `outputs:` field
   - Stage discovery artifacts produced by fan-out subagents: `stages/{stage}/discovery/**`
-  - Replaceable artifacts under `stages/{stage}/outputs/**` (figma exports, generated HTML, screenshots) — explicitly tracked because the "designer replaces a layout" scenario requires it
+  - Replaceable artifacts (figma exports, generated HTML, screenshots, design tokens) — these all live under `stages/{stage}/artifacts/**`. Where DESIGN-BRIEF.md and earlier sketches reference `outputs/`, the implementation MUST treat that as an alias for `artifacts/` and pick one canonical name throughout this document.
 - **Out-of-scope (NOT tracked, deliberately excluded)**:
   - Workflow-managed files: `units/*.md`, `feedback/*.md`, `intent.md`, `stages/{stage}/state.json` — these are policed by the existing PreToolUse hook at the agent level and have separate integrity guarantees (tamper-detection gate). Drift detection on these would create double-coverage that conflicts with the existing tamper logic.
   - Audit logs and lifecycle records: `stages/{stage}/decision_log.json`, `stages/{stage}/audit/**` — append-only, no reason to detect drift
@@ -40,7 +44,7 @@ The TRACKED-SURFACE-BOUNDARY.md must specify, with explicit include/exclude rule
 ## Completion Criteria
 
 - TRACKED-SURFACE-BOUNDARY.md exists at `stages/design/artifacts/TRACKED-SURFACE-BOUNDARY.md` and is at least 3KB of substantive prose
-- Document specifies the in-scope path patterns (≥4 distinct categories: knowledge, outputs, discovery, replaceable artifacts) with glob-style examples
+- Document specifies the in-scope path patterns (≥4 distinct categories: knowledge, outputs/artifacts, discovery, replaceable artifacts) with glob-style examples; uses `artifacts/` as the canonical output-directory name and explicitly notes the `outputs/` alias from DESIGN-BRIEF.md
 - Document specifies the out-of-scope path patterns (≥4 distinct exclusions: workflow-managed files, audit logs, infrastructure, files outside the intent) with glob-style examples and a one-line rationale per exclusion
 - Document specifies how STAGE.md may declare additional `tracked_paths:` beyond defaults (extension point for non-software studios)
 - Document specifies the first-tick-after-deploy "establish, don't fire" rule with explicit detail on how baseline establishment differs from drift detection

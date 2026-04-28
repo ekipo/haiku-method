@@ -1,7 +1,7 @@
 {
   "stage": "design",
   "status": "active",
-  "phase": "elaborate",
+  "phase": "execute",
   "started_at": "2026-04-28T14:42:29Z",
   "completed_at": null,
   "gate_entered_at": null,
@@ -16,7 +16,7 @@
       "result": null
     }
   ],
-  "elaboration_turns": 5,
+  "elaboration_turns": 6,
   "decision_log": [
     {
       "decision": "Design direction: discrete + autonomous classification",
@@ -32,5 +32,7 @@
     }
   ],
   "pre_review_dispatched": true,
-  "pre_review_dispatched_at": "2026-04-28T15:16:27Z"
+  "pre_review_dispatched_at": "2026-04-28T15:16:27Z",
+  "pre_review_reviewers_acknowledged": true,
+  "pre_review_reviewers_acknowledged_at": "2026-04-28T15:23:35Z"
 }

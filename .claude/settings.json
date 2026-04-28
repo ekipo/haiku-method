@@ -14,7 +14,8 @@
       "source": {
         "source": "directory",
         "path": "."
-      }
+      },
+      "autoUpdate": true
     },
     "han": {
       "source": {

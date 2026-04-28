@@ -6,7 +6,16 @@ inputs:
   - knowledge/CONVERSATION-CONTEXT.md
 outputs:
   - .haiku/intents/out-of-band-human-file-modifications/knowledge/DISCOVERY.md
-status: pending
+status: active
+bolt: 1
+hat: researcher
+started_at: '2026-04-28T14:12:36Z'
+hat_started_at: '2026-04-28T14:12:36Z'
+iterations:
+  - hat: researcher
+    started_at: '2026-04-28T14:12:36Z'
+    completed_at: null
+    result: null
 ---
 # Discovery Document
 

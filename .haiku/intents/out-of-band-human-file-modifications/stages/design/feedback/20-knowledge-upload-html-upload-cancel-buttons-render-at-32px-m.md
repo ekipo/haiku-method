@@ -2,7 +2,7 @@
 title: >-
   knowledge-upload.html: Upload/Cancel buttons render at 32px min-height at
   tablet (768px), below 44px spec requirement
-status: fixing
+status: closed
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T22:01:14Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-20:bolt-1'
 bolt: 1
 triaged_at: '2026-04-28T22:01:14Z'
 resolution: null

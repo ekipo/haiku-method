@@ -85,12 +85,13 @@ The SPA upload UI for stage outputs and knowledge directory needs a primary acce
 
 | Token name | Maps to existing | Notes |
 |---|---|---|
-| `--color-upload-affordance-fg` | `--accent-review` (teal-500) | Border, icon, label-on-hover |
+| `--color-upload-affordance-fg` | `--accent-review` (teal-500, ~oklch 62% 0.14 185 light / ~oklch 72% 0.12 185 dark) | Border, icon — UI-component scope, WCAG 1.4.11 (Non-text Contrast) 3:1 threshold |
+| `--color-upload-affordance-label-fg` | teal-700 family (~oklch 48% 0.16 185 light / ~oklch 82% 0.11 185 dark) | Drop-zone text label — TEXT scope, WCAG 1.4.3 (Contrast Minimum) 4.5:1 threshold (~5.2:1 against white in light mode, ~5.4:1 against `--surface-bg` in dark mode) |
 | `--color-upload-affordance-bg-resting` | `transparent` | Resting state is empty / dashed-border-only |
 | `--color-upload-affordance-bg-hover` | teal-500 at 8% opacity (`color-mix(in oklch, var(--color-upload-affordance-fg), transparent 92%)`) | Hover state |
 | `--color-upload-affordance-bg-dragover` | teal-500 at 15% opacity | File-drag-over state (dropzone active) |
 
-Rationale: explicit aliasing to `--accent-review` documents the design intent (upload === a deliberate workflow action in the same family as approve/request-changes), so a future accent-color swap propagates correctly.
+Rationale: explicit aliasing to `--accent-review` documents the design intent (upload === a deliberate workflow action in the same family as approve/request-changes), so a future accent-color swap propagates correctly. The label foreground is a separate token because text and UI-component graphics have different WCAG thresholds (4.5:1 vs 3:1) — a single token cannot satisfy both at the same accent saturation. The label token darkens the same hue (teal-700 family) so the visual identity stays in the teal family while text contrast meets WCAG AA 1.4.3 for normal-sized text (13px / weight 500 is below the large-text threshold of ≥18pt regular or ≥14pt bold).
 
 ### 1.4 Color-token usage rules (CRITICAL)
 
@@ -290,7 +291,8 @@ The following table documents every new token introduced by this intent and wher
 | `--color-baseline-clean-fg` | File-row indicator in stage output area | "At baseline, no drift" (low visual weight — the common case) |
 | `--color-baseline-drift-fg` | File-row indicator in stage output area | "Drift detected since last tick" |
 | `--color-baseline-stale-fg` | File-row indicator (only during baseline-establishment) | "Tracked, baseline being recorded — first tick after upgrade" |
-| `--color-upload-affordance-fg` | Upload dropzone border, icon, hover-label | "Click or drop file to upload" |
+| `--color-upload-affordance-fg` | Upload dropzone border, icon (UI-component) | "Click or drop file to upload" |
+| `--color-upload-affordance-label-fg` | Upload dropzone text label (text scope, 4.5:1) | "Click or drop file to upload" |
 | `--color-upload-affordance-bg-resting` / `-hover` / `-dragover` | Upload dropzone background | Resting = empty / Hover = invitational / Drag-over = "drop will succeed" |
 
 ---

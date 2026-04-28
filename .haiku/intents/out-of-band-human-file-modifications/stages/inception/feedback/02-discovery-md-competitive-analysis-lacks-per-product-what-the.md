@@ -2,7 +2,7 @@
 title: >-
   DISCOVERY.md competitive analysis lacks per-product "what they do well" +
   "gap" pairs for all products
-status: pending
+status: fixing
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T14:36:52Z'
 resolution: null
 replies: []

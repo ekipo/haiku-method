@@ -2,7 +2,7 @@
 title: >-
   IMPLEMENTATION-MAP.md names specific file paths and implementation constructs
   — crosses into design territory
-status: pending
+status: fixing
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T14:36:38Z'
 resolution: null
 replies: []

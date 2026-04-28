@@ -2848,9 +2848,13 @@ export const UNIT_FRONTMATTER_SCHEMA = {
 	},
 	// workflow-driven fields. Agents MUST NOT set these — the workflow engine owns
 	// transitions via haiku_unit_advance_hat / haiku_unit_reject_hat /
-	// haiku_unit_increment_bolt. AJV's propertyNames check rejects any
-	// of these at validate time; strict MCP clients reject at parse
-	// time before the call goes out.
+	// haiku_unit_increment_bolt (which call setFrontmatterField directly,
+	// bypassing the agent-facing tools). AJV's propertyNames check rejects
+	// any of these at validate time; strict MCP clients reject at parse
+	// time before the call goes out. `hat_started_at` and
+	// `scope_reject_attempts` are workflow-internal counters touched only
+	// by advance_hat / reject_hat — listed here so haiku_unit_write and
+	// haiku_unit_set both refuse to set them.
 	propertyNames: {
 		not: {
 			enum: [
@@ -2860,6 +2864,8 @@ export const UNIT_FRONTMATTER_SCHEMA = {
 				"iterations",
 				"started_at",
 				"completed_at",
+				"hat_started_at",
+				"scope_reject_attempts",
 			],
 		},
 	},
@@ -4983,15 +4989,37 @@ export const stateToolDefs = [
 	// state-integrity, etc.) but agents can no longer reach it through MCP.
 	{
 		name: "haiku_unit_set",
-		description: "Set a field in a unit's frontmatter",
+		description: `Set a field in a unit's frontmatter. \`value\` MUST match the field's declared type in the unit FM schema — array for \`inputs:\` / \`outputs:\` / \`depends_on:\` / \`closes:\` / \`quality_gates:\`, string for \`title:\` / \`model:\`. The handler validates per-field at runtime and rejects mismatches with \`field_type_mismatch\` so type drift never lands in YAML. Field-type contract (from UNIT_FRONTMATTER_SCHEMA): ${Object.entries(
+			UNIT_FRONTMATTER_SCHEMA.properties as Record<
+				string,
+				{ type?: string | string[] }
+			>,
+		)
+			.map(([k, v]) => {
+				const t = Array.isArray(v.type) ? v.type.join("|") : v.type
+				return `\`${k}\` → ${t}`
+			})
+			.join(", ")}.`,
 		inputSchema: {
 			type: "object" as const,
 			properties: {
 				intent: { type: "string" },
 				stage: { type: "string" },
 				unit: { type: "string" },
-				field: { type: "string" },
-				value: { type: "string" },
+				field: {
+					type: "string",
+					description: `Frontmatter field name. Agent-authorable fields: ${AGENT_AUTHORABLE_UNIT_FIELDS.join(", ")}. FSM-driven fields (${FSM_DRIVEN_UNIT_FIELDS.join(", ")}) are workflow engine-owned and rejected here.`,
+				},
+				value: {
+					// Multi-type so the MCP advertises every shape the tool can
+					// accept; the handler validates per-field against the unit
+					// FM schema and rejects mismatches. An agent setting an
+					// array field MUST pass an array — JSON-stringified arrays
+					// are no longer silently parsed.
+					type: ["string", "array", "number", "boolean", "null", "object"],
+					description:
+						"The field's new value. MUST match the field's declared type in UNIT_FRONTMATTER_SCHEMA — pass an array for array-typed fields, a string for string-typed, etc. Mismatches return `field_type_mismatch` with the expected type so the agent can correct the call. Native types only; stringified JSON is rejected.",
+				},
 			},
 			required: ["intent", "stage", "unit", "field", "value"],
 		},
@@ -6243,25 +6271,27 @@ export function handleStateTool(
 			)
 		}
 		case "haiku_unit_set": {
-			// Guards (architecture rules §1.1, §1.3):
-			//   1. status: completed is workflow engine-protected (always — only the workflow engine
-			//      auto-completes via advance_hat).
-			//   2. Lifecycle immutability — once a unit is `active` or
-			//      `completed`, all FM writes are denied. The forward-only
-			//      lifecycle rule means downstream work has been informed by
-			//      the unit's spec; mutating it would silently invalidate
-			//      that work. The workflow engine is the only legitimate writer at that
-			//      point (advance_hat, increment_bolt, reject_hat).
+			// Gate order (each layer rejects with a distinct error code):
+			//   1. fsm_field_forbidden — field is workflow-driven; agents
+			//      MUST NOT set it. Mirrors the AJV propertyNames check on
+			//      haiku_unit_write so both agent-write paths refuse FSM
+			//      fields uniformly.
+			//      Catches every status: completed write because "status" is
+			//      in FSM_DRIVEN_UNIT_FIELDS.
+			//   2. lifecycle_violation — unit is active/completed; forward-only.
+			//   3. field_type_mismatch — value's type doesn't match the
+			//      field's UNIT_FRONTMATTER_SCHEMA declaration. Includes a
+			//      sub-schema AJV pass so quality_gates items, depends_on
+			//      string-pattern, etc. all get validated, not just the
+			//      top-level type.
 			const field = args.field as string
 			const value = args.value
-			if (field === "status" && value === "completed") {
+			if ((FSM_DRIVEN_UNIT_FIELDS as readonly string[]).includes(field)) {
 				return reply(
 					{
-						error: "fsm_completion_protected",
+						error: "fsm_field_forbidden",
 						field,
-						value,
-						message:
-							'Cannot set status to "completed" directly — unit completion is workflow engine-controlled. Call `haiku_unit_advance_hat` to let the workflow engine auto-complete the unit\'s last hat, which runs scope validation, feedback-assessor closure, and worktree merge-back.',
+						message: `Field '${field}' is workflow-driven — set automatically by haiku_unit_advance_hat / haiku_unit_reject_hat / haiku_unit_increment_bolt. Agents must not set it directly. Forbidden fields: [${FSM_DRIVEN_UNIT_FIELDS.join(", ")}].`,
 					},
 					{ isError: true },
 				)
@@ -6276,20 +6306,7 @@ export function handleStateTool(
 				args.stage as string,
 				args.unit as string,
 			)
-			// Enforce lifecycle: only `pending` units accept arbitrary FM
-			// writes. The workflow-driven lifecycle fields (status, hat, bolt,
-			// iterations) are exempt because the workflow engine tools call setFrontmatterField
-			// directly (not through this MCP-callable case); agent calls go
-			// through here.
-			const FSM_DRIVEN_FIELDS = new Set([
-				"status",
-				"hat",
-				"bolt",
-				"iterations",
-				"started_at",
-				"completed_at",
-			])
-			if (existsSync(path) && !FSM_DRIVEN_FIELDS.has(field)) {
+			if (existsSync(path)) {
 				const { data: currentFm } = parseFrontmatter(readFileSync(path, "utf8"))
 				const currentStatus = (currentFm.status as string) || "pending"
 				if (currentStatus === "active" || currentStatus === "completed") {
@@ -6304,7 +6321,73 @@ export function handleStateTool(
 					)
 				}
 			}
-			setFrontmatterField(path, args.field as string, args.value)
+			// Strict per-field type validation against UNIT_FRONTMATTER_SCHEMA.
+			// Array-typed fields MUST receive arrays — JSON-stringified arrays
+			// are NOT silently parsed (they previously slipped through and
+			// YAML-serialized as folded scalars, breaking every downstream
+			// `inputs.map(...)`). Stage-specific fields not declared in the
+			// schema fall through (the schema can't enumerate per-stage
+			// extensions); they'll fail later at AJV validation in
+			// haiku_unit_write if shape-broken.
+			const fieldSchemaForType = (
+				UNIT_FRONTMATTER_SCHEMA.properties as Record<
+					string,
+					{ type?: string | string[] }
+				>
+			)[field]
+			if (fieldSchemaForType?.type) {
+				const expected = Array.isArray(fieldSchemaForType.type)
+					? fieldSchemaForType.type
+					: [fieldSchemaForType.type]
+				const actual = Array.isArray(value)
+					? "array"
+					: value === null
+						? "null"
+						: typeof value
+				if (!expected.includes(actual)) {
+					const expectedRendered =
+						expected.length === 1
+							? expected[0]
+							: `one of [${expected.join(", ")}]`
+					return reply(
+						{
+							error: "field_type_mismatch",
+							field,
+							expected_type: expected.length === 1 ? expected[0] : expected,
+							received_type: actual,
+							message: `Field '${field}' expects ${expectedRendered}, got ${actual}. Pass a native ${expectedRendered} value — JSON-stringified values are not accepted (they corrupt the YAML output). Example for array fields: \`value: ["intent.md", "knowledge/DISCOVERY.md"]\`.`,
+						},
+						{ isError: true },
+					)
+				}
+				// Deep validation against the field's sub-schema. Catches
+				// inner-shape problems (e.g. quality_gates items missing
+				// `command`, depends_on items violating the path pattern,
+				// model not in the haiku/sonnet/opus enum) that the
+				// top-level type check can't see. validateUnitSchema is the
+				// same AJV-compiled validator haiku_unit_write uses, so the
+				// two write paths share one rule set.
+				const candidate = { [field]: value }
+				if (!validateUnitSchema(candidate)) {
+					const fieldErrors = (validateUnitSchema.errors || []).filter(
+						(e) =>
+							e.instancePath === `/${field}` ||
+							e.instancePath.startsWith(`/${field}/`),
+					)
+					if (fieldErrors.length > 0) {
+						return reply(
+							{
+								error: "field_value_invalid",
+								field,
+								errors: fieldErrors,
+								message: `Field '${field}' value failed schema validation: ${ajv.errorsText(fieldErrors)}.`,
+							},
+							{ isError: true },
+						)
+					}
+				}
+			}
+			setFrontmatterField(path, field, value)
 			return text("ok")
 		}
 		case "haiku_unit_list": {

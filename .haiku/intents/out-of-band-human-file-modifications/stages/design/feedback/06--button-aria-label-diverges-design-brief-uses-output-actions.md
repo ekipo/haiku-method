@@ -2,7 +2,7 @@
 title: >-
   ⋯ button aria-label diverges: DESIGN-BRIEF uses "Output actions for" but
   SPA-UI-SPECS uses "More options for"
-status: fixing
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-28T20:25:32Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
-bolt: 2
+closed_by: 'fix-loop:FB-06:bolt-3'
+bolt: 3
 triaged_at: '2026-04-28T20:25:32Z'
 resolution: null
 replies: []

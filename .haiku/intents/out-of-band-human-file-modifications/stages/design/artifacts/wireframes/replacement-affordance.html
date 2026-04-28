@@ -552,7 +552,7 @@
             <!-- ⋯ button: hover-reveal on desktop, aria-label per spec -->
             <button
               class="ellipsis-btn ellipsis-btn--hover-reveal touch-target"
-              aria-label="More options for hero-mockup.html"
+              aria-label="Output actions for hero-mockup.html"
               aria-haspopup="menu"
               aria-expanded="false"
             >⋯</button>
@@ -577,7 +577,7 @@
           <div class="popover-wrapper">
             <button
               class="ellipsis-btn"
-              aria-label="More options for hero-mockup.html"
+              aria-label="Output actions for hero-mockup.html"
               aria-haspopup="menu"
               aria-expanded="true"
               style="background: var(--surface-hover); color: var(--surface-text); outline: 3px solid var(--focus-ring-color); outline-offset:2px;"
@@ -610,7 +610,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">hero-mockup.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -633,7 +633,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">hero-mockup.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -656,7 +656,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">landing-page.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for landing-page.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for landing-page.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -679,7 +679,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">specs.md</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for specs.md" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for specs.md" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -700,9 +700,15 @@
 
   <div class="modal-demo">
     <span class="modal-demo-label">Replace dialog (native &lt;dialog&gt; in implementation)</span>
-    <div class="modal-dialog">
+    <div
+      class="modal-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="replace-dialog-title"
+      aria-describedby="replace-dialog-body"
+    >
       <div class="modal-header">
-        <span class="modal-title">Replace output: hero-mockup.html</span>
+        <span id="replace-dialog-title" class="modal-title">Replace output: hero-mockup.html</span>
         <button class="modal-close" aria-label="Close dialog">×</button>
       </div>
       <div class="modal-body" id="replace-dialog-body">
@@ -760,12 +766,19 @@
   <p class="viewport-label" style="margin-top:32px;">Replace modal — mime mismatch state</p>
   <div class="modal-demo">
     <span class="modal-demo-label">Mime mismatch (assertive aria-live)</span>
-    <div class="modal-dialog" style="max-width:500px;">
+    <div
+      class="modal-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="replace-dialog-title-mime"
+      aria-describedby="replace-dialog-body-mime"
+      style="max-width:500px;"
+    >
       <div class="modal-header">
-        <span class="modal-title">Replace output: hero-mockup.html</span>
+        <span id="replace-dialog-title-mime" class="modal-title">Replace output: hero-mockup.html</span>
         <button class="modal-close" aria-label="Close dialog">×</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" id="replace-dialog-body-mime">
         <div class="current-artifact">
           <div class="current-thumb" aria-hidden="true">📄</div>
           <div class="current-meta">
@@ -827,7 +840,7 @@
           <button
             class="ellipsis-btn touch-target"
             style="opacity:1;"
-            aria-label="More options for hero-mockup.html"
+            aria-label="Output actions for hero-mockup.html"
             aria-haspopup="menu"
             aria-expanded="false"
           >⋯</button>
@@ -906,7 +919,7 @@
     <ul style="margin-top: 8px; padding-left: 16px; display:flex; flex-direction:column; gap:4px;">
       <li>All drift-state borders use <code>var(--color-drift-{state}-fg)</code> — canonical four-state tokens. NOT deprecated <code>--color-drift-bg/fg/stripe</code>.</li>
       <li>Every drift state has a non-color badge (icon + text label) — required by WCAG 1.4.1.</li>
-      <li><code>⋯</code> button carries <code>aria-label="More options for {artifact-name}"</code> (interpolated per card).</li>
+      <li><code>⋯</code> button carries <code>aria-label="Output actions for {artifact-name}"</code> (interpolated per card — canonical per SPA-UI-SPECS §0 conflict resolution #4).</li>
       <li>On mobile, <code>⋯</code> is always visible (no hover-reveal); on desktop it's hover/focus-revealed.</li>
       <li><code>⋯</code> button has expanded 44×44 hit area via <code>.touch-target--hit-area</code>.</li>
       <li>Mime mismatch warning uses <code>aria-live="assertive"</code> (blocking validation).</li>

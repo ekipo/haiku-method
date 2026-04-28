@@ -12,6 +12,7 @@
       --color-upload-affordance-bg-resting: transparent;
       --color-upload-affordance-bg-hover: color-mix(in oklch, oklch(62% 0.14 185), transparent 92%);
       --color-upload-affordance-bg-dragover: color-mix(in oklch, oklch(62% 0.14 185), transparent 85%);
+      --color-upload-affordance-chip-bg: oklch(45% 0.14 185);    /* teal-700 family — solid fill behind 10px white chip text, ≥4.5:1 contrast */
 
       /* Feedback pending for errors (reuse existing) */
       --color-feedback-pending-fg: oklch(50% 0.19 10);           /* rose-700 family */
@@ -37,6 +38,7 @@
         --color-upload-affordance-bg-resting: transparent;
         --color-upload-affordance-bg-hover: color-mix(in oklch, oklch(72% 0.12 185), transparent 92%);
         --color-upload-affordance-bg-dragover: color-mix(in oklch, oklch(72% 0.12 185), transparent 85%);
+        --color-upload-affordance-chip-bg: oklch(38% 0.13 185);  /* teal-800 family in dark mode — keeps ≥4.5:1 against white chip text */
         --surface-bg: oklch(18% 0.01 0);
         --surface-border: oklch(28% 0.01 0);
         --surface-text: oklch(90% 0.01 0);
@@ -173,7 +175,7 @@
     .ku-panel[open] .ku-caret { transform: rotate(0deg); }
 
     .ku-count-chip {
-      background: var(--color-upload-affordance-fg);
+      background: var(--color-upload-affordance-chip-bg);
       color: white;
       font-size: 10px;
       font-weight: 600;
@@ -595,7 +597,7 @@
               <span class="ku-caret">▾</span>
               <span>Upload knowledge</span>
             </span>
-            <span class="ku-count-chip">3</span>
+            <span class="ku-count-chip" aria-label="3 files staged">3</span>
             <span class="ku-info-icon" aria-label="info">ⓘ</span>
           </summary>
           <div class="ku-body">
@@ -654,7 +656,7 @@
               <span class="ku-caret">▾</span>
               <span>Upload knowledge</span>
             </span>
-            <span class="ku-count-chip">2</span>
+            <span class="ku-count-chip" aria-label="2 files staged">2</span>
             <span class="ku-info-icon" aria-label="info">ⓘ</span>
           </summary>
           <div class="ku-body">
@@ -722,7 +724,7 @@
               <span class="ku-caret">▾</span>
               <span>Upload knowledge</span>
             </span>
-            <span class="ku-count-chip">1</span>
+            <span class="ku-count-chip" aria-label="1 file staged">1</span>
             <span class="ku-info-icon" aria-label="info">ⓘ</span>
           </summary>
           <div class="ku-body">
@@ -769,7 +771,7 @@
               <span class="ku-caret">▾</span>
               <span>Upload knowledge</span>
             </span>
-            <span class="ku-count-chip">2</span>
+            <span class="ku-count-chip" aria-label="2 files staged">2</span>
             <span class="ku-info-icon" aria-label="info">ⓘ</span>
           </summary>
           <div class="ku-body">

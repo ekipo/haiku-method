@@ -1,6 +1,6 @@
 ---
 title: FB-03 fix loop exhausted — assessor disagreed with designer's fix scope
-status: rejected
+status: closed
 origin: agent
 author: parent-agent
 author_type: agent
@@ -8,7 +8,7 @@ created_at: '2026-04-28T21:31:19Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: unit-06-rollout-chip-self-contained
 bolt: 0
 triaged_at: '2026-04-28T21:31:19Z'
 resolution: stage_revisit

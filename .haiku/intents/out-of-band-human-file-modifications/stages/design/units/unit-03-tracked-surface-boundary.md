@@ -11,7 +11,16 @@ inputs:
   - stages/design/artifacts/ARCHITECTURE.md
 outputs:
   - stages/design/artifacts/TRACKED-SURFACE-BOUNDARY.md
-status: pending
+status: active
+bolt: 1
+hat: designer
+started_at: '2026-04-28T19:59:14Z'
+hat_started_at: '2026-04-28T19:59:14Z'
+iterations:
+  - hat: designer
+    started_at: '2026-04-28T19:59:14Z'
+    completed_at: null
+    result: null
 ---
 # Tracked-surface boundary spec
 

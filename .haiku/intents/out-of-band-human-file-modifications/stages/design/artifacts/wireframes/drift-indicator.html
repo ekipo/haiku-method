@@ -569,9 +569,9 @@
               <div class="drift-title">2 file(s) changed since the last agent write</div>
               <div class="drift-body">Assessment runs on the next tick.</div>
             </div>
-            <button class="drift-disclosure" aria-expanded="true">▴ Hide files</button>
+            <button class="drift-disclosure" aria-expanded="true" aria-controls="drift-entry-list-tablet">▴ Hide files</button>
           </div>
-          <div class="drift-entry-list">
+          <div class="drift-entry-list" id="drift-entry-list-tablet" aria-label="Changed files">
             <!-- Tablet: path + event on line 1; timestamp right-aligned on line 2 -->
             <div class="drift-entry-row" style="flex-direction:column; align-items:flex-start; gap:2px;">
               <div style="display:flex; align-items:center; gap:6px; width:100%;">
@@ -626,6 +626,7 @@
               <button
                 class="drift-disclosure"
                 aria-expanded="true"
+                aria-controls="drift-entry-list-mobile"
                 style="margin-top:6px; font-size:11px; min-height:44px; min-width:44px;"
               >
                 ▴ Hide files
@@ -634,7 +635,7 @@
           </div>
 
           <!-- Mobile entry rows: path stacked below chip (3-line layout) -->
-          <div class="drift-entry-list" style="margin-top:8px;">
+          <div class="drift-entry-list" id="drift-entry-list-mobile" aria-label="Changed files" style="margin-top:8px;">
             <div class="drift-entry-row" style="flex-direction:column; align-items:flex-start; gap:1px; padding:6px 4px;">
               <span class="drift-entry-stage-chip">design</span>
               <span

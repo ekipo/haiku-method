@@ -8,9 +8,9 @@ outputs:
   - stages/design/artifacts/ARCHITECTURE.md
 status: active
 bolt: 2
-hat: designer
+hat: design-reviewer
 started_at: '2026-04-28T15:30:35Z'
-hat_started_at: '2026-04-28T19:45:51Z'
+hat_started_at: '2026-04-28T19:48:33Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T15:30:35Z'
@@ -39,6 +39,10 @@ iterations:
       does not meet the durability requirement.
   - hat: designer
     started_at: '2026-04-28T19:45:51Z'
+    completed_at: '2026-04-28T19:48:33Z'
+    result: advance
+  - hat: design-reviewer
+    started_at: '2026-04-28T19:48:33Z'
     completed_at: null
     result: null
 model_original: sonnet

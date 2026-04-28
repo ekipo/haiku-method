@@ -433,6 +433,26 @@
       border: 1px solid var(--color-feedback-pending-fg);
     }
 
+    /* Mime override action button — sibling of .mime-warning, NOT nested inside the live region.
+       Live region carries status text only (ARIA 1.2: no interactive elements inside role="alert"
+       /aria-live="assertive"). Action button lives as a separate, keyboard-reachable control. */
+    .mime-override-btn {
+      align-self: flex-start;
+      margin-top: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--accent-review);
+      font-size: 12px;
+      padding: 0;
+      text-decoration: underline;
+      /* touch-target: visual is text-sized, hit area expanded to 44×44 via .touch-target--hit-area::after */
+    }
+    .mime-override-btn:focus-visible {
+      outline: 3px solid var(--focus-ring-color);
+      outline-offset: 2px;
+    }
+
     /* Note textarea */
     .note-label { font-size: 12px; color: var(--surface-muted); margin-bottom: 4px; }
     .note-textarea {
@@ -799,7 +819,9 @@
           <span class="dz-hint">+140 KB vs original</span>
         </div>
 
-        <!-- Mime mismatch warning: aria-live="assertive" (blocking) -->
+        <!-- Mime mismatch warning: aria-live="assertive" (blocking).
+             Live region carries status text only — interactive controls live OUTSIDE
+             (ARIA 1.2: do not nest interactive elements inside role="alert"/aria-live regions). -->
         <div
           class="mime-warning"
           role="alert"
@@ -807,9 +829,20 @@
         >
           <span aria-hidden="true">⚠</span>
           <span>Type mismatch: original is <strong>text/html</strong>, dropped <strong>image/png</strong>.
-            Pick a matching file, or <button style="background:none;border:none;cursor:pointer;color:var(--accent-review);font-size:12px;padding:0;text-decoration:underline;">override type ▾</button>
-          </span>
+            Pick a matching file, or use the override action below.</span>
         </div>
+
+        <!-- Override action: sibling of the live region, not nested inside it.
+             Hit area expanded to 44×44 via .touch-target--hit-area; focus ring via .mime-override-btn:focus-visible. -->
+        <button
+          type="button"
+          class="mime-override-btn touch-target touch-target--hit-area"
+          aria-label="Override mime type and accept image/png as replacement for text/html"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >
+          override type ▾
+        </button>
 
         <div class="info-notice">
           <span class="info-icon" aria-hidden="true">ℹ</span>

@@ -63,7 +63,7 @@ The baseline is written in four situations:
 
 1. **After every agent write to a tracked file.** When the agent writes a file through its MCP tool pipeline (Write, Edit, or equivalent), the baseline entry for that file is updated immediately with the new SHA and `author_class: "agent"`. The tick counter at the time of the write is recorded in `last_updated_tick`.
 
-2. **After the human-attributed-write MCP tool completes a write.** The sanctioned tool for agent-writes-on-behalf-of-human updates the baseline with `author_class: "human-via-mcp"` at write time, before the tool returns to the agent. This ensures the drift-detection gate does not re-surface the write as drift on the next tick.
+2. **After the `manual_change_assessment` action classifies a finding originating from a human-attributed-write MCP tool call.** The sanctioned tool for agent-writes-on-behalf-of-human writes the file to disk and stamps an action-log entry marking the write as `human-via-mcp` (mirroring the SPA upload pathway in §7.3). The tool does **not** update `baseline.json` directly. The next pre-tick drift gate observes the SHA divergence, emits a drift event with `author_class: "human-via-mcp"`, and dispatches `manual_change_assessment`. The baseline is updated when the agent classifies the finding (terminal outcomes update immediately; non-terminal outcomes update on resolution). This unifies all three human-mediated write paths (filesystem drop, SPA upload, human-attributed MCP tool) through the same detection-and-classification flow, per Decision 1 in DESIGN-DECISIONS.md.
 
 3. **After the `manual_change_assessment` action classifies a terminal finding (ignore or inline-fix).** When the agent classifies a drift event with either terminal outcome, the baseline entry for the affected file is updated immediately to the current on-disk SHA with `author_class: "human-implicit"` (or the class carried in the pending-assessment marker, if one exists — see §5).
 
@@ -240,17 +240,17 @@ The agent classifies all findings in a single response. Per-finding classificati
 
 **What the agent does:** The agent determines the change is not meaningful to the current or future workflow. Typical cases: a text editor wrote a backup file; a build tool touched a file incidentally; the change is a formatting-only normalization the agent would have made anyway.
 
-**What happens to the baseline:** The baseline entry for this file is updated immediately to the current on-disk SHA with `author_class: "human-implicit"`. The tick counter in the entry is updated to the current tick. No pending-assessment marker is written. On the next tick, the drift gate sees the new SHA as the expected state and emits no event for this file.
+**What happens to the baseline:** The baseline entry for this file is updated immediately to the current on-disk SHA with `author_class: "human-implicit"` (or whatever class the originating drift event carried — `human-via-mcp` for SPA uploads or human-attributed MCP writes). The tick counter in the entry is updated to the current tick. No pending-assessment marker is written. On the next tick, the drift gate sees the new SHA as the expected state and emits no event for this file.
 
-**What the user sees:** The drift assessment record (§6) logs the finding and the `ignore` outcome with the agent's rationale. A passive indicator — a "drift assessed: ignored" chip — appears on the affected artifact card in the SPA Outputs tab. The chip clears on the next agent write to that file. No banner, no prompt, no action required from the user.
+**What the user sees:** No new user-visible chip vocabulary is introduced by this outcome. The disposition is recorded in the assessment record (§4.6) — that record is the durable surface for the SPA's drift assessment view. The DESIGN-BRIEF's existing "manual change pending" chip (the transient indicator that appears when a replacement happens and clears when the assessor publishes its disposition) is the chip lifecycle this architecture honors. After classification, the chip clears; if the user wants to know what was decided, they consult the assessment record via the SPA. No banner, no prompt, no action required from the user.
 
 #### 4.4.2 `inline-fix`
 
 **What the agent does:** The agent determines the change is a human improvement or addition that the current bolt should incorporate. The agent will read the modified file and treat it as the new ground truth in its next bolt. This is equivalent to Aider's "human edit is authoritative; re-read before proceeding" stance, applied within the H·AI·K·U lifecycle.
 
-**What happens to the baseline:** Same as `ignore` — the baseline entry is updated immediately to the current on-disk SHA. No pending marker.
+**What happens to the baseline:** Same as `ignore` — the baseline entry is updated immediately to the current on-disk SHA, preserving the originating author_class. No pending marker.
 
-**What the user sees:** The assessment record logs `inline-fix`. A "drift assessed: folded in" chip appears on the artifact card. The agent's next bolt references the human-modified file without overwriting it.
+**What the user sees:** No new chip vocabulary. The assessment record (§4.6) logs the `inline-fix` outcome and the agent's rationale; the SPA's drift assessment view surfaces it. The DESIGN-BRIEF's "manual change pending" chip clears once classification publishes. The agent's next bolt references the human-modified file without overwriting it; that next bolt's outputs are the visible signal that the change was folded in.
 
 #### 4.4.3 `surface-as-feedback`
 
@@ -258,7 +258,7 @@ The agent classifies all findings in a single response. Per-finding classificati
 
 **What happens to the baseline:** The baseline is **not** updated at classification time. Instead, a pending-assessment marker is written for this file (§5). The marker records the finding_id, the feedback item path, and the current tick. The drift-detection gate reads the marker on subsequent ticks and suppresses re-emission of a drift event for this file until the marker is cleared. When the feedback item is resolved (closed or rejected), the marker is cleared and the baseline is updated to the file's then-current SHA.
 
-**What the user sees:** The feedback item appears in the SPA's feedback list with origin badge `agent-detected` and a note that it was surfaced from drift detection. The affected artifact card in the Outputs tab shows a "drift assessed: feedback opened" chip with a link to the feedback item. The drift-detected banner (§6) clears once the `manual_change_assessment` action completes; the pending feedback item is the durable record of the open finding.
+**What the user sees:** The feedback item appears in the SPA's feedback list with origin badge `agent-detected` and a note that it was surfaced from drift detection. No new chip vocabulary is introduced — the feedback item itself is the durable user-visible surface, accessible from the standard feedback list and from the assessment record (§4.6) via cross-reference. The DESIGN-BRIEF's "manual change pending" chip on the affected artifact card clears once classification publishes; from there the user navigates to the feedback list to see the open finding. The drift-detected banner (Screen 3 in DESIGN-BRIEF) clears once the `manual_change_assessment` action completes; the pending feedback item is the durable record of the open finding.
 
 #### 4.4.4 `trigger-revisit`
 
@@ -354,7 +354,7 @@ The author class on a baseline entry reflects the last write that the workflow e
 
 **`agent`** — the agent wrote the file through the MCP tool pipeline. The write is in-band and was tracked by the workflow engine at write time. This is the default for all files the agent produces during hat execution.
 
-**`human-via-mcp`** — the sanctioned human-attributed-write MCP tool performed the write. This tool exists to support the "agent writes a file on explicit user instruction" use case (Decision 7 in DESIGN-DECISIONS.md). When the user says "hey Claude, write this config file for me," the agent invokes this tool rather than its normal Write tool. The tool attributes the write to the human at write time, updating the baseline with this class and a timestamp before returning to the agent. The write is both tracked (the baseline records it) and human-attributed (the class distinguishes it from agent writes).
+**`human-via-mcp`** — an explicit human-mediated write reached the workflow engine through a sanctioned channel: either the human-attributed-write MCP tool (the agent's "write on behalf of user" path; Decision 7) or the SPA upload affordance (Knowledge Upload Panel, Stage Output Replacement Card). Both channels stamp an action-log entry at write time marking the write as `human-via-mcp`; neither updates `baseline.json` directly. The pre-tick drift gate consults the action log on its next scan, attaches the `human-via-mcp` class to the emitted drift event, and dispatches `manual_change_assessment` so the agent classifies the change. The class survives into the baseline entry only after the assessment publishes — terminal outcomes propagate the class via §2.3 item 2; non-terminal outcomes propagate it on marker resolution. The class distinguishes mediated human writes (where the user took an explicit, observable action through a sanctioned surface) from `human-implicit` writes (where no sanctioned channel was used).
 
 **`human-implicit`** — the file's SHA changed without an intervening agent stamp in the current tick's action log. No tool mediated the write. The change arrived via filesystem drop, SPA upload, or some other out-of-band path. The drift-detection gate infers this class and applies it to the baseline entry after a terminal assessment closes the finding.
 
@@ -377,7 +377,7 @@ Decision 9 in DESIGN-DECISIONS.md was left open at inception with two candidate 
 
 **Chosen stance: trust + audit.**
 
-The human-attributed-write MCP tool writes the file, updates the baseline with `author_class: "human-via-mcp"`, and writes an audit entry to `drift-markers.json`'s sibling audit log at `.haiku/intents/{slug}/write-audit.jsonl` (one JSON record per line, append-only). Each audit entry carries: timestamp, tool invocation context, user instruction excerpt (truncated to 200 chars), file path, SHA written, and session identifier.
+The human-attributed-write MCP tool writes the file, stamps a `human-via-mcp` entry in the current tick's action log (so the next pre-tick drift gate emits the drift event with the correct author class — see §2.3 item 2 and §7.3 for the unified flow), and writes an audit entry to `drift-markers.json`'s sibling audit log at `.haiku/intents/{slug}/write-audit.jsonl` (one JSON record per line, append-only). Each audit entry carries: timestamp, tool invocation context, user instruction excerpt (truncated to 200 chars), file path, SHA written, and session identifier. The tool deliberately does **not** update `baseline.json` directly; the baseline update happens when the next tick's `manual_change_assessment` classifies the resulting drift event, exactly as it does for SPA uploads and filesystem drops. The audit log is the immediate-write side-effect that records human attribution; the assessment record (§4.6) is the post-classification durable surface.
 
 This stance is chosen because:
 - The primary use case is interactive — the user is in the chat and explicitly instructs the agent. The human is present and their intent is unambiguous.
@@ -411,9 +411,19 @@ No locking, no optimistic concurrency, no retry-on-conflict. The eventual-consis
 
 ### 7.3 SPA Upload Timing
 
-When a user uploads a file through the SPA's upload affordance, the SPA performs a multipart POST to a write endpoint. That endpoint writes the file to disk and updates the baseline directly (it has access to the workflow engine's state layer). This means SPA uploads are immediately baselined with `author_class: "human-via-mcp"` at upload time — the next tick's drift gate sees them as already-acknowledged human writes and does not emit a drift event.
+When a user uploads a file through the SPA's upload affordance (Knowledge Upload Panel or Stage Output Replacement Card per DESIGN-BRIEF Screens 1 and 2), the SPA performs a multipart POST to a write endpoint. The endpoint:
 
-This is the preferred integration path for SPA uploads: the SPA's backend endpoint participates in the baseline protocol rather than relying on the drift gate to discover the write implicitly. The implicit-detection path (drift gate detecting an SPA-uploaded file as `human-implicit` on the next tick) is a fallback for the case where the backend endpoint is unavailable or the upload bypasses it.
+1. Writes the file to disk in the destination directory (intent `knowledge/`, stage `outputs/`, etc., per the destination selector).
+2. Stamps an entry in the current tick's action log marking the upload's author class as `human-via-mcp`. This entry is what the drift-detection gate consults at scan time to attach the correct author class to the emitted drift event.
+3. Does **not** update `baseline.json` directly. The endpoint deliberately leaves the file's baseline entry stale so that the next pre-tick drift-detection gate observes the SHA divergence, emits a drift event with `author_class: "human-via-mcp"`, and dispatches `manual_change_assessment` exactly the way it would for any other tracked-surface change.
+
+This means every SPA upload flows through the unified detection-and-classification path. The agent receives the drift event in its `manual_change_assessment` payload, observes that the change came from an explicit human-mediated write (the `human-via-mcp` author class is the signal), and classifies — typically `inline-fix` for a deliberate Replace dialog submission, since the user's intent is unambiguous from the upload action; typically `inline-fix` or `ignore` for an additive Knowledge Upload, depending on whether the new file is referenced from the current bolt. The classification's effect on the baseline is governed by §5.4 and §2.3 — exactly the same contract that governs filesystem drops and human-attributed MCP writes.
+
+This unified path honors the "next workflow tick will assess this change" UX promise made in DESIGN-BRIEF Screen 2's Replace dialog reassurance copy and Screen 3's Drift-Detected Banner — a promise that is only meaningful if the assessment actually fires. It also honors Decision 1 in DESIGN-DECISIONS.md, which requires that all three write paths (filesystem drop, SPA upload, human-attributed MCP write) flow through the same detection mechanism. There is no fast-path special case for SPA uploads.
+
+**SPA-side UX during the assessment window.** Because the assessment runs on the next tick rather than at upload time, the SPA shows the DESIGN-BRIEF's "manual change pending" chip on the affected artifact card from upload acknowledgment until classification publishes. The Drift-Detected Banner (DESIGN-BRIEF Screen 3) appears whenever `drift_detected === true` for the active stage and disappears when `manual_change_assessment` completes. The "Run now" button on the banner is the user-facing escape hatch for impatience — it triggers an immediate `haiku_run_next` call, which runs the gate and the classification action without waiting for the next scheduled tick.
+
+**Storage-location reconciliation.** DESIGN-BRIEF line 284's mention of "updates baseline SHA in `state.json`" is a known cross-document mismatch with this architecture's §2.2 (baseline lives at `stages/{stage}/baseline.json`, not `state.json`). The architecture is the binding contract; the DESIGN-BRIEF reference will be reconciled by a sibling brief amendment so the development stage implements against `baseline.json` rather than `state.json`. The behavior described above (endpoint does NOT update baseline at upload time) supersedes the brief's wording — the endpoint's only state mutation at upload time is the action-log entry, not a baseline write.
 
 ---
 
@@ -519,7 +529,7 @@ This architecture is consistent with all nine recorded decisions in DESIGN-DECIS
 
 | Decision | Where this architecture implements it |
 |---|---|
-| Decision 1: Both explicit and implicit detection | Implicit: SHA baseline + drift gate (§3). Explicit: SPA upload path baselines at write time (§7.3); human-attributed-write MCP tool baselines at write time (§2.3). |
+| Decision 1: Both explicit and implicit detection | Implicit: SHA baseline + drift gate (§3). Explicit: SPA upload (§7.3) and human-attributed-write MCP tool (§2.3 item 2) both stamp the action log with `author_class: "human-via-mcp"` at write time without touching `baseline.json`; the next tick's drift gate emits a drift event with that class and dispatches `manual_change_assessment`. All three paths (filesystem drop, SPA upload, MCP tool) flow through the unified detection-and-classification pipeline — no fast-path special cases. |
 | Decision 2: Agent guardrail boundary unchanged | Workflow-managed files excluded from tracked surface (§3.3). Gate does not guard against human edits to those files. |
 | Decision 3: New `manual_change_assessment` action, agent-owned classification | §4 in full. Four outcomes. Agent dispatched autonomously via `haiku_run_next`. |
 | Decision 4: Eventual consistency | §7 in full. No locking. Mid-bolt partial-state acknowledged. |

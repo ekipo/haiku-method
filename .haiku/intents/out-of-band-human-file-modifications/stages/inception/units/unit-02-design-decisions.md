@@ -11,12 +11,16 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/knowledge/DESIGN-DECISIONS.md
 status: active
 bolt: 1
-hat: researcher
+hat: distiller
 started_at: '2026-04-28T14:19:34Z'
-hat_started_at: '2026-04-28T14:19:34Z'
+hat_started_at: '2026-04-28T14:23:49Z'
 iterations:
   - hat: researcher
     started_at: '2026-04-28T14:19:34Z'
+    completed_at: '2026-04-28T14:23:49Z'
+    result: advance
+  - hat: distiller
+    started_at: '2026-04-28T14:23:49Z'
     completed_at: null
     result: null
 ---

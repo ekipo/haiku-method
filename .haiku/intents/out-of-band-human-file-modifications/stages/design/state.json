@@ -1,11 +1,11 @@
 {
   "stage": "design",
-  "status": "active",
+  "status": "completed",
   "phase": "gate",
   "started_at": "2026-04-28T14:42:29Z",
-  "completed_at": null,
-  "gate_entered_at": "2026-04-28T22:26:56Z",
-  "gate_outcome": null,
+  "completed_at": "2026-04-28T23:50:56Z",
+  "gate_entered_at": "2026-04-28T23:45:33Z",
+  "gate_outcome": "advanced",
   "visits": 2,
   "iterations": [
     {
@@ -18,9 +18,9 @@
     {
       "index": 2,
       "started_at": "2026-04-28T21:31:33Z",
-      "completed_at": null,
+      "completed_at": "2026-04-28T23:50:56Z",
       "trigger": "user-revisit",
-      "result": null,
+      "result": "advanced",
       "reason": "User revisit with 1 feedback item(s)",
       "feedback_signature": "sig:3247a96c"
     }

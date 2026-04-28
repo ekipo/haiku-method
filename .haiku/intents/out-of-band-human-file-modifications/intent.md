@@ -2,6 +2,7 @@
 title: Out-of-band human file modifications
 studio: software
 mode: continuous
+autopilot: true
 status: active
 created_at: '2026-04-28'
 stages:
@@ -11,6 +12,7 @@ stages:
   - development
   - operations
   - security
+active_stage: inception
 ---
 
 # Out-of-band human file modifications

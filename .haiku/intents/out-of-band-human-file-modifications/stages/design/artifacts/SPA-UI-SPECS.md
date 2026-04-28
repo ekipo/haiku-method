@@ -6,13 +6,15 @@
 
 ## 0. Conflict Resolution — SPA-UI-SPECS.md is Authoritative
 
-This spec was authored after the design direction was locked to **Direction A: discrete + autonomous classification** (recorded in `stages/design/decision_log.json` and mirrored in `knowledge/DESIGN-DECISIONS.md`). Three specific conflicts with DESIGN-BRIEF.md are resolved here:
+This spec was authored after the design direction was locked to **Direction A: discrete + autonomous classification** (recorded in `stages/design/decision_log.json` and mirrored in `knowledge/DESIGN-DECISIONS.md`). Four specific conflicts with DESIGN-BRIEF.md are resolved here:
 
 1. **"Run now ↻" button** — DESIGN-BRIEF.md's Screen 3 sketches this button. It is **removed** from this spec. Per Direction A, the user does NOT trigger manual-change-assessment. Assessment fires on the next normal `haiku_run_next` tick automatically. No button, no link, no affordance for user-triggered assessment appears on any of the three surfaces.
 
 2. **Raw Tailwind palette classes for drift-state styling** — DESIGN-BRIEF.md uses `bg-amber-50`, `text-amber-900`, etc. for drift state. This spec **replaces** those with CSS custom property references (`var(--color-drift-detected-bg)`, etc.) per the canonical token vocabulary in `knowledge/DESIGN-TOKENS.md`. Raw palette names are not used in any semantic surface.
 
 3. **Deprecated provisional token names** — DESIGN-BRIEF.md references `--color-drift-bg`, `--color-drift-fg`, `--color-drift-stripe`. These are **deprecated**. The canonical four-state taxonomy from `knowledge/DESIGN-TOKENS.md` applies: `--color-drift-detected-fg/bg`, `--color-drift-acknowledged-fg/bg`, `--color-drift-surfaced-fg/bg`, `--color-drift-revisit-fg/bg`. No other drift-state tokens may appear in wireframes or implementation.
+
+4. **`⋯` menu button `aria-label` string** — DESIGN-BRIEF.md Screen 2 uses `aria-label="Output actions for ${name}"`; an earlier draft of this spec used the generic `"More options for {artifact-name}"`. The canonical string is **`aria-label="Output actions for {artifact-name}"`** (interpolated per card with the actual artifact filename, e.g. `aria-label="Output actions for hero-mockup.html"`). The semantic "Output actions" — not the generic "More options" — is required because the menu's items are scoped to output-specific actions (replace this output, etc.) and screen-reader users need the category in the announcement. Implementations and wireframes MUST use this exact format string.
 
 **Passive-observer constraint (Direction A):** All three surfaces are read-only indicators. They show what was detected and what the agent decided. They do NOT contain action buttons for classification, assessment triggers, accept/reject controls, or any control that drives the agent's workflow. The agent classifies autonomously on the next tick.
 
@@ -145,14 +147,16 @@ Augments existing artifact cards in the `StageReview` Outputs tab (`ArtifactsTab
 
 | Token | Applied to |
 |---|---|
-| `--color-drift-detected-bg` | Card left-border accent when drift is detected, awaiting classification |
-| `--color-drift-acknowledged-bg` | Card left-border accent when drift was classified as `ignore` or `inline-fix` |
-| `--color-drift-surfaced-bg` | Card left-border accent when drift was classified as `surface-as-feedback` |
-| `--color-drift-revisit-bg` | Card left-border accent when drift was classified as `trigger-revisit` |
+| `--color-drift-detected-fg` | Card left-border accent when drift is detected, awaiting classification |
+| `--color-drift-acknowledged-fg` | Card left-border accent when drift was classified as `ignore` or `inline-fix` |
+| `--color-drift-surfaced-fg` | Card left-border accent when drift was classified as `surface-as-feedback` |
+| `--color-drift-revisit-fg` | Card left-border accent when drift was classified as `trigger-revisit` |
 | `--color-upload-affordance-fg` | Modal drop-zone border and icon |
 | `--color-upload-affordance-bg-resting` | Modal drop-zone resting background |
 | `--color-upload-affordance-bg-hover` | Modal drop-zone hover background |
 | `--color-upload-affordance-bg-dragover` | Modal drop-zone dragover background |
+
+The `-fg` token variants are required for the 4px left-border accent because the `-bg` variants are near-white/near-surface and would render with less than 3:1 contrast against the card surface, failing WCAG 1.4.11 (Non-text Contrast) for UI components. The `-bg` variants are reserved for filled surfaces (badges, banners) where the contrast budget is spent on the text/icon foreground.
 
 No raw hex values. No deprecated `--color-drift-bg/fg/stripe` tokens.
 
@@ -163,21 +167,21 @@ Each drift state MUST convey information via a non-color signal in addition to t
 | State | Border token | Non-color signal |
 |---|---|---|
 | Default (no drift) | None | No badge; card renders normally |
-| drift-detected | `var(--color-drift-detected-bg)` | Icon badge with text label "Drift detected" (AlertTriangle icon + text, positioned in card footer) |
-| drift-acknowledged | `var(--color-drift-acknowledged-bg)` | Icon badge with text label "Acknowledged" (CheckCircle icon + text) |
-| drift-surfaced | `var(--color-drift-surfaced-bg)` | Icon badge with text label "Surfaced as feedback" (MessageSquare icon + text) |
-| drift-revisit | `var(--color-drift-revisit-bg)` | Icon badge with text label "Revisit triggered" (RefreshCw icon + text) |
+| drift-detected | `var(--color-drift-detected-fg)` | Icon badge with text label "Drift detected" (AlertTriangle icon + text, positioned in card footer) |
+| drift-acknowledged | `var(--color-drift-acknowledged-fg)` | Icon badge with text label "Acknowledged" (CheckCircle icon + text) |
+| drift-surfaced | `var(--color-drift-surfaced-fg)` | Icon badge with text label "Surfaced as feedback" (MessageSquare icon + text) |
+| drift-revisit | `var(--color-drift-revisit-fg)` | Icon badge with text label "Revisit triggered" (RefreshCw icon + text) |
 
 The badge text and icon are required in all cases — not optional. A color-blind user or screen reader user must be able to identify the drift state without the color signal.
 
 ### 2.4 `⋯` Menu Button — ARIA Requirements
 
 The `⋯` button on each artifact card:
-- `aria-label="More options for {artifact-name}"` — interpolated per card with the actual artifact filename (e.g. `aria-label="More options for hero-mockup.html"`)
+- `aria-label="Output actions for {artifact-name}"` — interpolated per card with the actual artifact filename (e.g. `aria-label="Output actions for hero-mockup.html"`). This is the canonical string per §0 conflict resolution #4 — DESIGN-BRIEF.md Screen 2 also uses this string.
 - `aria-haspopup="menu"`
 - `aria-expanded` reflects popover open/closed state
 
-Without the interpolated `aria-label`, screen readers announce only "button" with no context. The per-card interpolation is required.
+Without the interpolated `aria-label`, screen readers announce only "button" with no context. The "Output actions" prefix (vs the generic "More options") is required because the menu is scoped to output-specific actions; the per-card interpolation supplies the artifact filename.
 
 Touch target: `.touch-target` MUST be applied to the `⋯` button at ≤768px. The visual element is sub-44px; `.touch-target--hit-area` expands the hit area.
 
@@ -236,7 +240,7 @@ All states from §1.3 Knowledge Upload drop zone, PLUS:
 
 ### 2.6 ARIA Annotations (Required)
 
-- `⋯` trigger: `aria-label="More options for {artifact-name}"` (interpolated), `aria-haspopup="menu"`, `aria-expanded`
+- `⋯` trigger: `aria-label="Output actions for {artifact-name}"` (interpolated — canonical per §0 conflict resolution #4), `aria-haspopup="menu"`, `aria-expanded`
 - Popover: `role="menu"`; items `role="menuitem"`; arrow-key navigation; Enter/Space activates; Esc closes and returns focus to `⋯` trigger
 - Replace modal: native `<dialog>` element; `aria-labelledby` on dialog title; `aria-describedby` on dialog body; focus on open lands on drop zone; focus on close returns to `⋯` trigger
 - Mime-mismatch warning: `aria-live="assertive"` — interrupts immediately because it is a blocking validation
@@ -416,6 +420,8 @@ The following token pairs are used in the new surfaces. Each has been verified a
 | Drift-revisit badge text | `--color-drift-revisit-fg` | `--color-drift-revisit-bg` | ~5.1:1 | 4.5:1 | PASS |
 
 Note: Exact OKLCH-to-sRGB conversion and precise contrast ratios must be verified by the development stage using the defined token values from `packages/haiku-ui/src/index.css`. The ratios above are computed from the palette anchors documented in `knowledge/DESIGN-TOKENS.md` §1.3.2 and §1.3.4.
+
+**No opacity reductions on token-pair text.** All ratios in this table assume full-opacity foreground tokens. Implementations MUST NOT apply `opacity:` (e.g. `opacity: 0.7`, `opacity: 0.85`) to text rendered with these foreground tokens — opacity blends the foreground toward the background and invalidates the ratios. If a muted/secondary text variant is needed, use the `color-mix(in oklch, …)` pattern documented in `knowledge/DESIGN-TOKENS.md` §1.3.4 to derive a darker foreground (mix toward black, not toward the background) and verify the resulting ratio against the applicable threshold (4.5:1 for normal text, 3:1 for ≥18px or ≥14px-bold large text). Visual hierarchy between title and body text MUST be carried by `font-size`, `font-weight`, and spacing — never by transparency.
 
 ### 4.5 Reduced-Motion Summary
 

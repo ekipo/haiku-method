@@ -6,14 +6,23 @@
   "completed_at": null,
   "gate_entered_at": null,
   "gate_outcome": null,
-  "visits": 1,
+  "visits": 2,
   "iterations": [
     {
       "index": 1,
       "started_at": "2026-04-28T14:42:30Z",
-      "completed_at": null,
+      "completed_at": "2026-04-28T21:31:33Z",
       "trigger": "initial",
-      "result": null
+      "result": "user-revisit"
+    },
+    {
+      "index": 2,
+      "started_at": "2026-04-28T21:31:33Z",
+      "completed_at": null,
+      "trigger": "user-revisit",
+      "result": null,
+      "reason": "User revisit with 1 feedback item(s)",
+      "feedback_signature": "sig:3247a96c"
     }
   ],
   "elaboration_turns": 6,

@@ -1,16 +1,16 @@
 ---
 title: Drift-detection architecture spec
-model: sonnet
+model: opus
 inputs: >-
   ["stages/design/DESIGN-BRIEF.md", "knowledge/DISCOVERY.md",
   "knowledge/DESIGN-DECISIONS.md", "knowledge/IMPLEMENTATION-MAP.md"]
 outputs:
   - stages/design/artifacts/ARCHITECTURE.md
 status: active
-bolt: 1
-hat: design-reviewer
+bolt: 2
+hat: designer
 started_at: '2026-04-28T15:30:35Z'
-hat_started_at: '2026-04-28T15:39:01Z'
+hat_started_at: '2026-04-28T19:45:51Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T15:30:35Z'
@@ -18,8 +18,30 @@ iterations:
     result: advance
   - hat: design-reviewer
     started_at: '2026-04-28T15:39:01Z'
+    completed_at: '2026-04-28T19:45:51Z'
+    result: reject
+    reason: >-
+      Two completion-criteria gaps: (1) Kill-switch flag missing — the document
+      never references `drift_detection: false` or any kill-switch integration;
+      the criterion requires the architecture to name the flag and specify the
+      gate's no-op behavior when set. (2) Assessment-record durability rationale
+      is incomplete — §4.6 specifies the drift-assessments/ directory but does
+      not explicitly justify the choice against the alternative (state.json
+      append-log) in terms of branch-operation survival; the completion
+      criterion requires that rationale to be present. Both gaps are in scope of
+      the design-reviewer mandate (state coverage and internal consistency with
+      the declared design decisions). Fix: (a) add a §11 or §3.5-addendum
+      specifying that when `drift_detection: false` is set in plugin settings
+      the drift-detection gate becomes a complete no-op (no SHA computation, no
+      events emitted, no baseline writes); (b) extend §4.6 to explicitly state
+      why the directory approach survives `git checkout` between stage branches
+      and `/haiku:revisit`-driven branch reuse, vs. why state.json append-log
+      does not meet the durability requirement.
+  - hat: designer
+    started_at: '2026-04-28T19:45:51Z'
     completed_at: null
     result: null
+model_original: sonnet
 ---
 # Drift-detection architecture spec
 

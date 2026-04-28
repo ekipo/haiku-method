@@ -12,7 +12,16 @@ inputs:
   - stages/design/artifacts/TRACKED-SURFACE-BOUNDARY.md
 outputs:
   - stages/design/artifacts/ROLLOUT-AND-BASELINE-ESTABLISHMENT.md
-status: pending
+status: active
+bolt: 1
+hat: designer
+started_at: '2026-04-28T20:14:29Z'
+hat_started_at: '2026-04-28T20:14:29Z'
+iterations:
+  - hat: designer
+    started_at: '2026-04-28T20:14:29Z'
+    completed_at: null
+    result: null
 ---
 # Rollout & baseline-establishment design
 

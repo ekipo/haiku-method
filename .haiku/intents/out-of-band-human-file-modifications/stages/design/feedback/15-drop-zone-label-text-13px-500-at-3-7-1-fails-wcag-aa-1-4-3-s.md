@@ -2,7 +2,7 @@
 title: >-
   Drop-zone label text (13px/500) at ~3.7:1 fails WCAG AA 1.4.3 — spec §4.4
   misclassifies threshold as 3:1
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 2
 visit: 2
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T21:59:48Z'
 resolution: null
 replies: []
@@ -47,4 +47,3 @@ The spec footnote ("exact ratios must be verified at development stage") does no
 **Option B:** Accept as known non-conformance with explicit documented decision (cannot remain silent).
 
 Note: the hover and dragover backgrounds (`color-mix` at 8–15% teal opacity) will have slightly less contrast than the resting state; all must be re-verified after the token change.
-

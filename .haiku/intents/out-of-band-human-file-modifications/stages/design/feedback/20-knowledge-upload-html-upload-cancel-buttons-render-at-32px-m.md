@@ -2,7 +2,7 @@
 title: >-
   knowledge-upload.html: Upload/Cancel buttons render at 32px min-height at
   tablet (768px), below 44px spec requirement
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 2
 visit: 2
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T22:01:14Z'
 resolution: null
 replies: []
@@ -51,4 +51,3 @@ Alternatively, apply `style="min-height:44px"` inline on the button elements in 
 Also consider applying `.touch-target` to the buttons in the tablet demo markup to make the intent explicit for the implementation team.
 
 **No change needed to the desktop (1280px) states.**
-

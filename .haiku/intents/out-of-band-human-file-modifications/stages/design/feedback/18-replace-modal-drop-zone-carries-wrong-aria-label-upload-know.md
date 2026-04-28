@@ -2,7 +2,7 @@
 title: >-
   Replace modal drop zone carries wrong aria-label "Upload knowledge file" in
   replacement context
-status: pending
+status: fixing
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 2
 visit: 2
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T22:00:33Z'
 resolution: null
 replies: []

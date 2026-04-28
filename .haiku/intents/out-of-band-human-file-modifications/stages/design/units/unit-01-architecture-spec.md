@@ -1,10 +1,10 @@
 ---
 title: Drift-detection architecture spec
 model: opus
-inputs: -
-  - "stages/design/DESIGN-BRIEF.md", 
+inputs:
+  - "stages/design/DESIGN-BRIEF.md" 
   - "knowledge/DISCOVERY.md"
-  - "knowledge/DESIGN-DECISIONS.md", 
+  - "knowledge/DESIGN-DECISIONS.md"
   - "knowledge/IMPLEMENTATION-MAP.md"
 outputs:
   - stages/design/artifacts/ARCHITECTURE.md

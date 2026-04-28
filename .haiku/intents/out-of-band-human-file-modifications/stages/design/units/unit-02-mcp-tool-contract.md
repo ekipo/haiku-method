@@ -10,7 +10,7 @@ inputs:
   - knowledge/DISCOVERY.md
 outputs:
   - stages/design/artifacts/MCP-TOOL-CONTRACT.md
-status: active
+status: completed
 bolt: 1
 hat: design-reviewer
 started_at: '2026-04-28T19:59:29Z'
@@ -22,8 +22,9 @@ iterations:
     result: advance
   - hat: design-reviewer
     started_at: '2026-04-28T20:04:17Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-28T20:04:55Z'
+    result: advance
+completed_at: '2026-04-28T20:04:55Z'
 ---
 # Human-attributed write MCP tool contract
 

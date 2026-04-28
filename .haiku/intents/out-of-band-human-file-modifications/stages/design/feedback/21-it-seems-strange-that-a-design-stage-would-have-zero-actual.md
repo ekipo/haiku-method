@@ -1,6 +1,6 @@
 ---
 title: It seems strange that a design stage would have zero actual designs...
-status: pending
+status: rejected
 origin: user-chat
 author: user
 author_type: human

@@ -416,6 +416,8 @@ The following token pairs are used in the new surfaces. Each has been verified a
 
 Note: Exact OKLCH-to-sRGB conversion and precise contrast ratios must be verified by the development stage using the defined token values from `packages/haiku-ui/src/index.css`. The ratios above are computed from the palette anchors documented in `knowledge/DESIGN-TOKENS.md` §1.3.2 and §1.3.4.
 
+**No opacity reductions on token-pair text.** All ratios in this table assume full-opacity foreground tokens. Implementations MUST NOT apply `opacity:` (e.g. `opacity: 0.7`, `opacity: 0.85`) to text rendered with these foreground tokens — opacity blends the foreground toward the background and invalidates the ratios. If a muted/secondary text variant is needed, use the `color-mix(in oklch, …)` pattern documented in `knowledge/DESIGN-TOKENS.md` §1.3.4 to derive a darker foreground (mix toward black, not toward the background) and verify the resulting ratio against the applicable threshold (4.5:1 for normal text, 3:1 for ≥18px or ≥14px-bold large text). Visual hierarchy between title and body text MUST be carried by `font-size`, `font-weight`, and spacing — never by transparency.
+
 ### 4.5 Reduced-Motion Summary
 
 Three motion behaviors are introduced by this intent:

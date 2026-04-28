@@ -192,7 +192,10 @@
       font-size: 12px;
       color: var(--color-drift-detected-fg);
       margin-top: 2px;
-      opacity: 0.85;
+      /* No opacity reduction — full-opacity --color-drift-detected-fg on
+         --color-drift-detected-bg is the verified 5.2:1 ratio per
+         SPA-UI-SPECS.md §4.4. Hierarchy vs .drift-title comes from
+         font-size (12px vs 13px) and font-weight (400 vs 600). */
     }
 
     /* Disclosure toggle — purely informational; no classification-trigger controls */
@@ -280,14 +283,15 @@
     .drift-entry-event {
       font-size: 10px;
       color: var(--color-drift-detected-fg);
-      opacity: 0.7;
+      /* No opacity reduction — at 10px this is small text; the 4.5:1
+         minimum applies. Full-opacity token pair is 5.2:1 per §4.4. */
       white-space: nowrap;
     }
 
     .drift-entry-age {
       font-size: 10px;
       color: var(--color-drift-detected-fg);
-      opacity: 0.7;
+      /* No opacity reduction — see .drift-entry-event note above. */
       white-space: nowrap;
     }
 
@@ -579,7 +583,7 @@
                 <span class="drift-entry-path">stages/design/outputs/hero.html</span>
                 <span class="drift-entry-event">modified</span>
               </div>
-              <div style="padding-left:52px; font-size:10px; color:var(--color-drift-detected-fg); opacity:0.7;">4m ago</div>
+              <div style="padding-left:52px; font-size:10px; color:var(--color-drift-detected-fg);">4m ago</div>
             </div>
             <div class="drift-entry-row" style="flex-direction:column; align-items:flex-start; gap:2px;">
               <div style="display:flex; align-items:center; gap:6px; width:100%;">
@@ -587,7 +591,7 @@
                 <span class="drift-entry-path">knowledge/brand-guide.pdf</span>
                 <span class="drift-entry-event">added</span>
               </div>
-              <div style="padding-left:52px; font-size:10px; color:var(--color-drift-detected-fg); opacity:0.7;">12m ago</div>
+              <div style="padding-left:52px; font-size:10px; color:var(--color-drift-detected-fg);">12m ago</div>
             </div>
           </div>
         </div>
@@ -641,7 +645,7 @@
                 class="drift-entry-path"
                 style="padding-left:8px; font-size:11px; white-space:normal; word-break:break-all;"
               >stages/design/outputs/hero.html</span>
-              <div style="padding-left:8px; display:flex; gap:8px; font-size:10px; color:var(--color-drift-detected-fg); opacity:0.7;">
+              <div style="padding-left:8px; display:flex; gap:8px; font-size:10px; color:var(--color-drift-detected-fg);">
                 <span>modified</span>
                 <span>4m ago</span>
               </div>
@@ -652,7 +656,7 @@
                 class="drift-entry-path"
                 style="padding-left:8px; font-size:11px; white-space:normal; word-break:break-all;"
               >knowledge/brand-guide.pdf</span>
-              <div style="padding-left:8px; display:flex; gap:8px; font-size:10px; color:var(--color-drift-detected-fg); opacity:0.7;">
+              <div style="padding-left:8px; display:flex; gap:8px; font-size:10px; color:var(--color-drift-detected-fg);">
                 <span>added</span>
                 <span>12m ago</span>
               </div>

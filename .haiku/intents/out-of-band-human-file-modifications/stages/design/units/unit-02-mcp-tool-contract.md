@@ -4,14 +4,22 @@ model: sonnet
 depends_on:
   - unit-01-architecture-spec
 inputs:
-  - intent.md
-  - knowledge/DISCOVERY.md
-  - knowledge/DESIGN-DECISIONS.md
-  - stages/design/knowledge/DESIGN-BRIEF.md
+  - stages/design/DESIGN-BRIEF.md
   - stages/design/artifacts/ARCHITECTURE.md
+  - knowledge/DESIGN-DECISIONS.md
+  - knowledge/DISCOVERY.md
 outputs:
   - stages/design/artifacts/MCP-TOOL-CONTRACT.md
-status: pending
+status: active
+bolt: 1
+hat: designer
+started_at: '2026-04-28T19:59:29Z'
+hat_started_at: '2026-04-28T19:59:29Z'
+iterations:
+  - hat: designer
+    started_at: '2026-04-28T19:59:29Z'
+    completed_at: null
+    result: null
 ---
 # Human-attributed write MCP tool contract
 

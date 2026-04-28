@@ -2,7 +2,7 @@
 title: >-
   replacement-affordance.html: mime mismatch "override type" button missing
   focus ring, touch-target, inside aria-live
-status: pending
+status: closed
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-28T22:00:52Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
-bolt: 0
+closed_by: 'fix-loop:FB-19:bolt-1'
+bolt: 1
 triaged_at: '2026-04-28T22:00:52Z'
 resolution: null
 replies: []
@@ -51,4 +51,3 @@ ARIA 1.2 guidance warns against embedding interactive elements in live regions. 
 2. Add `:focus-visible` rule: `outline: 3px solid var(--focus-ring-color); outline-offset: 2px;`.
 3. Apply `.touch-target.touch-target--hit-area` to expand the tap area to ≥44×44px.
 4. Update spec §2.5 / §2.6 to document: live region = status text only; action button = sibling element outside the live region.
-

@@ -145,14 +145,16 @@ Augments existing artifact cards in the `StageReview` Outputs tab (`ArtifactsTab
 
 | Token | Applied to |
 |---|---|
-| `--color-drift-detected-bg` | Card left-border accent when drift is detected, awaiting classification |
-| `--color-drift-acknowledged-bg` | Card left-border accent when drift was classified as `ignore` or `inline-fix` |
-| `--color-drift-surfaced-bg` | Card left-border accent when drift was classified as `surface-as-feedback` |
-| `--color-drift-revisit-bg` | Card left-border accent when drift was classified as `trigger-revisit` |
+| `--color-drift-detected-fg` | Card left-border accent when drift is detected, awaiting classification |
+| `--color-drift-acknowledged-fg` | Card left-border accent when drift was classified as `ignore` or `inline-fix` |
+| `--color-drift-surfaced-fg` | Card left-border accent when drift was classified as `surface-as-feedback` |
+| `--color-drift-revisit-fg` | Card left-border accent when drift was classified as `trigger-revisit` |
 | `--color-upload-affordance-fg` | Modal drop-zone border and icon |
 | `--color-upload-affordance-bg-resting` | Modal drop-zone resting background |
 | `--color-upload-affordance-bg-hover` | Modal drop-zone hover background |
 | `--color-upload-affordance-bg-dragover` | Modal drop-zone dragover background |
+
+The `-fg` token variants are required for the 4px left-border accent because the `-bg` variants are near-white/near-surface and would render with less than 3:1 contrast against the card surface, failing WCAG 1.4.11 (Non-text Contrast) for UI components. The `-bg` variants are reserved for filled surfaces (badges, banners) where the contrast budget is spent on the text/icon foreground.
 
 No raw hex values. No deprecated `--color-drift-bg/fg/stripe` tokens.
 
@@ -163,10 +165,10 @@ Each drift state MUST convey information via a non-color signal in addition to t
 | State | Border token | Non-color signal |
 |---|---|---|
 | Default (no drift) | None | No badge; card renders normally |
-| drift-detected | `var(--color-drift-detected-bg)` | Icon badge with text label "Drift detected" (AlertTriangle icon + text, positioned in card footer) |
-| drift-acknowledged | `var(--color-drift-acknowledged-bg)` | Icon badge with text label "Acknowledged" (CheckCircle icon + text) |
-| drift-surfaced | `var(--color-drift-surfaced-bg)` | Icon badge with text label "Surfaced as feedback" (MessageSquare icon + text) |
-| drift-revisit | `var(--color-drift-revisit-bg)` | Icon badge with text label "Revisit triggered" (RefreshCw icon + text) |
+| drift-detected | `var(--color-drift-detected-fg)` | Icon badge with text label "Drift detected" (AlertTriangle icon + text, positioned in card footer) |
+| drift-acknowledged | `var(--color-drift-acknowledged-fg)` | Icon badge with text label "Acknowledged" (CheckCircle icon + text) |
+| drift-surfaced | `var(--color-drift-surfaced-fg)` | Icon badge with text label "Surfaced as feedback" (MessageSquare icon + text) |
+| drift-revisit | `var(--color-drift-revisit-fg)` | Icon badge with text label "Revisit triggered" (RefreshCw icon + text) |
 
 The badge text and icon are required in all cases — not optional. A color-blind user or screen reader user must be able to identify the drift state without the color signal.
 

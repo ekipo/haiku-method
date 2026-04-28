@@ -134,25 +134,21 @@
       position: relative;
     }
 
-    /* Drift state left-border accent — width:4px per card */
+    /* Drift state left-border accent — width:4px per card.
+       Uses -fg tokens per SPA-UI-SPECS.md §2.2/§2.3: the -bg variants are near-surface
+       and would fail WCAG 1.4.11 (3:1 non-text contrast) for the 4px stripe. */
     .artifact-card--drift-detected {
-      border-left: 4px solid var(--color-drift-detected-bg);
-      /* Note: border-left accent uses -bg token per spec (SPA-UI-SPECS.md §2.2) */
+      border-left: 4px solid var(--color-drift-detected-fg);
     }
     .artifact-card--drift-acknowledged {
-      border-left: 4px solid var(--color-drift-acknowledged-bg);
+      border-left: 4px solid var(--color-drift-acknowledged-fg);
     }
     .artifact-card--drift-surfaced {
-      border-left: 4px solid var(--color-drift-surfaced-bg);
+      border-left: 4px solid var(--color-drift-surfaced-fg);
     }
     .artifact-card--drift-revisit {
-      border-left: 4px solid var(--color-drift-revisit-bg);
+      border-left: 4px solid var(--color-drift-revisit-fg);
     }
-    /* Stronger accent using fg variant for left border stripe on light backgrounds */
-    .artifact-card--drift-detected { border-left-color: var(--color-drift-detected-fg); }
-    .artifact-card--drift-acknowledged { border-left-color: var(--color-drift-acknowledged-fg); }
-    .artifact-card--drift-surfaced { border-left-color: var(--color-drift-surfaced-fg); }
-    .artifact-card--drift-revisit { border-left-color: var(--color-drift-revisit-fg); }
 
     .card-header {
       display: flex;

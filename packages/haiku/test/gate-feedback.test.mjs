@@ -495,7 +495,7 @@ try {
 		assert.strictEqual(state.elaboration_turns, 3)
 	})
 
-	test("human-authored pending feedback routes to gate_review (not feedback_revisit)", () => {
+	test("human-authored pending feedback routes to feedback_dispatch (no UI re-open)", () => {
 		const { projDir, intentDirPath, slug } = createProject(
 			"gate-fb-summaries",
 			{
@@ -517,14 +517,20 @@ try {
 		process.chdir(projDir)
 		const result = runNext(slug)
 
-		// Resolution-aware routing: when any pending item is
-		// human-authored with no explicit `resolution`, the workflow engine must
-		// open the review UI rather than auto-firing the fix loop. The
-		// reviewer triages each item (pick a resolution or leave for
-		// agent triage), then explicitly clicks "Send to agent" which
-		// fires haiku_revisit → feedback_dispatch / stage revisit.
-		assert.strictEqual(result.action, "gate_review")
+		// Contract: open feedback ⇒ never engage the user. A human-
+		// authored FB with no explicit resolution lands in the
+		// needsTriage bucket and the gate hands it back to the agent
+		// via `feedback_dispatch` so the agent classifies / replies
+		// inline. The review UI does NOT re-open while feedback is
+		// unaddressed — that was the loop the workflow engine used
+		// to fall into when the reviewer left "Let agent decide" on
+		// a comment and walked away.
+		assert.strictEqual(result.action, "feedback_dispatch")
 		assert.strictEqual(result.stage, "plan")
+		assert.ok(
+			result.counts && result.counts.needs_triage >= 1,
+			`Expected needs_triage >= 1, got: ${JSON.stringify(result.counts)}`,
+		)
 	})
 
 	test("pure agent-authored pending feedback still auto-dispatches fix loop (no human interrupt)", () => {

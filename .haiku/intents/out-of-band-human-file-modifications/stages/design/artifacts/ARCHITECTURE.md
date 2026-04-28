@@ -456,6 +456,39 @@ This is a heuristic, not a guarantee. The threshold (50%) and the default outcom
 
 **Rationale:** The marker store is a suppression optimization, not an integrity guarantee. Degraded behavior (re-emission without suppression) is preferable to halting. The drift findings are idempotent in the limit — an agent that sees the same finding twice and correctly identifies the existing open feedback items will produce the right outcome.
 
+### 8.5 Kill-Switch — `drift_detection: false`
+
+**Purpose.** Drift detection is a load-bearing addition to the pre-tick gate chain. If the new gate misbehaves in production — false-positive storms on a class of intent we didn't anticipate, performance regressions on large tracked surfaces, or interaction bugs with the marker store — operators need a way to disable the gate without rolling back the plugin or hand-editing baselines. The plugin-settings flag `drift_detection` is that escape hatch. The flag is specified in detail in unit-05's `ROLLOUT-AND-BASELINE-ESTABLISHMENT.md`; this section names the contract the architecture honors.
+
+**Flag location.** A boolean field at the plugin-settings level (the same settings surface where harness selection, provider configuration, and similar plugin-wide toggles live). The default value when the field is absent is `true` (drift detection on). Setting it to `false` disables the feature.
+
+**Gate behavior when `drift_detection: false`:** the pre-tick drift-detection gate becomes a complete no-op:
+
+- The gate **does not** enumerate the tracked surface.
+- The gate **does not** compute SHA-256 hashes for any file.
+- The gate **does not** read `baseline.json` or `drift-markers.json`.
+- The gate **does not** emit any drift events.
+- The gate **does not** dispatch `manual_change_assessment`.
+- The gate **does not** block, halt, or otherwise gate the tick.
+
+The pre-tick gate chain shortens to `tamper-detection → feedback-triage → per-state dispatch` — exactly the chain that exists today before this feature ships. The `manual_change_assessment` action is never dispatched because the drift gate never emits findings.
+
+**Baseline files when disabled.** Existing `baseline.json` and `drift-markers.json` files are left on disk untouched. They are not deleted, not migrated, not "drained." If the operator later flips the flag back to `true`, the gate resumes from the existing baseline (treating any drift accumulated during the disabled window as a normal first-tick observation through the rules in §3.5). This means re-enabling on an intent that drifted while disabled will produce one large drift event batch on the next tick — operators should expect this and may choose to delete the baseline before re-enabling to force re-establishment via §3.4.
+
+**Human-attributed-write MCP tool when disabled.** The tool itself remains callable — the agent can still use it to write a file on user instruction. When `drift_detection: false`, the tool writes the file but **does not** update `baseline.json` (since baselines are not consulted) and **does not** write an audit-log entry to `write-audit.jsonl`. In disabled mode, the tool is functionally equivalent to the agent's normal Write tool. The audit log gap during disabled windows is an accepted trade-off; if audit fidelity is required, the operator should not disable the flag.
+
+**SPA upload paths when disabled.** SPA upload endpoints continue to write files to disk (the user-facing affordance is not removed) but skip the baseline-protocol participation described in §7.3. Uploaded files land on disk; the next tick does not produce a drift event because the gate is a no-op; the agent only learns about the upload through whatever surface the upload affordance itself notifies (e.g., a websocket frame to the SPA, or a chat acknowledgment). The lack of automatic agent reaction during disabled windows is the explicit consequence of disabling the feature.
+
+**Operator scenarios that motivate the flag:**
+
+- *Roll-out staging.* The plugin ships with `drift_detection: true` as the default, but a cautious operator deploying to a fleet of intents may want to roll out per-project, flipping the flag from `false` to `true` once per project to control the baseline-establishment moment manually.
+- *Incident response.* A bug in the gate produces false-positive storms, baseline corruption, or a performance regression. The operator flips `drift_detection: false` to stop the bleeding while a fix is prepared. Existing intents continue working with the pre-feature gate chain.
+- *Diagnostics.* An operator suspects the gate is interacting badly with another feature. Flipping the flag isolates the variable.
+
+The flag is **not** intended for steady-state production use with the feature off — it is a roll-out and incident-response tool. Long-term per-intent suppression of drift detection (e.g., "this intent is too noisy, never run the gate") is not in scope for v1; it would require a per-intent setting rather than a plugin-wide flag.
+
+**Pairing with `ROLLOUT-AND-BASELINE-ESTABLISHMENT.md`.** The rollout document (unit-05) names the flag, defines its default, defines the migration story for existing intents, and documents the establish-then-enable sequence. The two documents form a consistent pair: the architecture document specifies the gate's no-op behavior when the flag is set; the rollout document specifies how the flag is exposed in plugin settings and how operators interact with it. Neither document duplicates the other's content.
+
 ---
 
 ## 9. Open Design Decisions Resolved by This Architecture

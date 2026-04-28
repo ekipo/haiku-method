@@ -15,7 +15,7 @@ outputs:
   - stages/design/artifacts/wireframes/knowledge-upload.html
   - stages/design/artifacts/wireframes/replacement-affordance.html
   - stages/design/artifacts/wireframes/drift-indicator.html
-status: active
+status: completed
 bolt: 1
 hat: design-reviewer
 started_at: '2026-04-28T19:59:56Z'
@@ -27,8 +27,9 @@ iterations:
     result: advance
   - hat: design-reviewer
     started_at: '2026-04-28T20:11:00Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-28T20:13:54Z'
+    result: advance
+completed_at: '2026-04-28T20:13:54Z'
 ---
 # SPA UI component specs (passive, no-action)
 

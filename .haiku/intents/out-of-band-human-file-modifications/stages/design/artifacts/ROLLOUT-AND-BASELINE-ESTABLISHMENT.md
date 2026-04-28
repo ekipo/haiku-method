@@ -121,7 +121,7 @@ During the one-tick window when a stage is running in establish mode, the SPA di
 
 Because establishment completes in a single tick, the indicator is visible for at most the duration between the tick that triggers establishment and the tick's completion. In practice, for most users, the indicator appears briefly and clears before the user notices. For intents where the tracked surface is large (many knowledge files, many design artifacts), the establishment scan may take a few seconds — the indicator provides feedback that the system is doing work.
 
-The indicator is **not** a spinner or a blocking overlay. Chip styling is intentionally deferred to development's design-system pass; the indicator is a text label in a neutral container with no interactive affordance until then. ARIA semantics and contrast tokens are determined during implementation, with the SPA's status-chip family.
+The indicator is **not** a spinner or a blocking overlay. Chip styling for the establish-mode indicator is intentionally deferred to the development stage's design-system pass; the indicator is a text label in a neutral container with no interactive affordance until then. ARIA semantics and contrast tokens are determined when the chip is implemented, alongside the rest of the SPA's status-chip family.
 
 ### 4.3 Multi-Stage Establishment
 

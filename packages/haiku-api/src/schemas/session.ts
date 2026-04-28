@@ -4,15 +4,15 @@
  * Traversed by: additive-elaborate.feature, auto-revisit.feature,
  *   review-ui-feedback.feature, revisit-with-reasons.feature, feedback-crud.feature.
  *
- * Ground truth:
- * - `ReviewSessionPayloadSchema`    — handleSessionApi session_type === "review" branch
- *                                     in packages/haiku/src/http.ts (~lines 71-104).
- * - `QuestionSessionPayloadSchema`  — handleSessionApi session_type === "question" branch
- *                                     (~lines 106-116).
- * - `DirectionSessionPayloadSchema` — handleSessionApi session_type === "design_direction" branch
- *                                     (~lines 118-124).
- * - `ReviewCurrentPayloadSchema`    — handleReviewCurrent (~lines 1242-1374).
- * - `HeartbeatResponseSchema`       — HEAD /api/session/:id/heartbeat (~line 1401), no body.
+ * Ground truth (after #245 god-file breakup, route handlers moved out of
+ * packages/haiku/src/http.ts into packages/haiku/src/http/*.ts):
+ * - `ReviewSessionPayloadSchema`    — respondSessionApi session_type === "review" branch
+ *                                     in packages/haiku/src/http/session-api.ts.
+ * - `QuestionSessionPayloadSchema`  — respondSessionApi session_type === "question" branch
+ *                                     in packages/haiku/src/http/session-api.ts.
+ * - `DirectionSessionPayloadSchema` — respondSessionApi session_type === "design_direction" branch
+ *                                     in packages/haiku/src/http/session-api.ts.
+ * - `HeartbeatResponseSchema`       — HEAD /api/session/:id/heartbeat (no body).
  * - Underlying session TS shapes live in packages/haiku/src/sessions.ts.
  *
  * Note: handleSessionApi builds the response imperatively and the field set
@@ -99,6 +99,30 @@ export type PreviousReviewSnapshot = z.infer<
 	typeof PreviousReviewSnapshotSchema
 >
 
+export const IntentCurrentStateSchema = z
+	.object({
+		studio: z.string(),
+		stage: z.string(),
+		phase: z.enum(["elaborate", "execute", "review", "gate", ""]),
+		step: z.string().optional(),
+		nextState: z
+			.object({
+				stage: z.string().optional(),
+				phase: z.enum(["elaborate", "execute", "review", "gate"]).optional(),
+				step: z.string().optional(),
+				blockedOn: z
+					.enum(["user-gate", "external-review", "feedback-fix"])
+					.nullable()
+					.optional(),
+			})
+			.nullable()
+			.optional(),
+	})
+	.describe(
+		"Unified current-state snapshot — derived fresh per request from per-stage state.json. The single source of truth for 'where is this intent right now?'.",
+	)
+export type IntentCurrentState = z.infer<typeof IntentCurrentStateSchema>
+
 export const ReviewSessionPayloadSchema = z
 	.object({
 		session_id: z.string(),
@@ -119,6 +143,7 @@ export const ReviewSessionPayloadSchema = z
 		intent_mockups: z.array(LooseRecord).optional(),
 		unit_mockups: z.record(z.array(LooseRecord)).optional(),
 		stage_states: z.record(StageStateInfoSchema).optional(),
+		current_state: IntentCurrentStateSchema.optional(),
 		knowledge_files: z.array(KnowledgeFileSchema).optional(),
 		stage_artifacts: z.array(StageArtifactSchema).optional(),
 		output_artifacts: z.array(OutputArtifactSchema).optional(),

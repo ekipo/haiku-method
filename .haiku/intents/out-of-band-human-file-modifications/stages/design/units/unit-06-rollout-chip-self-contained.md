@@ -14,12 +14,16 @@ outputs:
   - stages/design/artifacts/ROLLOUT-AND-BASELINE-ESTABLISHMENT.md
 status: active
 bolt: 1
-hat: designer
+hat: design-reviewer
 started_at: '2026-04-28T21:40:06Z'
-hat_started_at: '2026-04-28T21:40:06Z'
+hat_started_at: '2026-04-28T21:41:01Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T21:40:06Z'
+    completed_at: '2026-04-28T21:41:01Z'
+    result: advance
+  - hat: design-reviewer
+    started_at: '2026-04-28T21:41:01Z'
     completed_at: null
     result: null
 ---

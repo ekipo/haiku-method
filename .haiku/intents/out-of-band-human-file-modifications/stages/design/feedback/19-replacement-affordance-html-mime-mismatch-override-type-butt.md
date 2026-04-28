@@ -2,7 +2,7 @@
 title: >-
   replacement-affordance.html: mime mismatch "override type" button missing
   focus ring, touch-target, inside aria-live
-status: fixing
+status: closed
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T22:00:52Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-19:bolt-1'
 bolt: 1
 triaged_at: '2026-04-28T22:00:52Z'
 resolution: null

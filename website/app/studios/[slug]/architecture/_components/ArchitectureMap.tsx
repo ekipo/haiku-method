@@ -45,30 +45,44 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 	const [matchedArtifact, setMatchedArtifact] = useState<string | null>(null)
 	const mainRef = useRef<HTMLDivElement>(null)
 
-	// Fetch the bundle ONCE — it's a static JSON containing every studio.
-	// Studio switching is a pure state change after this; no refetch.
+	// Track whether the component is still mounted so the loader (used by
+	// the mount-effect AND the Retry button) can no-op state updates after
+	// unmount. Without this, retrying during an unmount transition would
+	// fire `setBundle` / `setBundleError` on a torn-down component (benign
+	// in React 18+ but worth avoiding).
+	const mountedRef = useRef(true)
 	useEffect(() => {
-		let cancelled = false
+		mountedRef.current = true
+		return () => {
+			mountedRef.current = false
+		}
+	}, [])
+
+	const loadBundle = useCallback(() => {
+		setBundleError(null)
+		setBundle(null)
 		fetch("/prototype-stage-content.json")
 			.then((r) => {
 				if (!r.ok) throw new Error(`HTTP ${r.status}`)
 				return r.json()
 			})
 			.then((data: StudioContentBundle) => {
-				if (cancelled) return
+				if (!mountedRef.current) return
 				setBundle(data)
-				setBundleError(null)
 			})
 			.catch((err: unknown) => {
-				if (cancelled) return
+				if (!mountedRef.current) return
 				const message = err instanceof Error ? err.message : String(err)
 				console.warn("studio content fetch failed", err)
 				setBundleError(message)
 			})
-		return () => {
-			cancelled = true
-		}
 	}, [])
+
+	// Fetch the bundle ONCE on mount — it's a static JSON containing every
+	// studio. Studio switching is a pure state change after this; no refetch.
+	useEffect(() => {
+		loadBundle()
+	}, [loadBundle])
 
 	// Once the bundle loads (or the active studio drifts to something the
 	// bundle doesn't recognize), fall back to defaultStudio / first available.
@@ -1313,24 +1327,7 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 					<div style={{ marginBottom: 10 }}>{bundleError}</div>
 					<button
 						type="button"
-						onClick={() => {
-							setBundleError(null)
-							setBundle(null)
-							// Trigger the load effect again by re-running the fetch
-							// inline — the load effect runs on mount only.
-							fetch("/prototype-stage-content.json")
-								.then((r) => {
-									if (!r.ok) throw new Error(`HTTP ${r.status}`)
-									return r.json()
-								})
-								.then((data: StudioContentBundle) => {
-									setBundle(data)
-								})
-								.catch((err: unknown) => {
-									const message = err instanceof Error ? err.message : String(err)
-									setBundleError(message)
-								})
-						}}
+						onClick={loadBundle}
 						style={{
 							padding: "4px 12px",
 							border: "1.5px solid #7c2d12",

@@ -134,7 +134,24 @@ export function launchBrowserBestEffort(url: string, label: string): void {
 		`[haiku] ${label} ready → ${url}\n` +
 			`         Share this URL with the reviewer if the browser didn't auto-open.`,
 	)
-	const cmd = process.platform === "darwin" ? ["open", url] : ["xdg-open", url]
+	// On Windows we use PowerShell `Start-Process` rather than `cmd /c start`.
+	// cmd.exe interprets `&`, `|`, `^`, `<`, `>`, `%`, `!` even in argv-passed
+	// args, which would mangle a URL like `?session=a&token=b` (everything
+	// after `&` would be parsed as a separate command). PowerShell does not
+	// share that hazard. We still escape embedded single quotes by doubling
+	// them — the only character `Start-Process '...'` is sensitive to.
+	const cmd: string[] =
+		process.platform === "darwin"
+			? ["open", url]
+			: process.platform === "win32"
+				? [
+						"powershell",
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						`Start-Process '${url.replace(/'/g, "''")}'`,
+					]
+				: ["xdg-open", url]
 	try {
 		const child = spawn(cmd[0], cmd.slice(1), {
 			stdio: "ignore",

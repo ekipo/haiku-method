@@ -2,7 +2,7 @@
 title: >-
   Card drift left-border uses -bg token per spec but wireframe silently
   overrides to -fg
-status: fixing
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-28T20:25:05Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
-bolt: 2
+closed_by: 'fix-loop:FB-04:bolt-3'
+bolt: 3
 triaged_at: '2026-04-28T20:25:05Z'
 resolution: null
 replies: []

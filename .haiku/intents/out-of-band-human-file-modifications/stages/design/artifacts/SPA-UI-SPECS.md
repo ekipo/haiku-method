@@ -6,13 +6,15 @@
 
 ## 0. Conflict Resolution — SPA-UI-SPECS.md is Authoritative
 
-This spec was authored after the design direction was locked to **Direction A: discrete + autonomous classification** (recorded in `stages/design/decision_log.json` and mirrored in `knowledge/DESIGN-DECISIONS.md`). Three specific conflicts with DESIGN-BRIEF.md are resolved here:
+This spec was authored after the design direction was locked to **Direction A: discrete + autonomous classification** (recorded in `stages/design/decision_log.json` and mirrored in `knowledge/DESIGN-DECISIONS.md`). Four specific conflicts with DESIGN-BRIEF.md are resolved here:
 
 1. **"Run now ↻" button** — DESIGN-BRIEF.md's Screen 3 sketches this button. It is **removed** from this spec. Per Direction A, the user does NOT trigger manual-change-assessment. Assessment fires on the next normal `haiku_run_next` tick automatically. No button, no link, no affordance for user-triggered assessment appears on any of the three surfaces.
 
 2. **Raw Tailwind palette classes for drift-state styling** — DESIGN-BRIEF.md uses `bg-amber-50`, `text-amber-900`, etc. for drift state. This spec **replaces** those with CSS custom property references (`var(--color-drift-detected-bg)`, etc.) per the canonical token vocabulary in `knowledge/DESIGN-TOKENS.md`. Raw palette names are not used in any semantic surface.
 
 3. **Deprecated provisional token names** — DESIGN-BRIEF.md references `--color-drift-bg`, `--color-drift-fg`, `--color-drift-stripe`. These are **deprecated**. The canonical four-state taxonomy from `knowledge/DESIGN-TOKENS.md` applies: `--color-drift-detected-fg/bg`, `--color-drift-acknowledged-fg/bg`, `--color-drift-surfaced-fg/bg`, `--color-drift-revisit-fg/bg`. No other drift-state tokens may appear in wireframes or implementation.
+
+4. **`⋯` menu button `aria-label` string** — DESIGN-BRIEF.md Screen 2 uses `aria-label="Output actions for ${name}"`; an earlier draft of this spec used the generic `"More options for {artifact-name}"`. The canonical string is **`aria-label="Output actions for {artifact-name}"`** (interpolated per card with the actual artifact filename, e.g. `aria-label="Output actions for hero-mockup.html"`). The semantic "Output actions" — not the generic "More options" — is required because the menu's items are scoped to output-specific actions (replace this output, etc.) and screen-reader users need the category in the announcement. Implementations and wireframes MUST use this exact format string.
 
 **Passive-observer constraint (Direction A):** All three surfaces are read-only indicators. They show what was detected and what the agent decided. They do NOT contain action buttons for classification, assessment triggers, accept/reject controls, or any control that drives the agent's workflow. The agent classifies autonomously on the next tick.
 
@@ -173,11 +175,11 @@ The badge text and icon are required in all cases — not optional. A color-blin
 ### 2.4 `⋯` Menu Button — ARIA Requirements
 
 The `⋯` button on each artifact card:
-- `aria-label="More options for {artifact-name}"` — interpolated per card with the actual artifact filename (e.g. `aria-label="More options for hero-mockup.html"`)
+- `aria-label="Output actions for {artifact-name}"` — interpolated per card with the actual artifact filename (e.g. `aria-label="Output actions for hero-mockup.html"`). This is the canonical string per §0 conflict resolution #4 — DESIGN-BRIEF.md Screen 2 also uses this string.
 - `aria-haspopup="menu"`
 - `aria-expanded` reflects popover open/closed state
 
-Without the interpolated `aria-label`, screen readers announce only "button" with no context. The per-card interpolation is required.
+Without the interpolated `aria-label`, screen readers announce only "button" with no context. The "Output actions" prefix (vs the generic "More options") is required because the menu is scoped to output-specific actions; the per-card interpolation supplies the artifact filename.
 
 Touch target: `.touch-target` MUST be applied to the `⋯` button at ≤768px. The visual element is sub-44px; `.touch-target--hit-area` expands the hit area.
 
@@ -236,7 +238,7 @@ All states from §1.3 Knowledge Upload drop zone, PLUS:
 
 ### 2.6 ARIA Annotations (Required)
 
-- `⋯` trigger: `aria-label="More options for {artifact-name}"` (interpolated), `aria-haspopup="menu"`, `aria-expanded`
+- `⋯` trigger: `aria-label="Output actions for {artifact-name}"` (interpolated — canonical per §0 conflict resolution #4), `aria-haspopup="menu"`, `aria-expanded`
 - Popover: `role="menu"`; items `role="menuitem"`; arrow-key navigation; Enter/Space activates; Esc closes and returns focus to `⋯` trigger
 - Replace modal: native `<dialog>` element; `aria-labelledby` on dialog title; `aria-describedby` on dialog body; focus on open lands on drop zone; focus on close returns to `⋯` trigger
 - Mime-mismatch warning: `aria-live="assertive"` — interrupts immediately because it is a blocking validation

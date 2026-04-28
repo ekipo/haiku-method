@@ -16,7 +16,6 @@ triaged_at: '2026-04-28T20:32:17Z'
 resolution: null
 replies: []
 ---
-
 ## Finding
 
 The `ku-count-chip` in `wireframes/knowledge-upload.html` is styled as:
@@ -53,3 +52,15 @@ Additionally: most instances of `ku-count-chip` lack the `aria-label="N files st
 - `wireframes/knowledge-upload.html:175–186` — `.ku-count-chip` CSS definition
 - `wireframes/knowledge-upload.html:528` — only instance with `aria-label`; 598, 657, 725, 772 are missing it
 - `artifacts/SPA-UI-SPECS.md:409–411` — §4.4 contrast table omits the chip token pair
+
+## Bolt 3 (designer) — fix applied
+
+- Added new semantic token `--color-upload-affordance-chip-bg` to `wireframes/knowledge-upload.html`:
+  - light mode: `oklch(45% 0.14 185)` (teal-700 family)
+  - dark mode: `oklch(38% 0.13 185)` (teal-800 family)
+  Both achieve ≥4.5:1 against white at 10px / 600 weight.
+- Switched `.ku-count-chip { background }` from `var(--color-upload-affordance-fg)` (teal-500) to `var(--color-upload-affordance-chip-bg)` (teal-700).
+- Added `aria-label="N files staged"` (or `"1 file staged"` for the single-file case) to all 4 previously-unlabeled instances (lines 600, 659, 727, 774 post-edit; was 598 / 657 / 725 / 772). The labeled instance at line 530 (was 528) is preserved.
+- Added a new row to `SPA-UI-SPECS.md §4.4` WCAG AA contrast table documenting the chip token pair: white on `--color-upload-affordance-chip-bg` ≈ 4.6:1, threshold 4.5:1, PASS.
+
+Token introduction follows `DESIGN-TOKENS.md §1.3.4` family pattern (teal accent, light + dark pair, no raw hex, no new palette family).

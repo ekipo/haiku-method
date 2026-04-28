@@ -13,12 +13,16 @@ outputs:
   - stages/design/artifacts/TRACKED-SURFACE-BOUNDARY.md
 status: active
 bolt: 1
-hat: designer
+hat: design-reviewer
 started_at: '2026-04-28T19:59:14Z'
-hat_started_at: '2026-04-28T19:59:14Z'
+hat_started_at: '2026-04-28T20:02:58Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T19:59:14Z'
+    completed_at: '2026-04-28T20:02:58Z'
+    result: advance
+  - hat: design-reviewer
+    started_at: '2026-04-28T20:02:58Z'
     completed_at: null
     result: null
 ---

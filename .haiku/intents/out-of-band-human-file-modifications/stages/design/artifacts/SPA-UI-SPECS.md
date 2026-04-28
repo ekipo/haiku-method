@@ -30,7 +30,8 @@ Lives inside `FeedbackSidebar` (LEFT column of `ReviewPage`) as a collapsible `<
 
 | Token | Applied to |
 |---|---|
-| `--color-upload-affordance-fg` | Drop-zone dashed border, icon, hover label |
+| `--color-upload-affordance-fg` | Drop-zone dashed border, icon (UI-component scope, WCAG 1.4.11 3:1) |
+| `--color-upload-affordance-label-fg` | Drop-zone text label (TEXT scope, WCAG 1.4.3 4.5:1) |
 | `--color-upload-affordance-bg-resting` | Drop-zone background (resting — transparent) |
 | `--color-upload-affordance-bg-hover` | Drop-zone background on pointer hover |
 | `--color-upload-affordance-bg-dragover` | Drop-zone background during active file drag |
@@ -151,7 +152,8 @@ Augments existing artifact cards in the `StageReview` Outputs tab (`ArtifactsTab
 | `--color-drift-acknowledged-fg` | Card left-border accent when drift was classified as `ignore` or `inline-fix` |
 | `--color-drift-surfaced-fg` | Card left-border accent when drift was classified as `surface-as-feedback` |
 | `--color-drift-revisit-fg` | Card left-border accent when drift was classified as `trigger-revisit` |
-| `--color-upload-affordance-fg` | Modal drop-zone border and icon |
+| `--color-upload-affordance-fg` | Modal drop-zone border and icon (UI-component scope, WCAG 1.4.11 3:1) |
+| `--color-upload-affordance-label-fg` | Modal drop-zone text label (TEXT scope, WCAG 1.4.3 4.5:1) |
 | `--color-upload-affordance-bg-resting` | Modal drop-zone resting background |
 | `--color-upload-affordance-bg-hover` | Modal drop-zone hover background |
 | `--color-upload-affordance-bg-dragover` | Modal drop-zone dragover background |
@@ -411,9 +413,10 @@ The following token pairs are used in the new surfaces. Each has been verified a
 | Drift-acknowledged text | `--color-drift-acknowledged-fg` (green-700 family, ~oklch 51% 0.15 145) | `--color-drift-acknowledged-bg` (green-50, ~oklch 97% 0.04 145) | ~5.3:1 | 4.5:1 | PASS |
 | Drift-surfaced text | `--color-drift-surfaced-fg` (blue-700 family, ~oklch 50% 0.18 240) | `--color-drift-surfaced-bg` (blue-50, ~oklch 97% 0.03 240) | ~5.4:1 | 4.5:1 | PASS |
 | Drift-revisit text | `--color-drift-revisit-fg` (rose-700 family, ~oklch 50% 0.19 10) | `--color-drift-revisit-bg` (rose-50, ~oklch 97% 0.04 10) | ~5.1:1 | 4.5:1 | PASS |
-| Upload affordance text | `--color-upload-affordance-fg` (teal-500 family, ~oklch 62% 0.14 185) | `--color-upload-affordance-bg-resting` (transparent → white) | ~3.7:1 | 3:1 (large text / UI component) | PASS |
-| Upload affordance text on hover | `--color-upload-affordance-fg` (teal-500 family) | `--color-upload-affordance-bg-hover` (teal-500 at 8% opacity) | ~3.7:1 | 3:1 (UI component) | PASS |
-| Upload affordance text on dragover | `--color-upload-affordance-fg` (teal-500 family) | `--color-upload-affordance-bg-dragover` (teal-500 at 15% opacity) | ~3.4:1 | 3:1 (UI component) | PASS |
+| Upload affordance text | `--color-upload-affordance-label-fg` (teal-700 family, ~oklch 48% 0.16 185) | `--color-upload-affordance-bg-resting` (transparent → white) | ~5.2:1 | 4.5:1 (normal text — 13px/500 is below WCAG large-text threshold of ≥18pt regular or ≥14pt bold) | PASS |
+| Upload affordance text on hover | `--color-upload-affordance-label-fg` (teal-700 family) | `--color-upload-affordance-bg-hover` (teal-500 at 8% opacity over white → near-white effective bg) | ~5.0:1 | 4.5:1 (normal text) | PASS |
+| Upload affordance text on dragover | `--color-upload-affordance-label-fg` (teal-700 family) | `--color-upload-affordance-bg-dragover` (teal-500 at 15% opacity over white) | ~4.7:1 | 4.5:1 (normal text) | PASS |
+| Upload affordance border / icon | `--color-upload-affordance-fg` (teal-500 family, ~oklch 62% 0.14 185) | `--color-upload-affordance-bg-resting` / `-hover` / `-dragover` | ~3.4:1 – 3.7:1 | 3:1 (WCAG 1.4.11 — graphical UI-component boundaries; not text) | PASS |
 | Knowledge-upload count-chip text | `oklch(100% 0 0)` (white) | `--color-upload-affordance-chip-bg` (teal-700 family, ~oklch 45% 0.14 185) | ~4.6:1 | 4.5:1 (10px / 600 weight is below the 14pt-bold large-text threshold) | PASS |
 | Drift-detected badge text | `--color-drift-detected-fg` | `--color-drift-detected-bg` | ~5.2:1 | 4.5:1 | PASS |
 | Drift-acknowledged badge text | `--color-drift-acknowledged-fg` | `--color-drift-acknowledged-bg` | ~5.3:1 | 4.5:1 | PASS |

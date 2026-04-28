@@ -24,6 +24,17 @@
 
       /* Stage banner accent */
       --stage-accent: oklch(55% 0.15 185);     /* teal-600 family */
+
+      /* KIND_BADGE palette (canonical — mirrors KIND_BADGE in StageReview.tsx
+         per DESIGN-BRIEF.md Screen 3 line 357). Stage = violet-50/700,
+         intent = sky-50/700. Implementer SHOULD prefer Tailwind utilities
+         `bg-violet-50 text-violet-700` / `bg-sky-50 text-sky-700` per
+         DESIGN-TOKENS §1.4; these tokens exist so the wireframe renders
+         the canonical hue without raw oklch on semantic surfaces. */
+      --color-kind-stage-bg: oklch(96.9% 0.016 293.756);     /* violet-50 */
+      --color-kind-stage-fg: oklch(49.1% 0.27 292.581);      /* violet-700 */
+      --color-kind-intent-bg: oklch(97.7% 0.013 236.62);     /* sky-50 */
+      --color-kind-intent-fg: oklch(50% 0.134 242.749);      /* sky-700 */
     }
 
     @media (prefers-color-scheme: dark) {
@@ -36,6 +47,13 @@
         --surface-muted: oklch(60% 0.01 0);
         --surface-hover: oklch(24% 0.01 0);
         --surface-header: oklch(20% 0.01 0);
+
+        /* Dark-mode KIND_BADGE — mirrors `dark:bg-{hue}-900/20 dark:text-{hue}-400`
+           from StageReview.tsx KIND_BADGE entries. */
+        --color-kind-stage-bg: oklch(28.1% 0.141 291.089 / 0.2);  /* violet-900/20 */
+        --color-kind-stage-fg: oklch(70.6% 0.213 293.541);        /* violet-400 */
+        --color-kind-intent-bg: oklch(29.3% 0.066 243.157 / 0.2); /* sky-900/20 */
+        --color-kind-intent-fg: oklch(74.6% 0.16 232.661);        /* sky-400 */
       }
     }
 
@@ -260,14 +278,18 @@
       font-weight: 600;
       padding: 1px 5px;
       border-radius: 9999px;
-      background: oklch(95% 0.025 270);
-      color: oklch(50% 0.12 270);
+      /* KIND_BADGE — stage scope (DESIGN-BRIEF Screen 3 line 357: violet-50/700).
+         Implementer: render as `bg-violet-50 text-violet-700` per DESIGN-TOKENS §1.4. */
+      background: var(--color-kind-stage-bg);
+      color: var(--color-kind-stage-fg);
       white-space: nowrap;
       flex-shrink: 0;
     }
     .drift-entry-stage-chip--intent {
-      background: oklch(95% 0.025 230);
-      color: oklch(50% 0.12 230);
+      /* KIND_BADGE — intent scope (DESIGN-BRIEF Screen 3 line 357: sky-50/700).
+         Implementer: render as `bg-sky-50 text-sky-700` per DESIGN-TOKENS §1.4. */
+      background: var(--color-kind-intent-bg);
+      color: var(--color-kind-intent-fg);
     }
 
     .drift-entry-path {

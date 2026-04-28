@@ -11,7 +11,7 @@ source_ref: null
 closed_by: null
 bolt: 0
 triaged_at: null
-resolution: null
+resolution: question
 replies: []
 ---
 

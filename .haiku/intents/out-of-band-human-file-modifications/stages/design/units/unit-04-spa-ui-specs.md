@@ -17,12 +17,16 @@ outputs:
   - stages/design/artifacts/wireframes/drift-indicator.html
 status: active
 bolt: 1
-hat: designer
+hat: design-reviewer
 started_at: '2026-04-28T19:59:56Z'
-hat_started_at: '2026-04-28T19:59:56Z'
+hat_started_at: '2026-04-28T20:11:00Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T19:59:56Z'
+    completed_at: '2026-04-28T20:11:00Z'
+    result: advance
+  - hat: design-reviewer
+    started_at: '2026-04-28T20:11:00Z'
     completed_at: null
     result: null
 ---

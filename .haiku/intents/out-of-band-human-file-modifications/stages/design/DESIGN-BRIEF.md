@@ -289,7 +289,7 @@ Destination options enumerate as: `Intent knowledge` (default — writes to `.ha
 
 ### Accessibility requirements
 
-- `⋯` trigger: `aria-label="Output actions for ${name}"`, `aria-haspopup="menu"`, `aria-expanded` reflects popover open state.
+- `⋯` trigger: `aria-label="Output actions for {artifact-name}"` (interpolated per card with the actual artifact filename — see SPA-UI-SPECS.md §0 conflict resolution #4 and §2.4 / §2.6 for the canonical string), `aria-haspopup="menu"`, `aria-expanded` reflects popover open state.
 - Popover: `role="menu"`, items `role="menuitem"`, arrow keys navigate, Enter / Space activates, Esc closes and returns focus to the trigger.
 - Replace dialog: native `<dialog>` so the focus trap and Esc-to-close are browser-native. `aria-labelledby` on the dialog title, `aria-describedby` on the body. Focus on open lands on the drop zone (primary action). Focus on close returns to the `⋯` trigger.
 - Drop zone keyboard path: same as Screen 1.

@@ -556,7 +556,7 @@
             <!-- ⋯ button: hover-reveal on desktop, aria-label per spec -->
             <button
               class="ellipsis-btn ellipsis-btn--hover-reveal touch-target"
-              aria-label="More options for hero-mockup.html"
+              aria-label="Output actions for hero-mockup.html"
               aria-haspopup="menu"
               aria-expanded="false"
             >⋯</button>
@@ -581,7 +581,7 @@
           <div class="popover-wrapper">
             <button
               class="ellipsis-btn"
-              aria-label="More options for hero-mockup.html"
+              aria-label="Output actions for hero-mockup.html"
               aria-haspopup="menu"
               aria-expanded="true"
               style="background: var(--surface-hover); color: var(--surface-text); outline: 3px solid var(--focus-ring-color); outline-offset:2px;"
@@ -614,7 +614,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">hero-mockup.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -637,7 +637,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">hero-mockup.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for hero-mockup.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -660,7 +660,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">landing-page.html</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for landing-page.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for landing-page.html" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -683,7 +683,7 @@
             <span class="kind-chip">wireframe</span>
             <span class="card-title">specs.md</span>
           </div>
-          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="More options for specs.md" aria-haspopup="menu" aria-expanded="false">⋯</button>
+          <button class="ellipsis-btn ellipsis-btn--hover-reveal touch-target" aria-label="Output actions for specs.md" aria-haspopup="menu" aria-expanded="false">⋯</button>
         </div>
         <div class="card-body">[ artifact preview ]</div>
         <div class="card-footer">
@@ -831,7 +831,7 @@
           <button
             class="ellipsis-btn touch-target"
             style="opacity:1;"
-            aria-label="More options for hero-mockup.html"
+            aria-label="Output actions for hero-mockup.html"
             aria-haspopup="menu"
             aria-expanded="false"
           >⋯</button>
@@ -910,7 +910,7 @@
     <ul style="margin-top: 8px; padding-left: 16px; display:flex; flex-direction:column; gap:4px;">
       <li>All drift-state borders use <code>var(--color-drift-{state}-fg)</code> — canonical four-state tokens. NOT deprecated <code>--color-drift-bg/fg/stripe</code>.</li>
       <li>Every drift state has a non-color badge (icon + text label) — required by WCAG 1.4.1.</li>
-      <li><code>⋯</code> button carries <code>aria-label="More options for {artifact-name}"</code> (interpolated per card).</li>
+      <li><code>⋯</code> button carries <code>aria-label="Output actions for {artifact-name}"</code> (interpolated per card — canonical per SPA-UI-SPECS §0 conflict resolution #4).</li>
       <li>On mobile, <code>⋯</code> is always visible (no hover-reveal); on desktop it's hover/focus-revealed.</li>
       <li><code>⋯</code> button has expanded 44×44 hit area via <code>.touch-target--hit-area</code>.</li>
       <li>Mime mismatch warning uses <code>aria-live="assertive"</code> (blocking validation).</li>

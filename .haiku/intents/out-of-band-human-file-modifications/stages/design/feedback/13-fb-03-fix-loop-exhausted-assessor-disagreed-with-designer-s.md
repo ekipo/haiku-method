@@ -1,6 +1,6 @@
 ---
 title: FB-03 fix loop exhausted — assessor disagreed with designer's fix scope
-status: pending
+status: rejected
 origin: agent
 author: parent-agent
 author_type: agent

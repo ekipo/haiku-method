@@ -145,7 +145,7 @@ Destination options enumerate as: `Intent knowledge` (default — writes to `.ha
 
 ### Accessibility requirements
 
-- Drop zone has `role="button"`, `tabIndex={0}`, `aria-label="Upload knowledge files. Drop files here or press Enter to browse."`. Enter / Space activates the hidden file input.
+- Drop zone has `role="button"`, `tabIndex={0}`, `aria-label="Upload knowledge file"` (authoritative per SPA-UI-SPECS.md §1.4 — exact string required). Enter / Space activates the hidden file input.
 - Drag-and-drop is augmented, not replaced — the click-to-browse path is the keyboard-and-screen-reader-equivalent and is wired identically. No drag-only flows.
 - All controls (disclosure caret, drop zone, file rows, destination select, buttons) are keyboard reachable via Tab in DOM order: caret → drop zone → first staged row → its remove button → next staged row → … → destination select → Upload → Cancel.
 - Staged list is wrapped in `role="list"`; each row is `role="listitem"`. Remove button has `aria-label="Remove ${file.name} from upload"`.

@@ -60,7 +60,7 @@ The plugin surfaces affected by this intent span the full workflow engine stack.
 
 **Change type:** New layer
 
-The workflow engine currently stores per-stage state in `state.json` files and per-intent state in `intent.md`. This intent requires a new state layer: a per-stage (or per-intent) SHA baseline that records the last-known-good content hash for each file in the tracked surface. This layer must be readable on every tick without additional I/O overhead and must survive branch switches and worktree operations. The storage format and location are design decisions (options include inline in `state.json`, a sidecar file alongside `state.json`, or a dedicated `baseline.json` per stage), but the conceptual layer — "there exists a durable, per-stage record of which files are agent-acknowledged and at what content state" — is new to the plugin. This layer is the foundation on which the drift-detection gate operates.
+The workflow engine already persists per-stage and per-intent state. This intent requires a new state layer: a per-stage (or per-intent) SHA baseline that records the last-known-good content hash for each file in the tracked surface. This layer must be readable on every tick without additional I/O overhead and must survive branch switches and worktree operations. The conceptual capability — "there exists a durable, per-stage record of which files are agent-acknowledged and at what content state" — is new to the plugin. The storage format and location (whether the baseline lives alongside existing state, in a dedicated record, or some other arrangement) is a design-stage decision. This layer is the foundation on which the drift-detection gate operates.
 
 ### Plugin Surface 2: Pre-Tick Gate Registration and Ordering
 

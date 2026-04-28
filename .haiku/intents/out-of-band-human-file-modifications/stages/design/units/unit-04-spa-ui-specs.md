@@ -7,15 +7,24 @@ inputs:
   - intent.md
   - knowledge/DISCOVERY.md
   - knowledge/DESIGN-DECISIONS.md
-  - stages/design/knowledge/DESIGN-BRIEF.md
-  - stages/design/knowledge/DESIGN-TOKENS.md
+  - stages/design/DESIGN-BRIEF.md
+  - knowledge/DESIGN-TOKENS.md
   - stages/design/artifacts/ARCHITECTURE.md
 outputs:
   - stages/design/artifacts/SPA-UI-SPECS.md
   - stages/design/artifacts/wireframes/knowledge-upload.html
   - stages/design/artifacts/wireframes/replacement-affordance.html
   - stages/design/artifacts/wireframes/drift-indicator.html
-status: pending
+status: active
+bolt: 1
+hat: designer
+started_at: '2026-04-28T19:59:56Z'
+hat_started_at: '2026-04-28T19:59:56Z'
+iterations:
+  - hat: designer
+    started_at: '2026-04-28T19:59:56Z'
+    completed_at: null
+    result: null
 ---
 # SPA UI component specs (passive, no-action)
 

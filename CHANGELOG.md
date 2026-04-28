@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.105.18] - 2026-04-28
+
+### Fixed
+- The review UI no longer reappears for feedback left unresolved; unaddressed findings are now routed back to the agent for inline triage.
+
+### Changed
+- Studio architecture diagrams are now native Next.js components, improving website performance and maintainability.
+
 ## [1.105.17] - 2026-04-28
 
 ### Fixed

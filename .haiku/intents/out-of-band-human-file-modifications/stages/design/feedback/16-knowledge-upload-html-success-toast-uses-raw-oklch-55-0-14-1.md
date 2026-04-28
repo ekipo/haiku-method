@@ -2,7 +2,7 @@
 title: >-
   knowledge-upload.html success toast uses raw oklch(55% 0.14 145) instead of a
   named token
-status: fixing
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T21:59:58Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-16:bolt-1'
 bolt: 1
 triaged_at: '2026-04-28T21:59:58Z'
 resolution: null

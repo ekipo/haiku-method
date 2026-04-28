@@ -7,10 +7,10 @@ inputs: >-
 outputs:
   - stages/design/artifacts/ARCHITECTURE.md
 status: active
-bolt: 2
-hat: design-reviewer
+bolt: 3
+hat: designer
 started_at: '2026-04-28T15:30:35Z'
-hat_started_at: '2026-04-28T19:48:33Z'
+hat_started_at: '2026-04-28T19:51:46Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T15:30:35Z'
@@ -43,6 +43,18 @@ iterations:
     result: advance
   - hat: design-reviewer
     started_at: '2026-04-28T19:48:33Z'
+    completed_at: '2026-04-28T19:51:46Z'
+    result: reject
+    reason: >-
+      FB-01: ARCHITECTURE §4.4 introduces three terminal-state "drift assessed:"
+      chips that DESIGN-BRIEF never specs and that contradict DESIGN-BRIEF's
+      single "manual change pending" chip lifecycle. FB-02: ARCHITECTURE §7.3
+      makes SPA uploads silently update the baseline so no
+      manual_change_assessment fires — contradicting DESIGN-BRIEF Screen 2's
+      user-facing "next workflow tick will see this change" promise and Decision
+      1's three-path unification.
+  - hat: designer
+    started_at: '2026-04-28T19:51:46Z'
     completed_at: null
     result: null
 model_original: sonnet

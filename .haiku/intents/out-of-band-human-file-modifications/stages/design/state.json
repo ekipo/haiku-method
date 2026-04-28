@@ -15,5 +15,22 @@
       "trigger": "initial",
       "result": null
     }
-  ]
+  ],
+  "elaboration_turns": 5,
+  "decision_log": [
+    {
+      "decision": "Design direction: discrete + autonomous classification",
+      "options": [
+        "A. Inline & Discrete (minimal additions in existing surfaces, autonomous classification — no user-trigger buttons)",
+        "B. Drift Hub (dedicated tab + activity rail + 'Run assessment' button)",
+        "C. Diff-Forward / Conversational (inline diff cards with Accept/Surface/Ignore buttons)"
+      ],
+      "choice": "A. Inline & Discrete (minimal additions in existing surfaces, autonomous classification — no user-trigger buttons)",
+      "source": "user",
+      "rationale": "User wants the system to auto-resolve drift on the next tick (agent classifies, agent acts) — drift detection and classification are NOT user actions. UI surfaces are passive observers that show what was detected and what the agent decided, not control surfaces with Assess/Accept/Surface/Ignore buttons. Implies: no \"Run now ↻\" button on the drift banner; no Accept/Surface/Ignore on inline diff cards; the four classification outcomes are agent-decided, not user-selected.",
+      "recorded_at": "2026-04-28T15:13:03Z"
+    }
+  ],
+  "pre_review_dispatched": true,
+  "pre_review_dispatched_at": "2026-04-28T15:16:27Z"
 }

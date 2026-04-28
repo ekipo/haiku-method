@@ -1,9 +1,16 @@
 ---
-title: "Out-of-band human file modifications"
-studio: ""
+title: Out-of-band human file modifications
+studio: software
 mode: continuous
 status: active
-created_at: 2026-04-28T13:52:19Z
+created_at: '2026-04-28'
+stages:
+  - inception
+  - design
+  - product
+  - development
+  - operations
+  - security
 ---
 
 # Out-of-band human file modifications

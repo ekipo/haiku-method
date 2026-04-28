@@ -2,7 +2,7 @@
 title: >-
   drift-indicator.html: tablet and mobile disclosure buttons missing
   aria-controls
-status: fixing
+status: closed
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-28T20:32:31Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
-bolt: 2
+closed_by: 'fix-loop:FB-12:bolt-3'
+bolt: 3
 triaged_at: '2026-04-28T20:32:31Z'
 resolution: null
 replies: []

@@ -704,9 +704,15 @@
 
   <div class="modal-demo">
     <span class="modal-demo-label">Replace dialog (native &lt;dialog&gt; in implementation)</span>
-    <div class="modal-dialog">
+    <div
+      class="modal-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="replace-dialog-title"
+      aria-describedby="replace-dialog-body"
+    >
       <div class="modal-header">
-        <span class="modal-title">Replace output: hero-mockup.html</span>
+        <span id="replace-dialog-title" class="modal-title">Replace output: hero-mockup.html</span>
         <button class="modal-close" aria-label="Close dialog">×</button>
       </div>
       <div class="modal-body" id="replace-dialog-body">
@@ -764,12 +770,19 @@
   <p class="viewport-label" style="margin-top:32px;">Replace modal — mime mismatch state</p>
   <div class="modal-demo">
     <span class="modal-demo-label">Mime mismatch (assertive aria-live)</span>
-    <div class="modal-dialog" style="max-width:500px;">
+    <div
+      class="modal-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="replace-dialog-title-mime"
+      aria-describedby="replace-dialog-body-mime"
+      style="max-width:500px;"
+    >
       <div class="modal-header">
-        <span class="modal-title">Replace output: hero-mockup.html</span>
+        <span id="replace-dialog-title-mime" class="modal-title">Replace output: hero-mockup.html</span>
         <button class="modal-close" aria-label="Close dialog">×</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" id="replace-dialog-body-mime">
         <div class="current-artifact">
           <div class="current-thumb" aria-hidden="true">📄</div>
           <div class="current-meta">

@@ -2,7 +2,7 @@
 title: >-
   knowledge-upload.html: ku-count-chip uses white text on teal-500 (~3.2:1) —
   fails 4.5:1 for 10px text
-status: fixing
+status: closed
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -10,12 +10,13 @@ created_at: '2026-04-28T20:32:17Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-11:bolt-3'
 bolt: 3
 triaged_at: '2026-04-28T20:32:17Z'
 resolution: null
 replies: []
 ---
+
 ## Finding
 
 The `ku-count-chip` in `wireframes/knowledge-upload.html` is styled as:

@@ -2,7 +2,7 @@
 title: >-
   Replace modal note textarea min-height 72px in wireframe vs 80px specified in
   DESIGN-BRIEF
-status: pending
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-28T22:00:17Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
-bolt: 0
+closed_by: 'fix-loop:FB-17:bolt-1'
+bolt: 1
 triaged_at: '2026-04-28T22:00:17Z'
 resolution: null
 replies: []

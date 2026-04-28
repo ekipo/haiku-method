@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation"
 import {
 	Fragment,
-	type ReactNode,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -11,28 +10,23 @@ import {
 	useState,
 } from "react"
 import { ACTORS } from "../_data/actors"
-import { HOOK_BY_NAME } from "../_data/hooks"
-import { type PayloadResult, payloadFor, type TransitionKey, type TransitionOpts } from "../_data/payload-for"
+import { payloadFor, type TransitionKey, type TransitionOpts } from "../_data/payload-for"
 import type {
 	DerivedStage,
 	ExecutionMode,
 	ModalKind,
 	StudioContentBundle,
 	StudioContentEntry,
-	StudioContentFile,
 } from "../_data/types"
 import "./arch.css"
-import { HtmlBlock, Modal } from "./Modal"
+import { ModalRouter } from "./ModalRouter"
 import {
 	branchName,
 	demoWavesAndUnits,
 	effectiveMode,
-	escHTML,
 	formatInputs,
 	gateClass,
 	gateFromReview,
-	renderInline,
-	renderMarkdown,
 	shortHat,
 } from "./utils"
 
@@ -43,6 +37,7 @@ interface ArchitectureMapProps {
 export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 	const router = useRouter()
 	const [bundle, setBundle] = useState<StudioContentBundle | null>(null)
+	const [bundleError, setBundleError] = useState<string | null>(null)
 	const [activeStudio, setActiveStudio] = useState(initialStudioDir)
 	const [mode, setMode] = useState<ExecutionMode>("continuous")
 	const [continuousFrom, setContinuousFrom] = useState<string>("")
@@ -55,12 +50,21 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 	useEffect(() => {
 		let cancelled = false
 		fetch("/prototype-stage-content.json")
-			.then((r) => r.json())
+			.then((r) => {
+				if (!r.ok) throw new Error(`HTTP ${r.status}`)
+				return r.json()
+			})
 			.then((data: StudioContentBundle) => {
 				if (cancelled) return
 				setBundle(data)
+				setBundleError(null)
 			})
-			.catch((err) => console.warn("studio content fetch failed", err))
+			.catch((err: unknown) => {
+				if (cancelled) return
+				const message = err instanceof Error ? err.message : String(err)
+				console.warn("studio content fetch failed", err)
+				setBundleError(message)
+			})
 		return () => {
 			cancelled = true
 		}
@@ -1286,423 +1290,77 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 		</section>
 	)
 
-	const renderModal = (m: ModalKind) => {
-		switch (m.kind) {
-			case "actor": {
-				const a = ACTORS[m.actorKey]
-				if (!a) return null
-				return (
-					<Modal open title={`${a.icon} ${a.name}`} subtitle="actor · runtime player" onClose={closeModal}>
-						<div className="modal-section">
-							<h3>role</h3>
-							<HtmlBlock className="prose" html={renderInline(a.role)} />
-						</div>
-						<div className="modal-section">
-							<h3>talks to</h3>
-							<ul>
-								{a.talks_to.map((t) => (
-									<li key={t}>
-										<HtmlBlock html={renderInline(t)} />
-									</li>
-								))}
-							</ul>
-						</div>
-						<div className="modal-section">
-							<h3>owns</h3>
-							<ul>
-								{a.owns.map((o) => (
-									<li key={o}>
-										<HtmlBlock html={renderInline(o)} />
-									</li>
-								))}
-							</ul>
-						</div>
-						<div className="modal-section">
-							<h3>notes</h3>
-							<HtmlBlock className="md-content" html={renderMarkdown(a.notes)} />
-						</div>
-					</Modal>
-				)
-			}
-			case "hook": {
-				const h = HOOK_BY_NAME[m.hookName]
-				if (!h) return null
-				return (
-					<Modal open title={m.hookName} subtitle={`hook · ${h.group}`} onClose={closeModal}>
-						<div className="modal-section">
-							<h3>role</h3>
-							<HtmlBlock className="prose" html={renderInline(h.desc)} />
-						</div>
-						<div className="modal-section">
-							<h3>where it fires</h3>
-							<ul>
-								{h.fires.map((f) => (
-									<li key={f}>
-										<code>{f}</code>
-									</li>
-								))}
-							</ul>
-						</div>
-						<div className="modal-section">
-							<h3>file</h3>
-							<div className="payload-block">{h.file}</div>
-						</div>
-					</Modal>
-				)
-			}
-			case "payload": {
-				const d = m.payload
-				return (
-					<Modal open title="haiku_run_next" subtitle={`${d.stage} · ${d.key}`} onClose={closeModal}>
-						<div className="modal-section">
-							<h3>action</h3>
-							<div className="payload-block" style={{ fontWeight: 600, color: "#2563eb" }}>
-								{d.action}
-							</div>
-						</div>
-						<div className="modal-section">
-							<h3>summary</h3>
-							<HtmlBlock className="prose" html={renderInline(d.summary)} />
-						</div>
-						<div className="modal-section">
-							<h3>payload returned to agent</h3>
-							<div className="payload-block">{JSON.stringify(d.payload, null, 2)}</div>
-						</div>
-						<div className="modal-section">
-							<h3>orchestrator validations</h3>
-							<ul>
-								{d.validations.map((v) => (
-									<li key={v}>
-										<HtmlBlock html={renderInline(v)} />
-									</li>
-								))}
-							</ul>
-						</div>
-						{d.writes && d.writes.length ? (
-							<div className="modal-section">
-								<h3>state writes (workflow engine persists to disk)</h3>
-								<ul className="writes-list">
-									{d.writes.map((w) => (
-										<li key={w.path + w.change}>
-											<code className="write-path">{w.path}</code>
-											<HtmlBlock className="write-change" html={renderInline(w.change)} />
-										</li>
-									))}
-								</ul>
-							</div>
-						) : null}
-						{d.injection && d.injection.length ? (
-							<div className="modal-section">
-								<h3>how the result reaches the agent</h3>
-								<ul className="writes-list">
-									{d.injection.map((i) => (
-										<li key={i.hook + i.target} style={{ borderLeftColor: "#2563eb" }}>
-											<code className="write-path" style={{ color: "#1e3a8a" }}>{i.hook}</code>
-											<HtmlBlock
-												className="write-change"
-												html={`→ <strong>${renderInline(i.target)}</strong>`}
-											/>
-											<HtmlBlock className="write-change" style={{ marginTop: 2 }} html={renderInline(i.what)} />
-										</li>
-									))}
-								</ul>
-							</div>
-						) : null}
-						<div className="modal-section">
-							<h3>instructions</h3>
-							<HtmlBlock className="prose" html={renderInline(d.instructions)} />
-						</div>
-					</Modal>
-				)
-			}
-			case "stageMd": {
-				const s = studioContent?.stages?.[m.stageKey]
-				if (!s) return null
-				return (
-					<Modal
-						open
-						title={`${m.stageKey.toUpperCase()} · STAGE.md`}
-						subtitle={s.stagePath}
-						onClose={closeModal}
+	if (bundleError) {
+		return (
+			<div className="haiku-arch-map">
+				<div
+					role="alert"
+					style={{
+						margin: "24px",
+						padding: "16px 20px",
+						background: "#fef2f2",
+						border: "1.5px solid #dc2626",
+						borderRadius: 10,
+						color: "#7c2d12",
+						fontFamily: "ui-monospace, 'SF Mono', monospace",
+						fontSize: 12,
+						lineHeight: 1.5,
+					}}
+				>
+					<div style={{ fontWeight: 700, marginBottom: 6 }}>
+						Failed to load <code>/prototype-stage-content.json</code>
+					</div>
+					<div style={{ marginBottom: 10 }}>{bundleError}</div>
+					<button
+						type="button"
+						onClick={() => {
+							setBundleError(null)
+							setBundle(null)
+							// Trigger the load effect again by re-running the fetch
+							// inline — the load effect runs on mount only.
+							fetch("/prototype-stage-content.json")
+								.then((r) => {
+									if (!r.ok) throw new Error(`HTTP ${r.status}`)
+									return r.json()
+								})
+								.then((data: StudioContentBundle) => {
+									setBundle(data)
+								})
+								.catch((err: unknown) => {
+									const message = err instanceof Error ? err.message : String(err)
+									setBundleError(message)
+								})
+						}}
+						style={{
+							padding: "4px 12px",
+							border: "1.5px solid #7c2d12",
+							borderRadius: 6,
+							background: "#fff",
+							color: "#7c2d12",
+							cursor: "pointer",
+							fontFamily: "inherit",
+							fontSize: 11,
+						}}
 					>
-						<HtmlBlock className="md-content" html={renderMdFile({ frontmatter: s.frontmatter, content: s.stageMd })} />
-					</Modal>
-				)
-			}
-			case "hat": {
-				const file = studioContent?.stages?.[m.stageKey]?.hats?.[m.hatName]
-				if (!file) return null
-				return (
-					<Modal open title={`${m.hatName} · hat`} subtitle={file.path} onClose={closeModal}>
-						<HtmlBlock className="md-content" html={renderMdFile(file)} />
-					</Modal>
-				)
-			}
-			case "reviewAgent": {
-				const file = studioContent?.stages?.[m.stageKey]?.reviewAgents?.[m.agentName]
-				if (!file) return null
-				return (
-					<Modal open title={`${m.agentName} · review agent`} subtitle={file.path} onClose={closeModal}>
-						<HtmlBlock className="md-content" html={renderMdFile(file)} />
-					</Modal>
-				)
-			}
-			case "subagent": {
-				return (
-					<Modal
-						open
-						title={`↗ ${m.hatName} runs in a subagent`}
-						subtitle={`${m.stageKey} · subagent-context`}
-						onClose={closeModal}
-					>
-						<div className="modal-section">
-							<h3>what this means</h3>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									`Every hat — including \`${m.hatName}\` — runs inside its own Claude Code subagent. The orchestrator's pattern at execute time is "one subagent per unit per hat."`,
-								)}
-							/>
-						</div>
-						<div className="modal-section">
-							<h3>tools the subagent uses</h3>
-							<ul>
-								<li><code>haiku_unit_start</code></li>
-								<li><code>haiku_unit_advance_hat</code></li>
-								<li><code>haiku_unit_reject_hat</code></li>
-								<li><code>haiku_unit_increment_bolt</code></li>
-							</ul>
-						</div>
-					</Modal>
-				)
-			}
-			case "schema":
-				return (
-					<Modal open title={m.schemaKey} subtitle="schema reference" onClose={closeModal}>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								`See \`packages/haiku/src/state-tools.ts\` for the canonical type definitions of \`${m.schemaKey}\`.`,
-							)}
-						/>
-					</Modal>
-				)
-			case "validation":
-				return (
-					<Modal
-						open
-						title={`✓ ${m.validationKey}`}
-						subtitle="elaborate-phase validation gate"
-						onClose={closeModal}
-					>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								`Validation check enforced by \`packages/haiku/src/orchestrator/workflow/handlers/elaborate.ts\` and \`validators.ts\`. See repo for the full rule set.`,
-							)}
-						/>
-					</Modal>
-				)
-			case "revisit": {
-				const prev = m.stageIdx > 0 ? stages[m.stageIdx - 1]?.name ?? null : null
-				const stageName = stages[m.stageIdx]?.name ?? m.stageKey
-				return (
-					<Modal open title="↺ /haiku:revisit" subtitle={`${stageName} · go-back semantics`} onClose={closeModal}>
-						<div className="modal-section">
-							<h3>summary</h3>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									"Bounces the workflow engine backwards to re-elaborate work that's already been done. Clears the target stage's `gate_outcome` and re-enters its `elaborate` phase.",
-								)}
-							/>
-						</div>
-						{prev ? (
-							<div className="modal-section">
-								<h3>cross-stage variant</h3>
-								<HtmlBlock
-									className="prose"
-									html={renderInline(`From **${stageName}**'s elaborate → bounces back to **${prev}**'s elaborate.`)}
-								/>
-							</div>
-						) : null}
-					</Modal>
-				)
-			}
-			case "gateDetail":
-				return (
-					<Modal
-						open
-						title={m.detailKey}
-						subtitle="nested gate inside haiku_run_next"
-						onClose={closeModal}
-					>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								m.detailKey === "specs_gate_review"
-									? "The post-elaboration review gate. Runs **inside the same** `haiku_run_next` call. After 2026-04-27, reject does not re-pop the UI: open feedback routes through `feedback_dispatch` (human, no resolution) or `review_fix` (inline-fix) until every FB closes."
-									: "Hard quality gates — tests, lint, typecheck — run inside the same `haiku_run_next` call that transitions execute → review. Loop iterates within review; never goes back to execute.",
-							)}
-						/>
-					</Modal>
-				)
-			case "tool":
-				return (
-					<Modal open title={m.toolName} subtitle={`mcp tool · ${m.contextKey ?? ""}`} onClose={closeModal}>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								`See \`packages/haiku/src/orchestrator.ts\` and \`state-tools.ts\` for the full schema of \`${m.toolName}\`.`,
-							)}
-						/>
-					</Modal>
-				)
-			case "skill":
-				return (
-					<Modal open title={m.skillName} subtitle="skill" onClose={closeModal}>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								`See \`plugin/skills/${m.skillName.replace(/^\/haiku:/, "")}/SKILL.md\` for the full skill mandate.`,
-							)}
-						/>
-					</Modal>
-				)
-			case "aux": {
-				const file = studioContent?.[m.auxKind]?.[m.name]
-				if (!file) return null
-				return (
-					<Modal
-						open
-						title={`${m.auxKind.replace(/s$/, "")} · ${m.name}`}
-						subtitle={file.path}
-						onClose={closeModal}
-					>
-						<HtmlBlock className="md-content" html={renderMdFile(file)} />
-					</Modal>
-				)
-			}
-			case "unit":
-				return (
-					<Modal open title={m.unitId} subtitle={`${m.stageName} · unit detail`} onClose={closeModal}>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								`Demo unit \`${m.unitId}\` (model: \`${m.model}\`). In a real intent, units live at \`.haiku/intents/{slug}/stages/${m.stageName.toLowerCase()}/units/\`.`,
-							)}
-						/>
-					</Modal>
-				)
-			case "artifact": {
-				const [stageKey, slug] = m.artifactKey.split(".")
-				const def =
-					stageKey && slug
-						? (studioContent?.stages?.[stageKey]?.discoveryDefs?.[slug] ??
-							studioContent?.stages?.[stageKey]?.outputDefs?.[slug] ??
-							null)
-						: null
-				if (!def) {
-					return (
-						<Modal open title={m.artifactKey} subtitle="no template defined" onClose={closeModal}>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									`No \`discovery/\` or \`outputs/\` template was found in the studio for \`${m.artifactKey}\`. The artifact still flows through the pool — it's just not formally specified by the studio.`,
-								)}
-							/>
-						</Modal>
-					)
-				}
-				return (
-					<Modal open title={m.artifactKey} subtitle={def.path} onClose={closeModal}>
-						<HtmlBlock className="md-content" html={renderMdFile(def)} />
-					</Modal>
-				)
-			}
-			case "intentCreation":
-				return (
-					<Modal open title="Intent creation" subtitle="user ↔ agent · /haiku:start" onClose={closeModal}>
-						<HtmlBlock
-							className="prose"
-							html={renderInline(
-								"User and agent exchange Q&A until the agent has enough to draft `intent.md`. The agent calls `haiku_select_studio` (default inferred from prompt), then `haiku_intent_create`, then `haiku_run_next` to enter the first stage's elaborate phase.",
-							)}
-						/>
-					</Modal>
-				)
-			case "preTickTriage":
-				return (
-					<Modal
-						open
-						title="⛓ pre-tick triage gate"
-						subtitle="run-tick.ts · interceptor · runs BEFORE every per-state handler"
-						onClose={closeModal}
-					>
-						<div className="modal-section">
-							<h3>where it sits</h3>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									"Implemented in `packages/haiku/src/orchestrator/workflow/run-tick.ts` (`preTickFeedbackGate`). On every `haiku_run_next` tick — after structural repair (`preTickConsistency`) and tamper detection (`verifyIntentState`) but BEFORE the per-state handler — the gate walks stages 0..current plus intent-scope for open (non-terminal) feedback. The point: misplaced or untriaged feedback can't be force-fixed by the wrong stage's hats, and a stage handler can't re-pop the review UI while feedback is still unaddressed.",
-								)}
-							/>
-						</div>
-						<div className="modal-section">
-							<h3>three priority outcomes</h3>
-							<ul className="writes-list">
-								<li>
-									<HtmlBlock
-										className="prose"
-										html={renderInline(
-											"**1. Untriaged FB found** — any open FB lacking `triaged_at:` → emit `feedback_triage`. Agent calls `haiku_feedback_move` (same-stage no-op confirms in place; cross-stage relocates the file to the correct stage's `feedback/` dir).",
-										)}
-									/>
-								</li>
-								<li>
-									<HtmlBlock
-										className="prose"
-										html={renderInline(
-											"**2. Triaged but on an earlier stage** — every open FB has `triaged_at:` but ≥ 1 sits on a stage earlier than `active_stage` → emit `revisited` targeting the earliest such stage. The existing revisit machinery handles branch state, downstream invalidation, and re-entry.",
-										)}
-									/>
-								</li>
-								<li>
-									<HtmlBlock
-										className="prose"
-										html={renderInline(
-											"**3. Triaged and in-scope (or no open FB)** — fall through to the per-state handler. The stage gate then routes pending feedback through `feedback_dispatch` (human comments without resolution) or the worktree-based `review_fix` chain (inline-fix items).",
-										)}
-									/>
-								</li>
-							</ul>
-						</div>
-						<div className="modal-section">
-							<h3>why it exists</h3>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									"Before this gate, the per-stage handler could see open feedback on a downstream stage and dispatch it to its own `fix_hats` — wrong stage, wrong hats, wrong fix. It could also re-emit `gate_review` even when the user had left feedback that was never addressed (the loop fixed on 2026-04-27). Centralizing the triage check ensures every tick passes through the same chokepoint.",
-								)}
-							/>
-						</div>
-						<div className="modal-section">
-							<h3>frontmatter convention</h3>
-							<HtmlBlock
-								className="prose"
-								html={renderInline(
-									"Agent-authored FBs (`origin: agent`, `adversarial-review`, `studio-review`, etc.) auto-stamp `triaged_at:` at creation time — they're filed in-context. Human origins (`user-chat`, `user-visual`, `user-question`) leave `triaged_at: null`, which is what triggers outcome 1 above.",
-								)}
-							/>
-						</div>
-					</Modal>
-				)
-		}
+						Retry
+					</button>
+				</div>
+			</div>
+		)
 	}
 
 	if (!bundle || !studioContent) {
 		return (
-			<div style={{ padding: "24px", color: "#6b7280", fontFamily: "ui-monospace, 'SF Mono', monospace", fontSize: "12px" }}>
+			<div
+				role="status"
+				aria-live="polite"
+				style={{
+					padding: "24px",
+					color: "#6b7280",
+					fontFamily: "ui-monospace, 'SF Mono', monospace",
+					fontSize: 12,
+				}}
+			>
 				Loading studio content…
 			</div>
 		)
@@ -1793,7 +1451,12 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 				</main>
 			</div>
 
-			{modal ? renderModal(modal) : null}
+			<ModalRouter
+				modal={modal}
+				onClose={closeModal}
+				studioContent={studioContent}
+				stages={stages}
+			/>
 		</div>
 	)
 }
@@ -1803,29 +1466,3 @@ function effectiveGate(stage: DerivedStage, mStage: ExecutionMode): { type: stri
 	if (mStage === "auto") return { type: "auto (autopilot · /haiku:autopilot)", options: ["advance"] }
 	return stage.gate
 }
-
-function renderMdFile(file: { frontmatter?: Record<string, unknown>; content?: string | null; body?: string }): string {
-	const fm = file.frontmatter ?? {}
-	const fmEntries = Object.entries(fm).filter(([, v]) => v !== undefined && v !== null && v !== "")
-	const fmHtml = fmEntries.length
-		? `<div class="fm-panel">${fmEntries
-				.map(
-					([k, v]) =>
-						`<div class="fm-row"><span class="fm-key">${escHTML(k)}</span><span class="fm-val">${renderInline(
-							typeof v === "string" ? v : JSON.stringify(v),
-						)}</span></div>`,
-				)
-				.join("")}</div>`
-		: ""
-	const body = file.body ?? stripFrontmatter(file.content ?? "")
-	return `${fmHtml}<div class="md-content">${renderMarkdown(body)}</div>`
-}
-
-function stripFrontmatter(src: string): string {
-	if (!src) return ""
-	const m = /^---\n[\s\S]*?\n---\n?/.exec(src)
-	return m ? src.slice(m[0].length) : src
-}
-
-// HtmlBlock and renderInline / renderMarkdown re-imported above for the modals.
-type _UnusedWatch = StudioContentFile

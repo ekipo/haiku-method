@@ -186,3 +186,36 @@ export function branchName(stageNameLower: string, mode: "continuous" | "discret
 		? `haiku/{slug}/${stageNameLower}`
 		: "haiku/{slug}/main"
 }
+
+/** Strip a leading frontmatter block (---...---) from raw markdown. */
+export function stripFrontmatter(src: string): string {
+	if (!src) return ""
+	const m = /^---\n[\s\S]*?\n---\n?/.exec(src)
+	return m ? src.slice(m[0].length) : src
+}
+
+/** Render a frontmatter block + markdown body to a single HTML string for the
+ *  modal preview. Frontmatter keys / string scalars are HTML-escaped; arrays
+ *  and objects are stringified via JSON. */
+export function renderMdFile(file: {
+	frontmatter?: Record<string, unknown>
+	content?: string | null
+	body?: string
+}): string {
+	const fm = file.frontmatter ?? {}
+	const fmEntries = Object.entries(fm).filter(
+		([, v]) => v !== undefined && v !== null && v !== "",
+	)
+	const fmHtml = fmEntries.length
+		? `<div class="fm-panel">${fmEntries
+				.map(
+					([k, v]) =>
+						`<div class="fm-row"><span class="fm-key">${escHTML(k)}</span><span class="fm-val">${renderInline(
+							typeof v === "string" ? v : JSON.stringify(v),
+						)}</span></div>`,
+				)
+				.join("")}</div>`
+		: ""
+	const body = file.body ?? stripFrontmatter(file.content ?? "")
+	return `${fmHtml}<div class="md-content">${renderMarkdown(body)}</div>`
+}

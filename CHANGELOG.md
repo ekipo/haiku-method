@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.105.19] - 2026-04-28
+
+### Fixed
+- Feedback dispatch now reliably flows through a centralized pre-tick triage gate, ensuring consistent routing of human-authored feedback items.
+
 ## [1.105.18] - 2026-04-28
 
 ### Fixed

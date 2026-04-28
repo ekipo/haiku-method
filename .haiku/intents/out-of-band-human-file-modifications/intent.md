@@ -12,7 +12,7 @@ stages:
   - development
   - operations
   - security
-active_stage: inception
+active_stage: design
 intent_reviewed: true
 ---
 

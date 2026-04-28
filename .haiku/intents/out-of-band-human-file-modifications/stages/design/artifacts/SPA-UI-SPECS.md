@@ -243,6 +243,7 @@ All states from §1.3 Knowledge Upload drop zone, PLUS:
 - `⋯` trigger: `aria-label="Output actions for {artifact-name}"` (interpolated — canonical per §0 conflict resolution #4), `aria-haspopup="menu"`, `aria-expanded`
 - Popover: `role="menu"`; items `role="menuitem"`; arrow-key navigation; Enter/Space activates; Esc closes and returns focus to `⋯` trigger
 - Replace modal: native `<dialog>` element; `aria-labelledby` on dialog title; `aria-describedby` on dialog body; focus on open lands on drop zone; focus on close returns to `⋯` trigger
+- Replace modal drop zone: `role="button"`, `tabIndex={0}`, `aria-label="Drop replacement file for {artifact-name}"` (interpolated per modal with the actual artifact filename, e.g. `aria-label="Drop replacement file for hero-mockup.html"`). This string is **distinct from** Screen 1's Knowledge Upload Panel drop zone (`aria-label="Upload knowledge file"`, §1.4) — the replace modal targets a specific stage output, not the knowledge directory, and screen-reader users must hear the action ("Drop replacement file") and the scope (the artifact filename) to avoid being misdirected. Implementations and wireframes MUST use this exact format string for the replace-modal drop zone and MUST NOT reuse Screen 1's `"Upload knowledge file"` label here.
 - Mime-mismatch warning: `aria-live="assertive"` — interrupts immediately because it is a blocking validation
 - Every state pairs an icon + text with color — never color alone
 

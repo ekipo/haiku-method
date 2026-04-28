@@ -3815,6 +3815,90 @@ export function slugifyTitle(title: string, maxLen = 60): string {
 		.replace(/-+$/, "")
 }
 
+/** Persisted form of a design-direction screenshot annotation.
+ *  `screenshot_path` is intent-relative so it survives worktree moves. */
+export interface DesignDirectionAnnotation {
+	comment: string
+	screenshot_path: string
+}
+
+/** Decode incoming `data:image/...` URLs from the design-direction
+ *  picker, write them as raw PNG/JPEG/WebP files under
+ *  `<stage>/artifacts/design-direction/`, and update stage state.json
+ *  with paths-only annotations. State stays small; binary lives next
+ *  to it. Return value carries the persisted annotations so callers
+ *  can pass them onwards (in-memory session, log, etc.).
+ *
+ *  Re-submissions replace the whole set: any prior `dd-NN-…` files are
+ *  deleted before the new annotations are written. This matches state's
+ *  "latest selection is the truth" semantics — there is no scenario
+ *  where a previously persisted screenshot stays load-bearing after a
+ *  fresh selection lands. */
+export function persistDesignDirectionSelection(opts: {
+	slug: string
+	stage: string
+	archetype: string
+	comments?: string
+	screenshots: Array<{ comment: string; screenshot_data_url: string }>
+}): {
+	annotations: DesignDirectionAnnotation[]
+	artifactsDir: string
+} {
+	const artifactsDir = join(
+		stageDir(opts.slug, opts.stage),
+		"artifacts",
+		"design-direction",
+	)
+	mkdirSync(artifactsDir, { recursive: true })
+
+	// Clear prior dd-NN-* files so re-submissions don't accumulate
+	// orphaned PNGs alongside the new set.
+	for (const f of readdirSync(artifactsDir)) {
+		if (/^dd-\d+-.*\.(png|jpe?g|webp)$/i.test(f)) {
+			try {
+				unlinkSync(join(artifactsDir, f))
+			} catch {
+				/* best-effort; persistence proceeds even if a stale file
+				   can't be removed (e.g. permission, missing) */
+			}
+		}
+	}
+
+	const archSlug = slugifyTitle(opts.archetype) || "selection"
+	const persisted: DesignDirectionAnnotation[] = []
+	let nn = 1
+	for (const ann of opts.screenshots) {
+		const m = ann.screenshot_data_url.match(
+			/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/,
+		)
+		if (!m) continue
+		const ext = m[1] === "jpeg" ? "jpg" : m[1]
+		const filename = `dd-${zeroPad(nn)}-${archSlug}.${ext}`
+		writeFileSync(join(artifactsDir, filename), Buffer.from(m[2], "base64"))
+		persisted.push({
+			comment: ann.comment,
+			screenshot_path: `stages/${opts.stage}/artifacts/design-direction/${filename}`,
+		})
+		nn++
+	}
+
+	const ssPath = stageStatePath(opts.slug, opts.stage)
+	const ssData = readJson(ssPath)
+	ssData.design_direction_selected = true
+	ssData.design_direction_selected_at = timestamp()
+	ssData.design_direction = {
+		archetype: opts.archetype,
+		...(opts.comments ? { comments: opts.comments } : {}),
+		...(persisted.length > 0 ? { annotations: persisted } : {}),
+	}
+	// Drop any prior surfaced flag so the next run_next emits the
+	// recovery action against this fresh selection.
+	delete ssData.design_direction_surfaced
+	writeJson(ssPath, ssData)
+
+	return { annotations: persisted, artifactsDir }
+}
+
 /** Path to the feedback directory for an intent. When `stage` is falsy,
  *  returns the intent-scope feedback dir used by the pre-intent-completion
  *  review layer. Otherwise returns the per-stage dir used by every stage's

@@ -12,12 +12,16 @@ outputs:
   - stages/design/artifacts/MCP-TOOL-CONTRACT.md
 status: active
 bolt: 1
-hat: designer
+hat: design-reviewer
 started_at: '2026-04-28T19:59:29Z'
-hat_started_at: '2026-04-28T19:59:29Z'
+hat_started_at: '2026-04-28T20:04:17Z'
 iterations:
   - hat: designer
     started_at: '2026-04-28T19:59:29Z'
+    completed_at: '2026-04-28T20:04:17Z'
+    result: advance
+  - hat: design-reviewer
+    started_at: '2026-04-28T20:04:17Z'
     completed_at: null
     result: null
 ---

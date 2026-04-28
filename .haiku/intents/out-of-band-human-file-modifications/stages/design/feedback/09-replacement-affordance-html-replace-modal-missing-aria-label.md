@@ -2,7 +2,7 @@
 title: >-
   replacement-affordance.html: Replace modal missing aria-labelledby and
   aria-describedby (required by spec §2.6)
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:26:20Z'
 resolution: null
 replies: []
@@ -56,4 +56,3 @@ The wireframe uses `<div class="modal-dialog">` instead of `<dialog>`, which is 
 - `wireframes/replacement-affordance.html:709` — `<span class="modal-title">` — needs `id` attribute
 - `wireframes/replacement-affordance.html:712` — `<div class="modal-body" id="replace-dialog-body">` — `id` exists but is not referenced by dialog
 - `artifacts/SPA-UI-SPECS.md:241` — requirement source
-

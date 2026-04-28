@@ -2,7 +2,7 @@
 title: >-
   replacement-affordance.html: spec §2.2/2.3 specifies near-invisible -bg border
   tokens; wireframe overrides to -fg
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:31:59Z'
 resolution: null
 replies: []
@@ -49,4 +49,3 @@ Update `SPA-UI-SPECS.md §2.2` (the token table) and §2.3 (the border-column of
 - `wireframes/replacement-affordance.html:911` (spec notes) — contradicts §2.2 by asserting `-fg`
 - `artifacts/SPA-UI-SPECS.md:147–150` — §2.2 table: specifies `-bg` tokens for card borders
 - `artifacts/SPA-UI-SPECS.md:165–169` — §2.3 table: border column shows `-bg` tokens
-

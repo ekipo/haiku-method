@@ -2,7 +2,7 @@
 title: >-
   ARCHITECTURE.md "drift assessed:" chips contradict DESIGN-BRIEF's "manual
   change pending" chip vocabulary
-status: pending
+status: rejected
 origin: adversarial-review
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: 'design-reviewer hat, bolt 2, unit-01-architecture-spec'
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T19:50:58Z'
 resolution: null
 replies: []
@@ -51,3 +51,7 @@ Option A is the lower-friction path because the assessment record and feedback l
 ## File / location
 
 `.haiku/intents/out-of-band-human-file-modifications/stages/design/artifacts/ARCHITECTURE.md` §4.4.1, §4.4.2, §4.4.3 — "What the user sees" paragraphs.
+
+---
+
+**Rejection reason:** stale — already fixed by commit 66d6a881 on this fix branch. ARCHITECTURE.md §4.4.1-4.4.3 no longer contain "drift assessed: ignored / folded in / feedback opened" chip vocabulary; the "What the user sees" paragraphs now reference the assessment record (§4.6) and feedback list as the durable surfaces and explicitly honor DESIGN-BRIEF's existing "manual change pending" chip lifecycle (Option A from the finding). Verified: `grep -n "drift assessed" ARCHITECTURE.md` returns zero matches.

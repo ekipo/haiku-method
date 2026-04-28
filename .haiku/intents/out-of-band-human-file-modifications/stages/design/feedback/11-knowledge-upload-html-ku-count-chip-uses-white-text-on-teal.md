@@ -2,7 +2,7 @@
 title: >-
   knowledge-upload.html: ku-count-chip uses white text on teal-500 (~3.2:1) —
   fails 4.5:1 for 10px text
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:32:17Z'
 resolution: null
 replies: []
@@ -53,4 +53,3 @@ Additionally: most instances of `ku-count-chip` lack the `aria-label="N files st
 - `wireframes/knowledge-upload.html:175–186` — `.ku-count-chip` CSS definition
 - `wireframes/knowledge-upload.html:528` — only instance with `aria-label`; 598, 657, 725, 772 are missing it
 - `artifacts/SPA-UI-SPECS.md:409–411` — §4.4 contrast table omits the chip token pair
-

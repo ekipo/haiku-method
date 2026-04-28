@@ -1,6 +1,6 @@
 ---
 title: Drop-zone aria-label diverges between DESIGN-BRIEF and SPA-UI-SPECS
-status: pending
+status: fixing
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:25:19Z'
 resolution: null
 replies: []

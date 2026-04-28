@@ -2,7 +2,7 @@
 title: >-
   ARCHITECTURE §7.3 SPA-upload-no-drift-event contradicts DESIGN-BRIEF's "next
   tick will assess" UX promise
-status: pending
+status: fixing
 origin: adversarial-review
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: 'design-reviewer hat, bolt 2, unit-01-architecture-spec'
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T19:51:37Z'
 resolution: null
 replies: []

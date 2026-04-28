@@ -9,7 +9,7 @@ inputs: >-
 outputs:
   - >-
     .haiku/intents/out-of-band-human-file-modifications/knowledge/DESIGN-DECISIONS.md
-status: active
+status: completed
 bolt: 1
 hat: verifier
 started_at: '2026-04-28T14:19:34Z'
@@ -25,8 +25,9 @@ iterations:
     result: advance
   - hat: verifier
     started_at: '2026-04-28T14:24:34Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-28T14:25:11Z'
+    result: advance
+completed_at: '2026-04-28T14:25:11Z'
 ---
 # Design Decisions
 

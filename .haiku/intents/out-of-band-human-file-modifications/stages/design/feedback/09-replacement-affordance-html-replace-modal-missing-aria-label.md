@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 1
+bolt: 2
 triaged_at: '2026-04-28T20:26:20Z'
 resolution: null
 replies: []
@@ -56,3 +56,12 @@ The wireframe uses `<div class="modal-dialog">` instead of `<dialog>`, which is 
 - `wireframes/replacement-affordance.html:709` — `<span class="modal-title">` — needs `id` attribute
 - `wireframes/replacement-affordance.html:712` — `<div class="modal-body" id="replace-dialog-body">` — `id` exists but is not referenced by dialog
 - `artifacts/SPA-UI-SPECS.md:241` — requirement source
+
+## Resolution (designer, bolt 1)
+
+Wired ARIA on both Replace modal states in `wireframes/replacement-affordance.html`:
+
+- Default state modal-dialog now carries `role="dialog"`, `aria-modal="true"`, `aria-labelledby="replace-dialog-title"`, `aria-describedby="replace-dialog-body"`. Title span gets `id="replace-dialog-title"`; body div already had `id="replace-dialog-body"`.
+- Mime-mismatch state modal-dialog carries the same attribute set with disambiguated ids `replace-dialog-title-mime` / `replace-dialog-body-mime` so both mockups can coexist on one HTML page without duplicate-id collisions. Title span and body div carry the matching ids.
+
+Implementation guidance: production uses native `<dialog>` per §2.6; the id-suffix scheme used here exists only because both states render in one wireframe document. Real implementation will have one set of canonical ids per mounted dialog instance.

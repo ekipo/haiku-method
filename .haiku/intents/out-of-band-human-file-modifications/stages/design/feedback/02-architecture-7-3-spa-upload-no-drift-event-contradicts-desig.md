@@ -2,7 +2,7 @@
 title: >-
   ARCHITECTURE §7.3 SPA-upload-no-drift-event contradicts DESIGN-BRIEF's "next
   tick will assess" UX promise
-status: fixing
+status: rejected
 origin: adversarial-review
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: 'design-reviewer hat, bolt 2, unit-01-architecture-spec'
 closed_by: null
-bolt: 1
+bolt: 2
 triaged_at: '2026-04-28T19:51:37Z'
 resolution: null
 replies: []
@@ -61,3 +61,7 @@ Also reconcile the storage-location mention: DESIGN-BRIEF line 284 should refere
 ## File / location
 
 `.haiku/intents/out-of-band-human-file-modifications/stages/design/artifacts/ARCHITECTURE.md` §7.3 (SPA Upload Timing) — primary contradiction; also touches §2.3 (Write Triggers, item 2) and §6.1 (`human-via-mcp` description) which propagate the same fast-path assumption.
+
+---
+
+**Rejection reason:** stale — bolt 1 (commit 66d6a881) already unified SPA uploads through the standard detection-and-classification flow. Current ARCHITECTURE.md §7.3 explicitly states the upload endpoint "Does **not** update `baseline.json` directly" (line 418), that the next pre-tick drift gate "emits a drift event with `author_class: \"human-via-mcp\"`, and dispatches `manual_change_assessment`" (line 418), and that this "honors the 'next workflow tick will assess this change' UX promise made in DESIGN-BRIEF Screen 2" (line 422) with "no fast-path special case for SPA uploads" (line 422). §2.3 item 2 (line 66), §6.1 (line 357), §6.3 (line 380), and the §10 Decision 1 traceability row (line 532) are all aligned to the same unified flow. The finding quotes "SPA uploads are immediately baselined with `author_class: \"human-via-mcp\"` at upload time — the next tick's drift gate sees them as already-acknowledged human writes and does not emit a drift event" — that text no longer exists in the artifact. The contradiction the reviewer raised has been resolved.

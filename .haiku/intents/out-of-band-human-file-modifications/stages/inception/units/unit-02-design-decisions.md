@@ -3,15 +3,22 @@ title: Design decisions
 model: sonnet
 depends_on:
   - unit-01-discovery-document
-inputs:
-  - intent.md
-  - knowledge/CONVERSATION-CONTEXT.md
-  - knowledge/DISCOVERY.md
-  - stages/inception/decision_log.json
+inputs: >-
+  ["stages/inception/artifacts/DISCOVERY.md",
+  "knowledge/CONVERSATION-CONTEXT.md"]
 outputs:
   - >-
     .haiku/intents/out-of-band-human-file-modifications/knowledge/DESIGN-DECISIONS.md
-status: pending
+status: active
+bolt: 1
+hat: researcher
+started_at: '2026-04-28T14:19:34Z'
+hat_started_at: '2026-04-28T14:19:34Z'
+iterations:
+  - hat: researcher
+    started_at: '2026-04-28T14:19:34Z'
+    completed_at: null
+    result: null
 ---
 # Design Decisions
 

@@ -4,7 +4,7 @@
   "phase": "gate",
   "started_at": "2026-04-28T14:42:29Z",
   "completed_at": null,
-  "gate_entered_at": null,
+  "gate_entered_at": "2026-04-28T22:26:56Z",
   "gate_outcome": null,
   "visits": 2,
   "iterations": [

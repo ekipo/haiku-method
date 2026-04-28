@@ -13,6 +13,7 @@ stages:
   - operations
   - security
 active_stage: inception
+intent_reviewed: true
 ---
 
 # Out-of-band human file modifications

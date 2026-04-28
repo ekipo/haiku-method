@@ -12,7 +12,7 @@ stages:
   - development
   - operations
   - security
-active_stage: design
+active_stage: product
 intent_reviewed: true
 started_at: '2026-04-28T07:52:19-06:00'
 ---

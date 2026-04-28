@@ -409,6 +409,7 @@ The following token pairs are used in the new surfaces. Each has been verified a
 | Upload affordance text | `--color-upload-affordance-fg` (teal-500 family, ~oklch 62% 0.14 185) | `--color-upload-affordance-bg-resting` (transparent → white) | ~3.7:1 | 3:1 (large text / UI component) | PASS |
 | Upload affordance text on hover | `--color-upload-affordance-fg` (teal-500 family) | `--color-upload-affordance-bg-hover` (teal-500 at 8% opacity) | ~3.7:1 | 3:1 (UI component) | PASS |
 | Upload affordance text on dragover | `--color-upload-affordance-fg` (teal-500 family) | `--color-upload-affordance-bg-dragover` (teal-500 at 15% opacity) | ~3.4:1 | 3:1 (UI component) | PASS |
+| Knowledge-upload count-chip text | `oklch(100% 0 0)` (white) | `--color-upload-affordance-chip-bg` (teal-700 family, ~oklch 45% 0.14 185) | ~4.6:1 | 4.5:1 (10px / 600 weight is below the 14pt-bold large-text threshold) | PASS |
 | Drift-detected badge text | `--color-drift-detected-fg` | `--color-drift-detected-bg` | ~5.2:1 | 4.5:1 | PASS |
 | Drift-acknowledged badge text | `--color-drift-acknowledged-fg` | `--color-drift-acknowledged-bg` | ~5.3:1 | 4.5:1 | PASS |
 | Drift-surfaced badge text | `--color-drift-surfaced-fg` | `--color-drift-surfaced-bg` | ~5.4:1 | 4.5:1 | PASS |

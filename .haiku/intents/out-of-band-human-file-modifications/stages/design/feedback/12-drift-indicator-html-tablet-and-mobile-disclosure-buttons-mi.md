@@ -2,7 +2,7 @@
 title: >-
   drift-indicator.html: tablet and mobile disclosure buttons missing
   aria-controls
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:32:31Z'
 resolution: null
 replies: []
@@ -58,4 +58,3 @@ Add `aria-controls` to the tablet disclosure button (pointing to the `drift-entr
 - `wireframes/drift-indicator.html:574` — tablet `.drift-entry-list` div: needs `id` attribute
 - `wireframes/drift-indicator.html:637` — mobile `.drift-entry-list` div: needs `id` attribute
 - `artifacts/SPA-UI-SPECS.md:327` — §3.5 requirement source for `aria-controls`
-

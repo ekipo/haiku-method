@@ -2,7 +2,7 @@
 title: >-
   drift-indicator.html: opacity-reduced text fails contrast for .drift-body and
   entry timestamps
-status: pending
+status: fixing
 origin: adversarial-review
 author: accessibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:26:04Z'
 resolution: null
 replies: []
@@ -51,4 +51,3 @@ The `SPA-UI-SPECS.md §4.4` contrast table lists the token-pair ratio at full op
 - `wireframes/drift-indicator.html:290` — `.drift-entry-age { opacity: 0.7 }`
 - `wireframes/drift-indicator.html:582, 590, 644, 655` — inline tablet/mobile opacity:0.7 on timestamps
 - `artifacts/SPA-UI-SPECS.md:405` — contrast table omits opacity-reduction states
-

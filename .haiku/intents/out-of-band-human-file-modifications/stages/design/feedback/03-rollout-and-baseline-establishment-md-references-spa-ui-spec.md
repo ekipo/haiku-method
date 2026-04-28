@@ -2,7 +2,7 @@
 title: >-
   ROLLOUT-AND-BASELINE-ESTABLISHMENT.md references SPA-UI-SPECS.md which is not
   in the design artifact set
-status: pending
+status: fixing
 origin: adversarial-review
 author: design-reviewer
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-28T20:22:46Z'
 resolution: null
 replies: []
@@ -38,4 +38,3 @@ One of the following:
 3. **If chip styling is intentionally deferred**: say so explicitly — "chip styling is deferred; the indicator is a text label in a neutral container; design system integration is a follow-up."
 
 The rollout spec is otherwise complete and sound. This is a localized reference gap, not a structural problem with the document.
-

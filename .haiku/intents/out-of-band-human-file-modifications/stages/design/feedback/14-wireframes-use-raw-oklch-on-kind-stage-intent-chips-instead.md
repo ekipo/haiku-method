@@ -2,7 +2,7 @@
 title: >-
   Wireframes use raw oklch on kind/stage/intent chips instead of KIND_BADGE
   token palette
-status: fixing
+status: closed
 origin: adversarial-review
 author: consistency
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-28T21:59:41Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-14:bolt-1'
 bolt: 1
 triaged_at: '2026-04-28T21:59:41Z'
 resolution: null

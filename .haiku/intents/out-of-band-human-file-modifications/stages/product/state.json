@@ -16,5 +16,21 @@
       "result": null
     }
   ],
-  "elaboration_turns": 1
+  "elaboration_turns": 4,
+  "decision_log": [
+    {
+      "decision": "Behavioral test framework",
+      "options": [
+        "Cucumber/Gherkin .feature files (matches haiku-method's existing pattern in .haiku/features/)",
+        "Vitest unit-style behavioral tests only (no Gherkin)",
+        "Mixed: Gherkin for SPA workflows + Vitest for backend contract tests"
+      ],
+      "choice": "Cucumber/Gherkin .feature files (matches haiku-method's existing pattern in .haiku/features/)",
+      "source": "autonomous-acknowledged",
+      "rationale": "The behavioral-spec discovery already produced 5 .feature files in .haiku/intents/{slug}/features/ following the project's existing convention. Sticking with Gherkin keeps acceptance criteria readable to non-engineers and matches universal-feedback intent's pattern. Backend contract tests in DATA-CONTRACTS.md still get Vitest equivalents at development time.",
+      "recorded_at": "2026-04-29T02:02:37Z"
+    }
+  ],
+  "pre_review_dispatched": true,
+  "pre_review_dispatched_at": "2026-04-29T02:05:30Z"
 }

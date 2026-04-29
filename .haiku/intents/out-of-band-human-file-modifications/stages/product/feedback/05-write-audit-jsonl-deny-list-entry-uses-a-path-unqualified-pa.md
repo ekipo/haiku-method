@@ -2,7 +2,7 @@
 title: >-
   write-audit.jsonl deny-list entry uses a path-unqualified pattern that will
   not reliably match intent-relative paths
-status: fixing
+status: addressed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,12 +11,17 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 2
+bolt: 3
 triaged_at: '2026-04-29T03:42:29Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 3
+    hat: product
+    completed_at: '2026-04-29T03:59:06Z'
+    result: advanced
 ---
-
 ## Finding
 
 DATA-CONTRACTS.md §4.1 (`haiku_human_write`) lists the deny-list for path validation. The deny entries include: `units/*.md`, `feedback/*.md`, `intent.md`, `state.json`, `baseline.json`, `drift-markers.json`, `write-audit.jsonl`.

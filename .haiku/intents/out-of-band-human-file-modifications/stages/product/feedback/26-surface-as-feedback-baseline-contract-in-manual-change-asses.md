@@ -2,7 +2,7 @@
 title: >-
   surface-as-feedback baseline contract in manual-change-assessment.feature
   still incorrect after FB-08 addressed
-status: fixing
+status: closed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:35:51Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-26:bolt-2'
 bolt: 2
 triaged_at: '2026-04-29T20:35:51Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 2
+    hat: product
+    completed_at: '2026-04-29T21:44:43Z'
+    result: advanced
+  - bolt: 2
+    hat: feedback-assessor
+    completed_at: '2026-04-29T21:46:10Z'
+    result: closed
 ---
-
 ## Finding
 
 `features/manual-change-assessment.feature` line 45 states:

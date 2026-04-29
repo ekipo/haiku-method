@@ -2,7 +2,7 @@
 title: >-
   AC-G5-A (trigger-revisit active-stage transition) is Open/Deferred with no
   resolution path
-status: fixing
+status: closed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -10,13 +10,23 @@ created_at: '2026-04-29T20:36:22Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-27:bolt-2'
 bolt: 2
 triaged_at: '2026-04-29T20:36:22Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 2
+    hat: product
+    completed_at: '2026-04-29T21:46:23Z'
+    result: advanced
+  - bolt: 2
+    hat: feedback-assessor
+    completed_at: '2026-04-29T21:47:45Z'
+    result: closed
+integrator_attempts: 1
 ---
-
 ## Finding
 
 `product/ACCEPTANCE-CRITERIA.md` AC-G5-A is explicitly marked **Open / Deferred** with the following rationale:

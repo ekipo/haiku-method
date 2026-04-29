@@ -2,7 +2,7 @@
 title: >-
   baseline.json scoped per-stage but drift-markers.json is intent-scoped —
   storage topology is inconsistent
-status: fixing
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:34:45Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-24:bolt-2'
 bolt: 2
 triaged_at: '2026-04-29T20:34:45Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 2
+    hat: product
+    completed_at: '2026-04-29T21:45:02Z'
+    result: advanced
+  - bolt: 2
+    hat: feedback-assessor
+    completed_at: '2026-04-29T21:45:59Z'
+    result: closed
 ---
-
 **Mandate lens:** Data contracts must be compatible with existing schemas; edge cases must have defined behavior.
 
 **Finding:**

@@ -2,7 +2,7 @@
 title: >-
   Kill-switch no-op scenario missing from all feature files — hard blocker per
   COVERAGE-MAPPING
-status: fixing
+status: closed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:35:32Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-25:bolt-2'
 bolt: 2
 triaged_at: '2026-04-29T20:35:32Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 2
+    hat: product
+    completed_at: '2026-04-29T21:47:14Z'
+    result: advanced
+  - bolt: 2
+    hat: feedback-assessor
+    completed_at: '2026-04-29T21:48:28Z'
+    result: closed
 ---
-
 ## Finding
 
 The `COVERAGE-MAPPING.md` validation outcome is **GAPS FOUND** (not APPROVED) due to a hard blocker: no scenario in any `features/*.feature` file covers the `drift_detection: false` kill-switch no-op path.

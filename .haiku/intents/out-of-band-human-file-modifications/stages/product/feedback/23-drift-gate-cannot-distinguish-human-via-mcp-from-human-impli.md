@@ -2,7 +2,7 @@
 title: >-
   Drift gate cannot distinguish human-via-mcp from human-implicit — missing
   sidecar schema
-status: fixing
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:34:28Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-23:bolt-2'
 bolt: 2
 triaged_at: '2026-04-29T20:34:28Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 2
+    hat: product
+    completed_at: '2026-04-29T21:47:42Z'
+    result: advanced
+  - bolt: 2
+    hat: feedback-assessor
+    completed_at: '2026-04-29T21:48:45Z'
+    result: closed
 ---
-
 **Mandate lens:** Specified behavior must be implementable within the technical constraints. The spec must not assume capabilities that require unreasonable effort to build.
 
 **Finding:**

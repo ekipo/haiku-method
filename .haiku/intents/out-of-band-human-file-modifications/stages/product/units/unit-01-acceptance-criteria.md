@@ -16,9 +16,9 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/product/ACCEPTANCE-CRITERIA.md
 status: active
 bolt: 1
-hat: specification
+hat: validator
 started_at: '2026-04-29T02:43:18Z'
-hat_started_at: '2026-04-29T02:52:42Z'
+hat_started_at: '2026-04-29T02:58:47Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T02:43:18Z'
@@ -26,6 +26,10 @@ iterations:
     result: advance
   - hat: specification
     started_at: '2026-04-29T02:52:42Z'
+    completed_at: '2026-04-29T02:58:47Z'
+    result: advance
+  - hat: validator
+    started_at: '2026-04-29T02:58:47Z'
     completed_at: null
     result: null
 ---

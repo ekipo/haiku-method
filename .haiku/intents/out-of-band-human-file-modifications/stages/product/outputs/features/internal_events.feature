@@ -104,10 +104,13 @@ Feature: Internal workflow events
     When the assessment_recorded event is emitted
     Then "feedback_ids_created" = []
 
-  Scenario: assessment_recorded baselines_updated reflects terminal and surface-as-feedback counts
+  Scenario: assessment_recorded baselines_updated reflects only terminal-outcome baseline writes
+    # Per DATA-CONTRACTS.md §3.5 R6 contract: surface-as-feedback and trigger-revisit defer
+    # the baseline update to marker clearance. Only terminal outcomes (ignore, inline-fix)
+    # increment baselines_updated at classification time.
     Given 2 findings classified as "inline-fix" and 1 as "surface-as-feedback"
     When the assessment_recorded event is emitted
-    Then "baselines_updated" = 3
+    Then "baselines_updated" = 2
     And "pending_markers_created" = 1
 
   # =========================================================================

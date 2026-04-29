@@ -2,7 +2,7 @@
 title: >-
   trigger-revisit baseline update timing is deferred to ARCHITECTURE.md §5.4
   which is not a product-stage artifact
-status: pending
+status: fixing
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T03:42:47Z'
 resolution: null
 replies: []

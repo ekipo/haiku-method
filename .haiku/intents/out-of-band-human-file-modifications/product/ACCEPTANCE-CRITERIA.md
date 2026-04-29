@@ -4,10 +4,10 @@
 > Sibling artifacts in this stage cover behavioral spec (`.feature` files), data contracts (DATA-CONTRACTS.md), and coverage mapping (COVERAGE-MAPPING.md); their substance is not duplicated here.
 > Implementation details (tool signatures, baseline storage format, gate ordering) are out of scope for this artifact — design-stage decisions in ARCHITECTURE.md feed back into AC at refinement time.
 >
-> **Reconciliation note (unit-01):** Five cross-document gaps surfaced during pre-execute review and are closed in this revision:
+> **Reconciliation note (unit-01):** Five cross-document gaps surfaced during pre-execute review and are addressed in this revision:
 > 1. DEC-9 stance resolved: Trust+Audit (replaces AC-AB4 placeholder).
 > 2. `surface-as-feedback` baseline contract corrected: baseline is NOT updated at classification time.
-> 3. Active-stage transition during pending `trigger-revisit` marker added (AC-G5-A).
+> 3. Active-stage transition during pending `trigger-revisit` marker — flagged as Open/Deferred (AC-G5-A) pending design-stage definition; ARCHITECTURE.md does not yet name the state, so this AC is a placeholder until the design stage adds the section.
 > 4. `outputs/` → `artifacts/` alias canonicalization added (AC-ALIAS*).
 > 5. Terminal-state clarification: `closed` and `rejected` clear markers; `addressed` does NOT.
 
@@ -215,15 +215,13 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
 - *Cites: ARCHITECTURE.md §5.3 (marker lifecycle). DEC-4 (eventual consistency).*
 
-#### AC-G5-A: Active-stage state during pending `trigger-revisit` marker — ARCHITECTURE.md §5.5
+#### AC-G5-A: Active-stage state during pending `trigger-revisit` marker — Open / Deferred (pending design clarification)
 
-- **Given** a `trigger-revisit` classification was produced for a drift event targeting an upstream stage
-- **When** a pending-assessment marker for that `trigger-revisit` is written and the revisit dispatch is initiated
-- **Then** the active stage transitions to `awaiting-revisit-resolution` (or the equivalent state named in ARCHITECTURE.md §5.5) for the duration the marker is open
-- **And** no new per-state dispatch actions are issued against the active stage's normal workflow while in `awaiting-revisit-resolution`
-- **And** the `awaiting-revisit-resolution` state clears when the targeted upstream stage re-passes its gate (the same event that clears the pending-assessment marker per AC-G5)
-- **And** normal active-stage workflow resumes immediately upon marker clearing
-- *Cites: ARCHITECTURE.md §5.5 (pending-revisit active-stage state).*
+- **Open in design:** The unit spec for this artifact called for an explicit AC describing the active-stage state while a `trigger-revisit` pending-assessment marker is open ("`awaiting-revisit-resolution` or the equivalent state ARCHITECTURE.md §5.5 names"). At the time of writing, ARCHITECTURE.md §5 has only §5.1 (the Steady-State Loop Problem), §5.2 (Marker Storage), §5.3 (Marker Lifecycle), and §5.4 (Marker and Baseline Consistency). It does NOT yet name an active-stage state for the pending-revisit window, and it does not contain a §5.5. This AC is therefore a documented placeholder, not an enforceable criterion in this revision.
+- **What the design stage must resolve before this AC can be made testable:** The design stage must (a) decide whether to add an explicit "active-stage state during pending-revisit" section (proposed location: ARCHITECTURE.md §5.5) that names the state and specifies the transitions in/out, OR (b) explicitly declare that no special active-stage state is introduced and that workflow simply continues against the active stage with the pending marker as the only signal. Either path closes the gap.
+- **Interim behavior (until design clarifies):** The pending-assessment marker (AC-SF2, AC-TR1, AC-TR2, AC-G5) is the load-bearing mechanism. The marker suppresses re-emission of drift events for the affected file and clears when the revisited upstream stage re-passes its gate. AC-TR1 and AC-TR2 fully specify the marker behavior; the question of whether the active stage's workflow position should change in parallel with the marker is the deferred portion.
+- **Why this is deferred rather than fabricated:** A prior bolt of this unit cited "ARCHITECTURE.md §5.5" as authority for an `awaiting-revisit-resolution` state. The validator caught that §5.5 does not exist and the state is not defined anywhere in the design-stage artifacts; producing an AC against an invented citation would let the artifact pass validation while encoding a load-bearing claim with no upstream backing. Demoting AC-G5-A to Open/Deferred preserves the visibility of the gap without inventing authority.
+- *Cites: AC-UO1 (precedent for Open/Deferred AC structure). Unit-01 spec, completion criterion #7 (active-stage transition during pending-revisit).*
 
 #### AC-G6: Existing PreToolUse hook on workflow-managed files is unchanged — DEC-2
 
@@ -507,6 +505,20 @@ The behavior of out-of-band detection and reaction varies along the following di
 #### AC-UO1: Unit-output tracking boundary is design-stage decision
 
 - **Open in design (TRACKED-SURFACE-BOUNDARY.md §2):** Whether files inside `units/{unit-slug}/` working directories are part of the tracked surface in v1 is a design-stage decision. The default tracked surface as defined in ARCHITECTURE.md §3.3 does not include unit working directories. AC for this class will be added at design-refinement time if the boundary is extended.
+- **What this AC asserts in the meantime:** Until the boundary is extended, the gate MUST NOT enumerate, baseline, or emit drift events for paths under `stages/{stage}/units/{unit-slug}/` working directories. Any drift event the gate produces with `file_class: "unit-output"` in v1 is an implementation bug — the variant exists in the variability brief for forward compatibility, not as a live enforcement target.
+- *Cites: TRACKED-SURFACE-BOUNDARY.md §3.1 (workflow-managed files excluded — `units/*.md` is the relevant pattern); ARCHITECTURE.md §3.3 (tracked surface definition).*
+
+#### AC-UO2: v1 unit-output drift is invisible to the gate (negative AC) — TRACKED-SURFACE-BOUNDARY.md §3.1
+
+- **Given** a human writes a file directly into a unit working directory (e.g., `stages/{stage}/units/unit-NN-foo/working-notes.md`) during v1
+- **When** the next `haiku_run_next` tick runs
+- **Then** the gate does NOT emit a drift event for that file
+- **And** no `manual_change_assessment` action is dispatched on account of that file
+- **And** no baseline entry is written for `stages/{stage}/units/**` paths
+- **And** the framework's behavior is identical to pre-feature behavior for that path
+- **Rationale:** This is the negative-space companion to AC-UO1 — it specifies what the gate MUST NOT do for the unit-output variant in v1. It exists so that a contributor reading the spec understands the variant is declared in the variability brief but is intentionally excluded from v1 enforcement, and so that a development-stage test can assert the negative behavior (no events emitted on unit-working-directory writes).
+- **Note:** When the design stage extends the boundary to cover a unit-output sub-class (e.g., `stages/{stage}/units/{slug}/artifacts/`), this AC will be revised. The spec should be re-read after any TRACKED-SURFACE-BOUNDARY.md §2 amendment.
+- *Cites: TRACKED-SURFACE-BOUNDARY.md §3.1, ARCHITECTURE.md §3.3.*
 
 ---
 
@@ -717,7 +729,7 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **Then** a revisit is dispatched targeting the owning stage (existing `haiku_revisit` mechanism)
 - **And** a pending-assessment marker is recorded linking the file path to the revisit dispatch
 - **And** the baseline SHA does **NOT** update at classification time
-- **And** the active stage transitions to `awaiting-revisit-resolution` (per AC-G5-A) for the duration of the pending marker
+- **And** the active-stage workflow position during the open-marker window is governed by AC-G5-A (currently Open/Deferred — see AC-G5-A's pending-design-clarification framing). The marker itself, not an active-stage state field, is the suppression mechanism for re-detection.
 - *Cites: ARCHITECTURE.md §4.4.4: "What happens to the baseline: Same as surface-as-feedback — the baseline is not updated at classification time."*
 
 #### AC-TR2: Revisit completion clears the marker and updates the baseline — ARCHITECTURE.md §5.3
@@ -726,7 +738,7 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **When** the targeted stage re-passes its gate (revisit completes)
 - **Then** the marker is cleared
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
-- **And** the active stage exits `awaiting-revisit-resolution` and normal workflow resumes
+- **And** any active-stage workflow-position transition associated with the open marker (the deferred portion in AC-G5-A) clears alongside the marker; behavioral spec for that transition is pending design clarification per AC-G5-A
 
 #### AC-TR3: Revisit on the same stage as a drifted file is not allowed for current-stage drift
 
@@ -806,13 +818,14 @@ The behavior of out-of-band detection and reaction varies along the following di
 ### P0 (must-have for completion)
 
 - US-01, US-02, US-03, US-04, US-05, US-07, US-08, US-09, US-11, US-12
-- All General Rules AC-G1 through AC-G13
+- All General Rules AC-G1 through AC-G13 (AC-G5-A is Open/Deferred — see Open list below)
 - All Trust+Audit ACs: AC-TA1, AC-TA2, AC-TA3, AC-TA4
 - All Alias Canonicalization ACs: AC-ALIAS1, AC-ALIAS2, AC-ALIAS3
 - AC-FS1, AC-FS2, AC-FS3 (filesystem-drop variant)
 - AC-AB1, AC-AB2, AC-AB3 (agent-on-behalf variant — AC-AB4 is replaced by AC-TA1 through AC-TA4)
 - AC-SO1, AC-SO2 (stage-output variant)
 - AC-KI1, AC-KI2 (knowledge-input variant)
+- AC-UO2 (unit-output negative AC: gate must NOT emit drift events under `stages/{stage}/units/**` in v1)
 - AC-T1, AC-T2 (text payload variant)
 - AC-B1, AC-B2, AC-B3 (binary payload variant)
 - AC-CO1, AC-CO2 (current stage-of-ownership)
@@ -830,7 +843,8 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 ### Open / Deferred
 
-- AC-UO1 (Tracked-surface boundary on `units/` — design-stage decision, not resolved in v1 default)
+- AC-G5-A (active-stage state during pending `trigger-revisit` marker — pending design-stage clarification; ARCHITECTURE.md §5 currently has only §5.1–§5.4 and does not name an active-stage state for the pending-revisit window. The unit spec called for this AC and the placeholder is documented; making it enforceable requires a design-stage amendment that either adds the named state or explicitly declares no special state is introduced)
+- AC-UO1 (Tracked-surface boundary on `units/` — design-stage decision, not resolved in v1 default; AC-UO2 captures the negative-space behavior in v1)
 - AC-T2 size cap value — ARCHITECTURE.md §3.6 specifies first 200 lines; exact KB threshold is development-stage tunable
 - AC-FS3 specific temp-file pattern set — TRACKED-SURFACE-BOUNDARY.md defers exact list to development
 
@@ -844,7 +858,7 @@ This document is internally consistent with the following design-stage artifacts
 |---|---|
 | AC-G4 (baseline NOT updated on surface-as-feedback) | ARCHITECTURE.md §4.4.3, §5.4 (the baseline-update contract table) |
 | AC-G5 (closed/rejected clear; addressed does not) | ARCHITECTURE.md §5.3 ("when the feedback item transitions to a terminal state (closed or rejected)") |
-| AC-G5-A (awaiting-revisit-resolution state) | ARCHITECTURE.md §5.5 |
+| AC-G5-A (active-stage state during pending-revisit) | Open / Deferred — pending design-stage clarification. ARCHITECTURE.md §5 currently has only §5.1–§5.4; no section names this state. AC-G5-A is a placeholder mirroring AC-UO1's "open in design" structure. |
 | AC-G8 (establish, don't fire) | ROLLOUT-AND-BASELINE-ESTABLISHMENT.md §3.1, ARCHITECTURE.md §3.4 |
 | AC-G10 (unified detection path for all three write origins) | ARCHITECTURE.md §10 (Decision 1 traceability row) |
 | AC-TA1 (no interrupt confirmation in v1) | ARCHITECTURE.md §6.3, MCP-TOOL-CONTRACT.md §10 |

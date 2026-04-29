@@ -2,7 +2,7 @@
 title: >-
   Drift batch pagination contract exists in feature file but is absent from
   DATA-CONTRACTS.md action payload schema
-status: pending
+status: rejected
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T03:42:16Z'
 resolution: null
 replies: []
@@ -28,3 +28,7 @@ DATA-CONTRACTS.md §3.2 defines the `manual_change_assessment` action payload sc
 Additionally, the 50-finding cap is specified only in the feature file, not in any schema, not in any boundary note in §8, and not in any unit body. This makes the cap an undocumented magic number with no traceable origin.
 
 **Fix required:** Either add the pagination fields to DATA-CONTRACTS.md §3.2 with exact field names, types, and constraints (e.g., `has_more: boolean`, `findings_page: integer`, `total_findings: integer`), or explicitly defer pagination to the development stage with a §8 boundary note and remove the specific-count assertion from the feature file. If deferred, the feature file scenario must be revised to remove the concrete 50-finding assertion.
+
+---
+
+**Rejection reason:** misread — citation references `manual-change-assessment.feature` lines 562–568, which does not exist. No file by that name exists in this stage's outputs/features/. No feature file anywhere asserts a 50-finding cap on the manual_change_assessment action payload, a "flag indicating more findings are pending" on the action, or a "second tick dispatch" continuation. drift_finding_and_action.feature defines the manual_change_assessment action shape (lines 63–101) with no pagination scenario; its required-fields list (action, intent_slug, stage, tick_id, findings, mode, instructions, legal_outcomes) matches DATA-CONTRACTS.md §3.2 exactly. The only `has_more` field in the artifacts is on the GET /api/intents/{slug}/assessments HTTP endpoint (http_api.feature:168, DATA-CONTRACTS.md:815) — an unrelated SPA pagination contract, not the workflow action payload. There is no contract gap to fix.

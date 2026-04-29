@@ -404,16 +404,32 @@ is always safe.
 
 When `Assessment.outcome === "surface-as-feedback"` (specifically: when the `haiku_classify_drift`
 tool writes the `Classification` with that outcome), the `Baseline` row for the affected file is
-**updated to the post-drift SHA at the same time the assessment is recorded** — this is an atomic
-write. Both the `Assessment` record and the updated `Baseline` entry are committed together, or
-neither is committed (rollback on failure).
+**NOT updated at classification time**. Instead, a `PendingMarker` (§2.2) is written atomically
+with the `Assessment` record. The `Assessment` and `PendingMarker` writes are committed together,
+or neither is committed (rollback on failure). The `Baseline` is left unchanged.
 
-This atomic write prevents the next tick from re-detecting the same drift. Without the baseline
-update, the file's SHA would still differ from the prior baseline entry, and the gate would emit the
-same drift event on every subsequent tick until the feedback resolved. The pending-assessment marker
-(§2.2) is written in addition to the baseline update — the marker suppresses re-emission for any
-further changes while the feedback is open; the baseline update handles the specific divergence that
-triggered the current assessment.
+Re-detection suppression is handled entirely by the `PendingMarker`: while an open marker
+(`cleared_at IS NULL`) exists for a file, the drift-detection gate skips that file regardless of
+on-disk SHA divergence. The baseline update is deferred until marker clearance (§4.4 —
+`haiku_baseline_clear_marker`), which fires when the linked feedback transitions to a terminal
+state (`closed` or `rejected`). At that point the baseline is updated to the file's then-current
+on-disk SHA — which may differ from the SHA observed at classification time, since the file may
+have been edited further while the feedback was open. This is the correct semantic: the workflow
+engine acknowledges the resolved end-state, not an intermediate snapshot.
+
+Cross-references that must agree with this contract:
+- §0.3 outcome table — `surface-as-feedback` says "baseline deferred"
+- §2.3 `Assessment.resulting_sha` — for non-terminal outcomes, updated at marker-clearance time
+- §4.3 atomic side-effect ordering, step 6 — pending marker only, no baseline write
+- §4.4 `haiku_baseline_clear_marker` — the tool that performs the deferred baseline update
+- ARCHITECTURE.md §4.4.3 (design stage upstream) — the originating spec
+
+**Re-detection of subsequent edits while a marker is open:** Suppression is per-file, not per-SHA.
+If the human edits the file again while the marker is open, no new drift event fires (the marker
+still suppresses). When the marker clears, the baseline is updated to the *then-current* SHA in
+one step; any intermediate edits are folded into that single acknowledgment. The pending marker
+is the sole suppression mechanism — there is no separate "expected SHA" tracked while the marker
+is open.
 
 ---
 
@@ -571,10 +587,13 @@ for already-baselined files.
 4. Write the `Assessment` record (§2.3) including all DEC-9 audit fields.
 5. For terminal outcomes (`ignore`, `inline-fix`): update `Baseline` to current on-disk SHA
    with `author_class` carried from the finding; set `acknowledged_via: "classification-terminal"`.
-6. For `surface-as-feedback`: **atomically** update `Baseline` to post-drift SHA (per R6 contract,
-   §3.5) AND write a `PendingMarker`. Both writes are part of the same atomic commit.
-7. For `trigger-revisit`: write a `PendingMarker` (baseline NOT updated at classification time —
-   updated on revisit completion, per §5.4 of ARCHITECTURE.md).
+6. For `surface-as-feedback`: write a `PendingMarker` (§2.2) atomically with the `Assessment`
+   record. The `Baseline` is **not** updated at classification time per R6 contract (§3.5);
+   the deferred baseline update happens on marker clearance via `haiku_baseline_clear_marker`
+   (§4.4) when the linked feedback transitions to `closed` or `rejected`.
+7. For `trigger-revisit`: write a `PendingMarker` atomically with the `Assessment` record.
+   `Baseline` is **not** updated at classification time — updated on revisit completion via
+   `haiku_baseline_clear_marker`, per §5.4 of ARCHITECTURE.md.
 8. Return the response.
 
 **Response (success):**
@@ -585,10 +604,15 @@ for already-baselined files.
   "assessment_id": "AS-07",
   "feedback_created": ["FB-12"],
   "pending_markers_created": 1,
-  "baselines_updated": 1,
+  "baselines_updated": 0,
   "next_tick_will": "dispatch_review_fix_for_FB-12"
 }
 ```
+
+*Note: `baselines_updated` is 0 here because `surface-as-feedback` defers the baseline update to
+marker clearance (§3.5 R6, §4.4). The count reflects only baselines updated by this call —
+terminal outcomes (`ignore`, `inline-fix`) and `haiku_baseline_clear_marker` invocations are the
+only paths that increment it.*
 
 **Error responses:**
 

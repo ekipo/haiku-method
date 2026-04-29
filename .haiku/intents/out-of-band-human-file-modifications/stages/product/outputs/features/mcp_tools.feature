@@ -188,14 +188,40 @@ Feature: MCP tool contracts
       When haiku_classify_drift executes
       Then "feedback_created" contains the new "FB-NN" identifier
       And "pending_markers_created" = 1
-      And "baselines_updated" = 1
+      And "baselines_updated" = 0
       And a PendingMarker exists with "linked_feedback_id" = the new FB
+      And the Baseline entry for the file is unchanged (still the pre-drift SHA)
 
-    Scenario: surface-as-feedback baseline is updated atomically with assessment record
+    Scenario: surface-as-feedback does NOT update baseline at classification time
+      # Per DATA-CONTRACTS.md §3.5 R6 contract and ARCHITECTURE.md §4.4.3:
+      # the baseline is deferred until marker clearance.
       Given the agent classifies a finding as "surface-as-feedback"
+      And the pre-drift Baseline SHA is "9f86d0..."
+      And the on-disk SHA is "ab12cd..."
       When haiku_classify_drift executes
-      Then the Baseline entry for the file reflects the post-drift SHA
-      And the Assessment record is written in the same atomic transaction
+      Then the Baseline entry for the file still reads "9f86d0..." (unchanged)
+      And a PendingMarker is written with "cleared_at" = null
+      And the PendingMarker and Assessment record are written in the same atomic transaction
+      And "baselines_updated" = 0
+      And "pending_markers_created" = 1
+
+    Scenario: open PendingMarker suppresses re-detection on subsequent ticks
+      # The PendingMarker is the sole re-detection suppression mechanism for surface-as-feedback;
+      # baseline divergence alone does NOT trigger re-detection while a marker is open.
+      Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with "cleared_at" = null
+      And the file's on-disk SHA differs from the unchanged Baseline SHA
+      When the drift-detection gate runs on the next tick
+      Then no drift event is emitted for that path
+      And no new Assessment is dispatched
+
+    Scenario: baseline is updated to current on-disk SHA when marker clears
+      # Per §4.4 — the deferred baseline update happens at marker-clearance time, not at classification.
+      Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with outcome "surface-as-feedback"
+      And the linked feedback "FB-12" transitions to "closed"
+      When haiku_baseline_clear_marker fires with trigger "feedback-closed"
+      Then the PendingMarker's "cleared_at" is set to the current UTC timestamp
+      And the Baseline entry for the file is updated to the current on-disk SHA
+      And the Assessment record's "resulting_sha" is updated to the same current on-disk SHA
 
     Scenario: trigger-revisit classification writes pending marker but does NOT update baseline
       Given the agent classifies the finding as "trigger-revisit" targeting stage "design"

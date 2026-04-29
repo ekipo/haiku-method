@@ -2,7 +2,7 @@
 title: >-
   Assessment append-only guarantee contradicts mutable resulting_sha for
   non-terminal outcomes
-status: fixing
+status: pending
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,11 +11,12 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 3
+bolt: 0
 triaged_at: '2026-04-29T03:42:04Z'
 resolution: null
 replies: []
 ---
+
 ## Finding
 
 DATA-CONTRACTS.md §2.3 declared the `Assessment` schema append-only ("records are never modified after writing"), yet the same section described `resulting_sha` as "updated at marker-clearance time for non-terminal outcomes." Mutually exclusive.

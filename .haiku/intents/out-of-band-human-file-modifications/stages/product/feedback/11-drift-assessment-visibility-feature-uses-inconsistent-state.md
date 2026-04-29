@@ -2,7 +2,7 @@
 title: >-
   drift-assessment-visibility.feature uses inconsistent state names not grounded
   in Assessment schema
-status: fixing
+status: pending
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 3
+bolt: 0
 triaged_at: '2026-04-29T03:43:29Z'
 resolution: null
 replies: []

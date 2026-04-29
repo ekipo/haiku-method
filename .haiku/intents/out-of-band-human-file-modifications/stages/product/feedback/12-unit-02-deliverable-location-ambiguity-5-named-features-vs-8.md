@@ -2,7 +2,7 @@
 title: >-
   Unit-02 deliverable location ambiguity: 5 named features vs 8 different files
   in outputs/features/
-status: fixing
+status: pending
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 3
+bolt: 0
 triaged_at: '2026-04-29T03:43:46Z'
 resolution: null
 replies: []

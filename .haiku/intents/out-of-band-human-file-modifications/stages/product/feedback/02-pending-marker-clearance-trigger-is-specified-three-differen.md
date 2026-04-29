@@ -2,7 +2,7 @@
 title: >-
   Pending-marker clearance trigger is specified three different ways across
   three artifacts
-status: fixing
+status: pending
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,11 +11,12 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 3
+bolt: 0
 triaged_at: '2026-04-29T03:41:51Z'
 resolution: null
 replies: []
 ---
+
 ## Finding
 
 The trigger condition for clearing a `PendingMarker` was specified inconsistently across four product-stage artifacts:

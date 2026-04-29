@@ -79,12 +79,29 @@ Feature: PendingMarker schema and lifecycle
 
   # --- Clearance lifecycle ---
 
-  Scenario: PendingMarker is cleared when linked feedback transitions to addressed
+  Scenario: PendingMarker is cleared when linked feedback transitions to closed
     Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with "outcome" = "surface-as-feedback"
-    And the linked feedback "FB-12" transitions to "addressed" status
-    When haiku_baseline_clear_marker is invoked with trigger "feedback-addressed"
+    And the linked feedback "FB-12" transitions to "closed" status
+    When haiku_baseline_clear_marker is invoked with trigger "feedback-closed"
     Then the PendingMarker's "cleared_at" is set to the current UTC timestamp
     And the Baseline entry for the file is updated to the current on-disk SHA
+
+  Scenario: PendingMarker is cleared when linked feedback transitions to rejected
+    Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with "outcome" = "surface-as-feedback"
+    And the linked feedback "FB-12" transitions to "rejected" status
+    When haiku_baseline_clear_marker is invoked with trigger "feedback-rejected"
+    Then the PendingMarker's "cleared_at" is set to the current UTC timestamp
+    And the Baseline entry for the file is updated to the current on-disk SHA
+
+  Scenario: PendingMarker is NOT cleared when linked feedback transitions to addressed
+    # Rationale: `addressed` is a mid-state that can be reopened. Only terminal states
+    # provide the immutability guarantee required to safely update the baseline (AC-G5, AC-SF3).
+    # `"feedback-addressed"` is not a valid trigger for haiku_baseline_clear_marker.
+    Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with "outcome" = "surface-as-feedback"
+    And the linked feedback "FB-12" transitions to "addressed" status
+    Then haiku_baseline_clear_marker is NOT invoked
+    And the PendingMarker's "cleared_at" remains null
+    And the Baseline entry for the file is unchanged
 
   Scenario: PendingMarker is cleared when linked revisit completes
     Given a PendingMarker exists for a file with "outcome" = "trigger-revisit"

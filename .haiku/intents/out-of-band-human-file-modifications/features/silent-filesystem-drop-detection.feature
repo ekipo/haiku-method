@@ -154,46 +154,35 @@ Feature: Silent filesystem drop detection
     And the gate suppresses drift detection for "stages/design/artifacts/layout.html"
     And no DriftFinding is emitted for "stages/design/artifacts/layout.html"
   # ---------------------------------------------------------------------------
-  # Reconciliation requirement R5 (DATA-CONTRACTS.md §4.4): marker clears at
-  # `addressed` (primary trigger) — not only at `closed`. The human fix landing
-  # is what clears the marker, not the reviewer's formal closure. `closed` and
-  # `rejected` are fallback triggers if the marker was not cleared at the
-  # `addressed` transition.
+  # Clearance trigger contract (DATA-CONTRACTS.md §4.4 + unit-01 AC-G5/AC-SF3):
+  # only terminal feedback states (`closed`, `rejected`) clear the PendingMarker.
+  # `addressed` is a mid-state that can be reopened — it does NOT clear the marker.
   # ---------------------------------------------------------------------------
 
-  Scenario: Pending-assessment marker IS cleared when feedback transitions to addressed (primary trigger)
+  Scenario Outline: Pending-assessment marker is cleared when feedback reaches a terminal state
     Given a pending-assessment marker exists for "stages/design/artifacts/layout.html" linked to feedback "FB-05"
     And "FB-05" has status "open"
-    When "FB-05" transitions to status "addressed"
-    Then haiku_baseline_clear_marker fires with trigger "feedback-addressed"
+    When "FB-05" transitions to status "<terminal_status>"
+    Then haiku_baseline_clear_marker fires with trigger "feedback-<terminal_status>"
     And the pending-assessment marker for "stages/design/artifacts/layout.html" is cleared
     And the baseline SHA for "stages/design/artifacts/layout.html" updates to the file's current SHA at clearing time
     And on the next tick the drift-detection gate treats "stages/design/artifacts/layout.html" as baseline-matched
 
-  Scenario: Pending-assessment marker is cleared when feedback transitions to closed (fallback trigger after addressed)
-    Given a pending-assessment marker exists for "stages/design/artifacts/spec.md" linked to feedback "FB-06"
-    And "FB-06" has status "addressed"
-    And the marker was already cleared at the prior "addressed" transition
-    When "FB-06" transitions to status "closed"
-    Then haiku_baseline_clear_marker is a no-op for "stages/design/artifacts/spec.md" (no open marker)
-    And the baseline SHA for "stages/design/artifacts/spec.md" remains the SHA recorded at the "addressed" clearing time
+    Examples:
+      | terminal_status |
+      | closed          |
+      | rejected        |
 
-  Scenario: Pending-assessment marker is cleared at closed when addressed was skipped (fallback trigger)
+  Scenario: Pending-assessment marker is NOT cleared when feedback transitions to addressed
+    # Rationale: `addressed` is a mid-state that can be reopened. Only immutable terminal
+    # states provide the guarantee required to update the baseline safely (AC-G5, AC-SF3).
     Given a pending-assessment marker exists for "stages/design/artifacts/spec.md" linked to feedback "FB-06"
-    And "FB-06" has status "open" (never transitioned through "addressed")
-    When "FB-06" transitions to status "closed"
-    Then haiku_baseline_clear_marker fires with trigger "feedback-closed"
-    And the pending-assessment marker for "stages/design/artifacts/spec.md" is cleared
-    And the baseline SHA for "stages/design/artifacts/spec.md" updates to the file's current SHA at clearing time
-    And on the next tick the drift-detection gate treats "stages/design/artifacts/spec.md" as baseline-matched
-
-  Scenario: Pending-assessment marker is cleared when feedback transitions to rejected (fallback trigger)
-    Given a pending-assessment marker exists for "stages/design/artifacts/tokens.css" linked to feedback "FB-07"
-    And "FB-07" has status "open"
-    When "FB-07" transitions to status "rejected"
-    Then haiku_baseline_clear_marker fires with trigger "feedback-rejected"
-    And the pending-assessment marker for "stages/design/artifacts/tokens.css" is cleared
-    And the baseline SHA for "stages/design/artifacts/tokens.css" updates to the file's current SHA at clearing time
+    And "FB-06" has status "open"
+    When "FB-06" transitions to status "addressed"
+    Then haiku_baseline_clear_marker is NOT called
+    And the pending-assessment marker for "stages/design/artifacts/spec.md" remains open (cleared_at is null)
+    And the baseline SHA for "stages/design/artifacts/spec.md" is unchanged
+    And the drift-detection gate continues to suppress re-detection of "stages/design/artifacts/spec.md" on the next tick
   # ---------------------------------------------------------------------------
   # Error scenarios
   # ---------------------------------------------------------------------------

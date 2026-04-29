@@ -119,6 +119,7 @@ Append-only. The durable record of "what changed, what the agent decided, why." 
 | `classifications` | array of `Classification` | yes | — | One classification per finding, parallel-indexed (`classifications[i]` corresponds to `findings[i]`). Length must equal `findings.length`. |
 | `agent_rationale` | string | yes | — | Free-form prose, the agent's explanation of *why* it classified each finding the way it did. Used by the SPA's drift assessment view; `>= 1` non-whitespace character. |
 | `resulting_sha` | string \| null | yes | — | For terminal outcomes (`ignore`, `inline-fix`): the on-disk SHA-256 of the file at classification time. For non-terminal outcomes (`surface-as-feedback`, `trigger-revisit`): `null` — always. Never updated after the record is written. The post-clearance SHA for non-terminal outcomes lives on `PendingMarker.resolved_sha` and the `pending_marker_cleared` event payload (§ 6.3). |
+| `revisit_invoked_at` | string (RFC 3339) \| null | yes | `null` | UTC timestamp when the workflow engine invoked `haiku_revisit` for a `trigger-revisit` outcome in this assessment. `null` at write time; stamped atomically when `haiku_revisit` fires on the next tick. Append-only: never reset once set. `null` for assessments with no `trigger-revisit` classifications. Full timing contract in §3.6. |
 | `mode` | string | yes | — | Enum: `"interactive"` \| `"pickup"` \| `"autopilot"` \| `"hybrid"`. Captured at assessment time so the SPA can render mode-aware context (e.g. "this was decided silently in autopilot"). |
 | `confirmed_by_user` | boolean | yes | `false` | True only when the user explicitly confirmed the agent's classification in interactive mode. False in autopilot. False when the user hasn't acted on a surfaced classification. |
 
@@ -406,7 +407,16 @@ Purpose: invoked by the workflow engine itself (not the agent) when a linked fee
 
 > **Normative constraint:** `"feedback-addressed"` is **not** a valid trigger and does **not** clear a `PendingMarker`. The `addressed` status is a mid-state — addressed feedback can be reopened, so it does not provide the immutability guarantee required to safely update the baseline and lift re-detection suppression. Only terminal states (`closed`, `rejected`) and `revisit-complete` provide that guarantee. This aligns with unit-01 AC-G5 and AC-SF3.
 
-Response: `{ ok: true, marker_cleared: true, baseline_updated: true }` or `{ ok: true, marker_cleared: false, reason: "no_open_marker" }`.
+**Side effects (atomic):**
+
+1. Read the current on-disk SHA-256 for `path`.
+2. Set `PendingMarker.cleared_at` to the current UTC timestamp and `PendingMarker.resolved_sha` to the on-disk SHA-256 in a single atomic write. These two fields are always set together and never updated after this point.
+3. Update `Baseline` to the same SHA-256 value (plus current `bytes`, `mtime_ns`, `is_binary`), with `acknowledged_via = "classification-terminal"`.
+4. Emit a `pending_marker_cleared` event (§ 6.3) that includes `resolved_sha` in its payload.
+
+**The `Assessment` record is never modified by this tool.** `Assessment.resulting_sha` remains `null` for non-terminal outcomes; the post-clearance SHA is carried exclusively by `PendingMarker.resolved_sha` and the event payload.
+
+Response: `{ ok: true, marker_cleared: true, baseline_updated: true, resolved_sha: "<sha>" }` or `{ ok: true, marker_cleared: false, reason: "no_open_marker" }`.
 
 ---
 
@@ -581,6 +591,7 @@ Emitted when a non-terminal classification's downstream action resolves (feedbac
 | `trigger` | string | yes | Enum: `"feedback-closed"` \| `"feedback-rejected"` \| `"revisit-complete"`. |
 | `linked_feedback_id` | string \| null | yes | — |
 | `linked_revisit_target_stage` | string \| null | yes | — |
+| `resolved_sha` | string | yes | The on-disk SHA-256 of the file at clearance time. Mirrors `PendingMarker.resolved_sha`. This is the canonical post-resolution SHA for non-terminal-outcome assessments; `Assessment.resulting_sha` remains `null`. |
 
 > **Normative constraint:** This event is never emitted on `feedback-addressed`. The `addressed` status is a mid-state that does not guarantee finality. Only `feedback-closed`, `feedback-rejected`, and `revisit-complete` produce this event. See §4.4 for rationale.
 
@@ -603,6 +614,7 @@ Quick consistency check that the same entity appears identically wherever it cro
 | Feedback ID | n/a (links via `linked_feedback_id`) | `linked_feedback_id` | `linked_feedback_id` / `feedback_created` | n/a | `linked_feedback_id` / `feedback_ids_created` |
 | Stage | `stage` | `stage` | n/a (implicit in `path`) | `stage` (form / query) | `stage` |
 | Tick identifier | n/a (only in `Assessment`) | `tick_id` | `tick_id` | n/a | `tick_id` |
+| Post-clearance SHA | `PendingMarker.resolved_sha` | n/a | `resolved_sha` (§ 4.4 response) | n/a | `resolved_sha` (§ 6.3 event) |
 
 The intentional asymmetry — HTTP request bodies use `target_path` (stage-relative) where the rest of the system uses `path` (intent-relative) — is the only naming variance, and it is documented inline in § 5.1 with the conversion rule (`path = "stages/" + stage + "/" + target_path`).
 

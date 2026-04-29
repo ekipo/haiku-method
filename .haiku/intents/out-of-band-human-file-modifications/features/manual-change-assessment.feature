@@ -45,13 +45,35 @@ Feature: Manual change assessment classification by the agent
     And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" IS updated atomically to the post-drift SHA at classification time
     And the drift-detection gate suppresses re-detection of "stages/design/artifacts/dashboard-layout.html" while the marker is open
 
-  Scenario: surface-as-feedback baseline is updated when feedback reaches a terminal state
+  # ---------------------------------------------------------------------------
+  # Clearance trigger contract (DATA-CONTRACTS.md §4.4 + unit-01 AC-G5/AC-SF3):
+  # only terminal feedback states clear the PendingMarker. `addressed` does NOT.
+  # ---------------------------------------------------------------------------
+
+  Scenario Outline: surface-as-feedback baseline is updated when feedback reaches a terminal state
     Given a pending-assessment marker exists for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
     And "FB-09" has status "open"
-    When "FB-09" transitions to status "closed"
-    Then the pending-assessment marker for "stages/design/artifacts/dashboard-layout.html" is cleared
+    When "FB-09" transitions to status "<terminal_status>"
+    Then haiku_baseline_clear_marker fires with trigger "feedback-<terminal_status>"
+    And the pending-assessment marker for "stages/design/artifacts/dashboard-layout.html" is cleared
     And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" updates to the file's current SHA at clearing time
     And on the next tick the drift-detection gate does not emit a DriftFinding for "stages/design/artifacts/dashboard-layout.html"
+
+    Examples:
+      | terminal_status |
+      | closed          |
+      | rejected        |
+
+  Scenario: feedback transitioning to addressed does NOT clear the pending-assessment marker
+    # Rationale: `addressed` is a mid-state that can be reopened; only terminal states
+    # guarantee the immutability required to safely update the baseline (AC-G5, AC-SF3).
+    Given a pending-assessment marker exists for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
+    And "FB-09" has status "open"
+    When "FB-09" transitions to status "addressed"
+    Then haiku_baseline_clear_marker is NOT called
+    And the pending-assessment marker for "stages/design/artifacts/dashboard-layout.html" remains open (cleared_at is null)
+    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" is unchanged
+
 
   Scenario: Agent classifies a fundamental redirect as trigger-revisit
     Given the DriftFinding has change_kind "modified" for "stages/inception/artifacts/DISCOVERY.md"

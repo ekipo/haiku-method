@@ -71,8 +71,12 @@ interface OpenFeedbackOnStage {
  *  intentionally — they're not terminal. Outcome 3 uses
  *  `classifyPendingForRevisit`, which buckets only
  *  `status === "pending"` items, so re-dispatching a `fixing` /
- *  `answered` item won't happen here. */
-function isOpen(item: FeedbackItem): boolean {
+ *  `answered` item won't happen here.
+ *
+ *  Exported because the HTTP revisit handler reuses this exact
+ *  predicate when deciding whether to 409 on an empty-reasons
+ *  request — the two call sites must stay in sync. */
+export function isOpen(item: FeedbackItem): boolean {
 	if (item.closed_by) return false
 	return (
 		item.status !== "closed" &&

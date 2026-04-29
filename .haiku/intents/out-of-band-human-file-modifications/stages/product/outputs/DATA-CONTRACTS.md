@@ -456,13 +456,119 @@ per invocation) recording: `timestamp`, `entry_id`, `path`, `sha256`, `author_cl
 
 | Field | Type | Required | Constraints |
 |---|---|---|---|
-| `path` | string | yes | Intent-relative or absolute (resolved to intent-relative). Must fall within the tracked surface allow-list (§5 of `MCP-TOOL-CONTRACT.md`). |
+| `path` | string | yes | Intent-relative or absolute (resolved to intent-relative — see §4.1.1 *Path normalization*). Must fall within the tracked surface allow-list (§5 of `MCP-TOOL-CONTRACT.md`) and must NOT match any deny-list pattern (§4.1.2). |
 | `content` | string | yes | UTF-8 string or base64-encoded binary (when `content_encoding: "base64"`). |
 | `content_encoding` | `"utf-8" \| "base64"` | no | Default: `"utf-8"`. |
 | `human_author_id` | string | no | Human user's identifier. Captured in audit log. Self-reported; not validated. |
 | `rationale` | string | no | Short free-text explanation of why the human requested the write. Captured in audit log and surfaced in the next tick's `manual_change_assessment` payload. |
 | `overwrite` | boolean | no | Default: `true`. Pass `false` for create-only semantics. |
 | `create_dirs` | boolean | no | Default: `true`. Creates intermediate directories if needed. |
+
+#### 4.1.1 Path normalization (normative)
+
+Every `path` value submitted to `haiku_human_write` is normalized to a single canonical form
+**before** allow-list and deny-list matching. Both the allow-list (§5 of `MCP-TOOL-CONTRACT.md`)
+and the deny-list (§4.1.2) match against this canonical form only — never against the raw input.
+
+**Canonical form:** A POSIX-style relative path **rooted at the intent directory**
+(`.haiku/intents/{slug}/`). Forward slashes only. No leading slash. No `.` or `..` segments. No
+trailing slash. Lowercase as supplied (path-segment casing is preserved).
+
+**Algorithm (apply in order):**
+
+1. **Reject NUL bytes** (any ` ` in the input) → `path_outside_tracked_surface` /
+   `reason: "path_escape"`.
+2. **Convert separators** — replace any `\\` (Windows separator) with `/`.
+3. **Resolve absolute inputs** — if the input begins with `/`:
+   a. If the input begins with the absolute path of the active intent directory
+      (`<repo-root>/.haiku/intents/{slug}/`), strip that prefix.
+   b. Otherwise → `path_outside_tracked_surface` / `reason: "path_escape"`.
+4. **Resolve `~` and environment expansions** — not supported; if the input contains a leading
+   `~` or `$`, treat as literal and continue (no expansion). The result either passes step 6 or is
+   rejected there.
+5. **Lexical normalization** — collapse runs of `/`, drop `.` segments, and resolve `..` segments
+   purely lexically (no filesystem calls). If any `..` segment would escape the intent root (the
+   running depth ever goes negative) → `path_outside_tracked_surface` /
+   `reason: "path_escape"`.
+6. **Reject leading `/`** — if step 5's output still begins with `/` → `path_outside_tracked_surface` /
+   `reason: "path_escape"`. (Defense in depth; should not occur after steps 3 and 5.)
+7. **Reject empty** — if the result is the empty string or `.` → `path_outside_tracked_surface` /
+   `reason: "no_allow_match"`.
+
+**Resulting invariants** (all true of every normalized path):
+- Does not start with `/`, `./`, or `../`.
+- Does not contain `//`, `/./`, `/../`, or trailing `/`.
+- Is interpreted relative to the intent root only.
+
+**Worked normalization examples:**
+
+| Input | Canonical form | Notes |
+|---|---|---|
+| `knowledge/brand-guide.md` | `knowledge/brand-guide.md` | Already canonical. |
+| `./knowledge/brand-guide.md` | `knowledge/brand-guide.md` | Leading `./` dropped. |
+| `knowledge//brand-guide.md` | `knowledge/brand-guide.md` | Doubled separator collapsed. |
+| `stages/design/artifacts/../artifacts/hero.html` | `stages/design/artifacts/hero.html` | `..` resolved lexically. |
+| `/abs/repo/.haiku/intents/out-of-band-human-file-modifications/knowledge/brand-guide.md` | `knowledge/brand-guide.md` | Absolute input stripped of intent-root prefix. |
+| `stages\design\artifacts\hero.html` | `stages/design/artifacts/hero.html` | Windows separators converted. |
+| `../other-intent/secret.md` | (rejected) | Escapes intent root → `path_escape`. |
+| `/etc/passwd` | (rejected) | Absolute, not under intent root → `path_escape`. |
+| `write-audit.jsonl` | `write-audit.jsonl` | Resolves to intent-root path; matches deny-list (§4.1.2). |
+| `stages/design/write-audit.jsonl` | `stages/design/write-audit.jsonl` | Resolves to a stage-scoped path; **does NOT match** the intent-root `write-audit.jsonl` deny entry. Whether this is denied is governed by §4.1.2 — see deny-list pattern `**/write-audit.jsonl`. |
+
+#### 4.1.2 Deny-list (normative)
+
+The deny-list is matched against the **canonical form** from §4.1.1 using
+**git-style pathspec glob semantics** (the same semantics as `.gitignore`):
+
+- A pattern with no `/` (e.g. `intent.md`) matches the basename only at any depth — equivalent to
+  `**/intent.md`.
+- A pattern beginning with `/` is anchored at the intent root.
+- `**` matches any number of path segments (including zero).
+- `*` matches any run of characters within a single segment (does not cross `/`).
+- A trailing `/` denotes a directory; the pattern matches any path *inside* that directory at any
+  depth.
+- Match is case-sensitive.
+
+A `path` is denied iff at least one deny pattern matches the canonical form. The first matching
+pattern's name is returned in the error envelope's `deny_rule` field for diagnostic clarity.
+
+**Canonical deny patterns:**
+
+| Pattern | What it denies | Rationale |
+|---|---|---|
+| `/intent.md` | The intent's root metadata file. | Workflow-managed (FM is workflow-engine territory). |
+| `/state.json` | The legacy intent-scope state file (if present). | Workflow-managed. |
+| `stages/*/state.json` | Per-stage state files. | Workflow-managed. |
+| `stages/*/units/` | Every file under any stage's `units/` directory. | Unit specs are workflow-managed; agents go through `haiku_unit_*` MCP tools. |
+| `stages/*/feedback/` | Every file under any stage's `feedback/` directory. | Feedback is workflow-managed; agents go through `haiku_feedback_*` MCP tools. |
+| `feedback/` | Intent-scope feedback directory (studio-review findings). | Workflow-managed. |
+| `**/baseline.json` | The drift-detection baseline file at any depth (intent root or per-stage). | Workflow-engine-only; mutated exclusively by `haiku_baseline_init` and `haiku_baseline_clear_marker`. |
+| `**/drift-markers.json` | The pending-marker sidecar at any depth. | Workflow-engine-only; mutated exclusively by `haiku_classify_drift` and `haiku_baseline_clear_marker`. |
+| `**/write-audit.jsonl` | The human-write audit log at any depth. | Tool-managed; appended only by `haiku_human_write` itself. The `**/` prefix denies stage-scoped copies (`stages/{stage}/write-audit.jsonl`) in addition to the intent-root canonical location, matching the audit-log invariant that no agent or human path may write to it directly. |
+
+**Notes:**
+- Allow-list (§5 of `MCP-TOOL-CONTRACT.md`) is consulted **after** the deny-list. A path that
+  matches both is denied — deny wins.
+- The deny-list does not depend on whether a file currently exists on disk. A deny pattern denies
+  the *target path*; create-vs-overwrite semantics are independent.
+- The deny pattern returned in `deny_rule` is the literal pattern string from this table (e.g.
+  `stages/*/units/`, `**/write-audit.jsonl`), not a regex or expanded form.
+
+**Worked deny-list examples:**
+
+| Canonical path | Matched deny pattern | Result |
+|---|---|---|
+| `intent.md` | `/intent.md` | Denied. |
+| `stages/product/units/unit-01-spec.md` | `stages/*/units/` | Denied. |
+| `stages/design/feedback/FB-01.md` | `stages/*/feedback/` | Denied. |
+| `feedback/FB-04.md` | `feedback/` | Denied (intent-scope feedback). |
+| `baseline.json` | `**/baseline.json` | Denied. |
+| `stages/design/baseline.json` | `**/baseline.json` | Denied. |
+| `drift-markers.json` | `**/drift-markers.json` | Denied. |
+| `write-audit.jsonl` | `**/write-audit.jsonl` | Denied. |
+| `stages/design/write-audit.jsonl` | `**/write-audit.jsonl` | Denied. |
+| `knowledge/brand-guide.md` | (none) | Allowed (subject to allow-list match). |
+| `stages/design/artifacts/hero.html` | (none) | Allowed (subject to allow-list match). |
 
 **Response (success):**
 
@@ -484,7 +590,7 @@ per invocation) recording: `timestamp`, `entry_id`, `path`, `sha256`, `author_cl
 
 | `error` (code) | HTTP-equivalent | When |
 |---|---|---|
-| `path_outside_tracked_surface` | 400/403 | Path escapes intent directory, matches deny-list (units, feedback, intent.md, state.json, baseline.json, drift-markers.json, write-audit.jsonl), or matches no allow-list pattern. Includes `reason` sub-field: `deny_list_match` / `no_allow_match` / `path_escape` / `invalid_stage`. |
+| `path_outside_tracked_surface` | 400/403 | Path escapes the intent directory (per §4.1.1 normalization), matches a deny-list pattern (per §4.1.2), or matches no allow-list pattern. Includes `reason` sub-field: `deny_list_match` (pattern from §4.1.2 hit) / `no_allow_match` (no allow-list pattern hit) / `path_escape` (normalization rejected the input) / `invalid_stage` (the path's `stages/{stage}/...` segment names a stage that does not exist for this intent). On `deny_list_match`, the response also includes `deny_rule` set to the literal deny pattern that matched (e.g. `**/write-audit.jsonl`). |
 | `rationale_required` | 400 | `human_write_require_rationale` plugin setting is `true` and `rationale` was absent. |
 | `baseline_conflict` | 409 | A concurrent workflow tick updated the baseline for this path between validation and write. Transient — retry. |
 | `path_already_exists` | 409 | `overwrite: false` and destination file already exists. Includes `existing_sha`. |
@@ -493,8 +599,11 @@ per invocation) recording: `timestamp`, `entry_id`, `path`, `sha256`, `author_cl
 
 **Error envelope:**
 ```json
-{ "ok": false, "error": "path_outside_tracked_surface", "message": "Cannot write to 'stages/design/units/unit-02.md': unit files are workflow-managed.", "reason": "deny_list_match", "deny_rule": "stages/{stage}/units/*.md" }
+{ "ok": false, "error": "path_outside_tracked_surface", "message": "Cannot write to 'stages/design/units/unit-02.md': unit files are workflow-managed.", "reason": "deny_list_match", "deny_rule": "stages/*/units/" }
 ```
+
+The `deny_rule` value is the literal pattern from §4.1.2's deny-list table, matched after the
+input was normalized per §4.1.1.
 
 ---
 

@@ -2,7 +2,7 @@
 title: >-
   silent-filesystem-drop-detection.feature contradicts DATA-CONTRACTS.md on
   marker-clearing trigger
-status: fixing
+status: addressed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -15,8 +15,13 @@ bolt: 1
 triaged_at: '2026-04-29T03:42:33Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T03:46:42Z'
+    result: advanced
 ---
-
 ## Finding
 
 `silent-filesystem-drop-detection.feature` (lines 160–175) explicitly states that a pending-assessment marker is **NOT** cleared when feedback transitions to `addressed`, and IS cleared when it transitions to `closed`. This directly contradicts the authoritative data contract.

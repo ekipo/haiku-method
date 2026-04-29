@@ -1,6 +1,6 @@
 ---
 title: explicit-spa-upload.feature uses HTTP 423 not in DATA-CONTRACTS.md error table
-status: fixing
+status: addressed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -13,8 +13,13 @@ bolt: 1
 triaged_at: '2026-04-29T03:43:03Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T03:48:37Z'
+    result: advanced
 ---
-
 ## Finding
 
 `explicit-spa-upload.feature` lines 101–104 (locked worktree scenario) specifies:

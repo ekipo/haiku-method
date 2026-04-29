@@ -1,6 +1,6 @@
 ---
 title: surface-as-feedback baseline update contract is contradictory across artifacts
-status: fixing
+status: addressed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -13,8 +13,13 @@ bolt: 1
 triaged_at: '2026-04-29T03:41:43Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T03:48:24Z'
+    result: advanced
 ---
-
 ## Finding
 
 DATA-CONTRACTS.md §3.5 (R6 contract) explicitly states: when `haiku_classify_drift` records a `surface-as-feedback` classification, the `Baseline` row is **atomically updated to the post-drift SHA at the same time the assessment is recorded**. This is described as an atomic write that prevents the next tick from re-detecting the same drift.

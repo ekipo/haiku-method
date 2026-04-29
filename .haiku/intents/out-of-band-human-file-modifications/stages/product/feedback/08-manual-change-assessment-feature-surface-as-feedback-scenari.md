@@ -2,7 +2,7 @@
 title: >-
   manual-change-assessment.feature surface-as-feedback scenario has wrong
   baseline contract
-status: fixing
+status: addressed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -15,8 +15,13 @@ bolt: 1
 triaged_at: '2026-04-29T03:42:52Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T03:48:01Z'
+    result: advanced
 ---
-
 ## Finding
 
 `manual-change-assessment.feature` line 45 states:

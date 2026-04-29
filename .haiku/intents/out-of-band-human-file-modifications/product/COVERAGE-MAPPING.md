@@ -54,11 +54,11 @@ Domain covers DEC-1 (detection model) and the ARCHITECTURE.md pre-tick drift gat
 | SC-1.4 | New files appearing in a tracked path with no baseline emitted as `change_kind: added` with null prior SHA | DESN-03 §"new-file detection" | AC-FS2, AC-G2 | "User drops a brand-new knowledge file into the elaborate phase" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`change_kind: "new-file-detected"`, `before_sha256: null`) | COVERED |
 | SC-1.5 | A previously-baselined file that disappears emits `change_kind: deleted`; agent classifies | DESN-03 §"file-deletion behavior" | AC-EE2 | "Tracked file is deleted from the worktree" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`change_kind: "file-removed"`, `after_sha256: null`) | COVERED |
 | SC-1.6 | Binary files baselined by SHA only; drift event contains `is_binary: true`, `diff_unified: null` | DESN-03 §"binary file handling" | AC-B1 | "Binary file replacement is detected with SHA delta only" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`is_binary: true`, `diff_unified: null`) | COVERED |
-| SC-1.7 | Gate is a no-op when `drift_detection: false` plugin-settings flag is set | DESN-01; DESN-05 | AC-G1 (implicit: "before any per-state dispatch" + kill-switch governed by ROLLOUT-AND-BASELINE), AC-OM1 (classification unchanged across modes) | "Operator disables drift detection mid-incident" — specified in discovery gap §9 as a BSPEC projection; scenario not yet present in on-disk `.feature` files | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by` (`"baseline-init"` on establish) | **GAPS FOUND — blocker**: No `features/*.feature` scenario covers the kill-switch no-op path. The projected "Operator disables drift detection mid-incident" scenario was a §9 projected gap in the discovery draft; that gap has NOT been closed by unit-02 or unit-03 feature authoring. |
+| SC-1.7 | Gate is a no-op when `drift_detection: false` plugin-settings flag is set | DESN-01; DESN-05 | AC-G1-KS (kill-switch no-op — explicit), AC-G1 (gate runs on every tick; kill-switch suppresses), AC-OM1 (classification unchanged across modes) | "Kill-switch disabled — drift-detection gate is a complete no-op" and "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by` (`"baseline-init"` on establish) | COVERED |
 | SC-1.8 | First-tick-after-upgrade establishes baselines without firing drift events | DESN-05 §"First-tick-after-upgrade behavior" | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by: "baseline-init"` | COVERED |
 | SC-1.9 | New stages added post-upgrade re-establish baseline only for that stage's tracked paths | DESN-05 §"Per-stage establish triggers" | AC-G8 (extends to per-stage isolation) | No scenario covers multi-stage isolation specifically | n/a (no data contract beyond §2.1 `Baseline.stage`) | DEFERRED: development — per-stage isolation is a runtime boundary verifiable only in integration tests; AC-G8 covers the policy; scenario absent but non-blocking per discovery draft's original assessment |
 
-**Domain gap summary:** SC-1.7 (kill-switch no-op) has no feature scenario — hard blocker per reconciliation requirement §11.
+**Domain gap summary:** No gaps — SC-1.7 (kill-switch no-op) is now covered by the "Kill-switch disabled — drift-detection gate is a complete no-op" scenario and the "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" scenario in `silent-filesystem-drop-detection.feature`. AC-G1-KS in `ACCEPTANCE-CRITERIA.md` is the normative AC. Reconciliation requirement §11 satisfied.
 
 ---
 
@@ -77,9 +77,9 @@ Domain covers DEC-3 (reaction mechanism), DEC-5 (cascade policy), four classific
 | SC-2.7 | Cross-stage drift is not auto-resolved by harness; agent classifies | DEC-5 | AC-EO1, AC-EO2, AC-SO2 | "Cross-stage drift does not auto-revisit — the Agent decides" (`manual-change-assessment.feature`) | n/a (no data contract) | COVERED |
 | SC-2.8 | Ambiguous diffs default to `surface-as-feedback` with `reason_code: 'cannot-determine-intent'` | DESN-01 §"Ambiguous-diff fallback behavior" | AC-B2 | "Binary file drift is classified with degraded payload (no textual diff)" (`manual-change-assessment.feature`) — covers the degraded/ambiguous binary path | DATA-CONTRACTS.md §3.3 `Classification.rationale_excerpt` (rationale notes binary ambiguity) | COVERED — binary ambiguity is the canonical ambiguous-diff case; AC-B2's "default classification for binary drift absent stage context is surface-as-feedback" is the normative hook |
 | SC-2.9 | Classification record is durable across branch operations and `/haiku:revisit` flows | DESN-01 §"Classification-record durability" | AC-G11 | "ManualChangeAssessment record is durable and human-readable" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §2.3 `Assessment` (append-only, survives branch switches per AC-G11) | COVERED |
-| SC-2.10 | `manual_change_assessment` action is skipped when kill-switch is set | DESN-05 §"Failure-mode rollback" | AC-G1 (gate no-op implies no action emission) | No explicit scenario for this kill-switch + action-skip path | n/a | **GAPS FOUND — blocker**: same kill-switch scenario gap as SC-1.7. Both SC-1.7 and SC-2.10 require a "kill-switch no-op" scenario that confirms gate AND action both no-op. |
+| SC-2.10 | `manual_change_assessment` action is skipped when kill-switch is set | DESN-05 §"Failure-mode rollback" | AC-G1-KS (explicit no-action-queued clause), AC-G1 (gate no-op implies no action emission) | "Kill-switch disabled — drift-detection gate is a complete no-op" (`silent-filesystem-drop-detection.feature` — explicitly asserts `no "manual_change_assessment" action is queued on the workflow for this tick`) | n/a | COVERED |
 
-**Domain gap summary:** SC-2.10 has no feature scenario (same blocker as SC-1.7).
+**Domain gap summary:** No gaps — SC-2.10 is now covered by the same `silent-filesystem-drop-detection.feature` kill-switch scenario that closes SC-1.7. The scenario confirms gate AND action both no-op as required.
 
 ---
 
@@ -119,12 +119,12 @@ Domain covers DEC-4 (concurrency), DEC-8 (sync surface), DESN-03 (tracked-surfac
 | SC-4.7 | First tick of an existing intent establishes baselines without firing drift | DESN-05 | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_via: "baseline-init"`, `Baseline.acknowledged_by: "baseline-init"` | COVERED |
 | SC-4.8 | Baseline backfill defaults `acknowledged_by: "agent"` for pre-existing files | DESN-05 §"Author-class backfill" | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature` — "each baseline entry has acknowledged_by 'agent' as the conservative default") | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by: "agent"` | COVERED |
 | SC-4.9 | `/haiku:reset` clears baseline; next tick re-establishes | DESN-05 §"Reset semantics" | AC-G8 (re-establish on missing baseline — covers the post-reset case per AC-EE4 missing-baseline fallback) | No explicit reset scenario; AC-EE4 and AC-G8 together cover it | n/a | DEFERRED: development — reset is a lifecycle operation; the AC policy is clear; scenario is integration-test territory |
-| SC-4.10 | `drift_detection: false` disables gate + action; re-enable does not auto-re-establish | DESN-05 §"Failure-mode rollback" | AC-G1 (kill-switch referenced in "gate is a no-op" framing) | No scenario — same kill-switch gap as SC-1.7 | DATA-CONTRACTS.md §2.1 (no dedicated kill-switch field; governed by plugin settings not on-disk state) | **GAPS FOUND — blocker** (same kill-switch gap) |
+| SC-4.10 | `drift_detection: false` disables gate + action; re-enable does not auto-re-establish | DESN-05 §"Failure-mode rollback" | AC-G1-KS (re-enable clause: "Kill-switch is later flipped back to true" → "MUST NOT auto-establish a fresh baseline — re-establishment requires explicit `haiku_repair`") | "Kill-switch disabled — drift-detection gate is a complete no-op" and "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 (no dedicated kill-switch field; governed by plugin settings not on-disk state) | COVERED |
 | SC-4.11 | Telemetry emits ≥5 named events | DESN-05 §"Telemetry" | AC-G11 (assessment record → implicit event log) | No explicit telemetry scenario | DATA-CONTRACTS.md §6.1 `drift_detected`, §6.2 `assessment_recorded`, §6.3 `pending_marker_cleared` events | DEFERRED: development — structured event emission is a runtime behavior; 3 of 5 named events are contracted in DC §6; the remaining 2 (`baseline-established`, `kill-switch-toggled`) are implied by the corresponding tool calls. No scenario required at product stage. |
 | SC-4.12 | Concurrency model is eventual consistency; mid-bolt human edits are next-tick | DEC-4; DESN-01 §"Concurrency model" | AC-G9 | "Change is detected on next tick not during in-flight bolt" (`silent-filesystem-drop-detection.feature`) | n/a (no data contract — model is behavioral) | COVERED |
 | SC-4.13 | Failure modes: missing → establish; corrupt → halt; out-of-sync → drift event | DESN-01 §"Failure modes" | AC-EE4 | "Baseline storage is corrupt on tick" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline` (integrity enforced by parse) | COVERED |
 
-**Domain gap summary:** SC-4.10 (kill-switch) repeats the same blocker. SC-4.3, SC-4.9, SC-4.11 appropriately deferred to development.
+**Domain gap summary:** No blockers — SC-4.10 (kill-switch) is now covered by the dedicated kill-switch scenarios in `silent-filesystem-drop-detection.feature` and AC-G1-KS in `ACCEPTANCE-CRITERIA.md`. SC-4.3, SC-4.9, SC-4.11 appropriately deferred to development.
 
 ---
 
@@ -178,7 +178,8 @@ The following ACs exist in `ACCEPTANCE-CRITERIA.md` but were not directly cited 
 
 | AC | Traced to SC (via) | Status |
 |---|---|---|
-| AC-G1 | SC-1.2 (drift gate), SC-1.7 (kill-switch — blocked), SC-4.10 (kill-switch) | Non-orphan |
+| AC-G1 | SC-1.2 (drift gate); kill-switch coverage now lives on dedicated AC-G1-KS | Non-orphan |
+| AC-G1-KS | SC-1.7 (gate no-op), SC-2.10 (action skipped), SC-4.10 (re-enable does not auto-establish) | Non-orphan |
 | AC-G2 | SC-2.1, SC-1.3 | Non-orphan |
 | AC-G3 | SC-2.2, SC-5.2 | Non-orphan |
 | AC-G4 | SC-2.3, SC-2.4, SC-2.5, SC-2.6 (baseline-update contract) | Non-orphan |
@@ -257,6 +258,8 @@ The following ACs exist in `ACCEPTANCE-CRITERIA.md` but were not directly cited 
 | `silent-filesystem-drop-detection.feature` | "Zero changes since the last tick" | SC-1.2 | Non-orphan |
 | `silent-filesystem-drop-detection.feature` | "Change is detected on next tick not during in-flight bolt" | SC-4.12 | Non-orphan |
 | `silent-filesystem-drop-detection.feature` | "First tick after feature ships establishes baselines without firing assessments" | SC-1.8, SC-4.7, SC-4.8 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Kill-switch disabled — drift-detection gate is a complete no-op" | SC-1.7, SC-2.10, SC-4.10 (AC-G1-KS) | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" | SC-4.10 (AC-G1-KS re-enable clause) | Non-orphan |
 | `silent-filesystem-drop-detection.feature` | "Editor temp files do not produce false drift events" | SC-1.3 (AC-FS3) | Non-orphan |
 | `silent-filesystem-drop-detection.feature` | "Tracked file is deleted from the worktree" | SC-1.5 | Non-orphan |
 | `silent-filesystem-drop-detection.feature` | "Binary file replacement is detected with SHA delta only" | SC-1.6 | Non-orphan |
@@ -343,8 +346,6 @@ Five additional `.feature` files in `stages/product/outputs/features/` cover sch
 
 | SC | Gap description | Blocking? | Unblock condition |
 |---|---|---|---|
-| SC-1.7 | No feature scenario for kill-switch no-op path (gate does not compute SHAs, emits zero events, action not queued when `drift_detection: false`) | **YES — hard blocker** | A scenario in a `features/*.feature` file must assert: given `drift_detection: false` in plugin settings; when `haiku_run_next` is called; then no SHA computation occurs, no drift event emitted, no `manual_change_assessment` queued, tick proceeds to per-state dispatch normally. |
-| SC-2.10 | Same as SC-1.7 — the kill-switch scenario gap also means the action-processing skip is unverified | **YES — hard blocker** (same root cause as SC-1.7) | Same as SC-1.7 — a single scenario covering both gate and action no-op closes both gaps simultaneously. |
 | SC-4.3 | No scenario for per-STAGE.md `tracked_paths` extension | No — deferred to development | Development-stage integration test |
 | SC-4.9 | No scenario for reset semantics | No — deferred to development | Development-stage integration test |
 | SC-4.11 | No scenario for all 5 telemetry events | No — deferred to development | DC §6 contracts 3 of the 5 events; development stage verifies emission |
@@ -352,7 +353,7 @@ Five additional `.feature` files in `stages/product/outputs/features/` cover sch
 | SC-5.5–5.12 | Responsive/ARIA/a11y scenarios absent | No — deferred to development | Development-stage UI tests |
 | AC-G5-A | None — AC-G5-A is now a concrete negative-space AC (no special active-stage state is introduced); covered by SC-2.6 trigger-revisit lifecycle scenarios in `drift-assessment-visibility.feature` and `manual-change-assessment.feature` which assert the marker — not a workflow-position transition — is the load-bearing artifact | No — covered | n/a — resolved per FB-27 resolution path #2 |
 
-**Hard blockers:** 2 (SC-1.7 and SC-2.10 — same root cause). All other gaps are deferred and non-blocking.
+**Hard blockers:** 0. The prior SC-1.7 / SC-2.10 / SC-4.10 kill-switch hard blockers are closed by AC-G1-KS in `ACCEPTANCE-CRITERIA.md` and the "Kill-switch disabled — drift-detection gate is a complete no-op" + "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" scenarios in `silent-filesystem-drop-detection.feature`. All remaining gaps are deferred and non-blocking.
 
 ---
 
@@ -362,7 +363,6 @@ Items explicitly deferred to later stages. These SCs are intentionally NOT cover
 
 | SC / Concept | Deferred to | Rationale |
 |---|---|---|
-| SC-1.7 / SC-2.10 kill-switch scenario | **Development** (unblock condition above) | Kill-switch behavior is a runtime gate behavior; product AC covers the policy (AC-G1 gateway language); scenario must be authored to close the hard blocker |
 | SC-4.3 STAGE.md `tracked_paths` | Development | Deployment configuration; integration test |
 | SC-4.9 Reset semantics scenario | Development | Lifecycle operation; integration test |
 | SC-4.11 All 5 telemetry events | Development | Runtime emission; DC §6 contracts the shapes |
@@ -498,18 +498,20 @@ All 15 scope-creep candidates from the discovery draft §8 were checked against 
 
 ## 13. Validation Outcome
 
-**GAPS FOUND**
+**APPROVED**
 
-The following conditions prevent `APPROVED`:
+### Hard blockers — resolved
 
-### Hard blockers (must be resolved before gate opens)
-
-1. **Kill-switch no-op scenario missing** — SC-1.7 and SC-2.10 both require a feature scenario demonstrating that when `drift_detection: false` is set, the drift-detection gate performs no SHA computation, emits zero drift events, and the `manual_change_assessment` action is not queued. No such scenario exists in any `features/*.feature` file on disk. A single scenario authored in a new or existing feature file (e.g., `silent-filesystem-drop-detection.feature` or a new `kill-switch.feature`) closes both blockers simultaneously.
+1. **Kill-switch no-op scenario** — RESOLVED. The prior hard blocker (SC-1.7, SC-2.10, SC-4.10 lacking a `features/*.feature` scenario for the `drift_detection: false` no-op path) is closed by:
+   - A new normative AC, **AC-G1-KS**, in `product/ACCEPTANCE-CRITERIA.md` covering: kill-switch suppresses gate SHA computation, action emission, marker writes, and audit-log appends; re-enable does not auto-establish (operator must invoke `haiku_repair`).
+   - Two new scenarios in `silent-filesystem-drop-detection.feature`: "Kill-switch disabled — drift-detection gate is a complete no-op" (covers SC-1.7 + SC-2.10 simultaneously) and "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" (covers SC-4.10's re-enable clause).
+   - Cross-references updated in §2 (SC-1.7), §3 (SC-2.10), §5 (SC-4.10), §8.1 (AC orphan check), §8.2 (scenario orphan check), §9 (gap detection — hard blockers count now 0), §10 (out-of-scope — kill-switch row removed).
 
 ### Confirmed satisfied
 
-- **Zero AC orphans** — All ACs in `product/ACCEPTANCE-CRITERIA.md` trace to at least one SC-N row (§8.1).
-- **Zero scenario orphans** — All scenarios in the four primary feature files trace to at least one SC-N row (§8.2). All schema-contract feature files in `stages/product/outputs/features/` similarly trace to SC-N rows (§8.3).
+- **Zero hard blockers** — see §9. The kill-switch gap is closed; remaining items are deferred development-stage obligations.
+- **Zero AC orphans** — All ACs in `product/ACCEPTANCE-CRITERIA.md` (including the new AC-G1-KS) trace to at least one SC-N row (§8.1).
+- **Zero scenario orphans** — All scenarios in the four primary feature files trace to at least one SC-N row (§8.2), including the two new kill-switch scenarios. All schema-contract feature files in `stages/product/outputs/features/` similarly trace to SC-N rows (§8.3).
 - **Zero scope creep** — All 15 scope-creep candidates confirmed absent from on-disk artifacts (§12).
 - **Reconciliation requirement RR-1** (AC-G*/AC-EE* identifier scheme) — SATISFIED.
 - **Reconciliation requirement RR-2** (canonical enum cross-check: `change_kind`, `acknowledged_by`, `outcome`) — SATISFIED.
@@ -521,8 +523,6 @@ The following conditions prevent `APPROVED`:
 - **AC-G* identifier scheme** throughout this document uses only real identifiers from `product/ACCEPTANCE-CRITERIA.md`. No invented citations.
 - **DC entities** cited throughout are verified sections in `product/DATA-CONTRACTS.md`.
 
-### What unblocks APPROVED
+### Notes on remaining deferred items
 
-Author one scenario covering the kill-switch no-op path — either in `silent-filesystem-drop-detection.feature` under a new "Kill-switch" section or in a dedicated `kill-switch.feature` — and re-run this validation. The scenario must assert: given `drift_detection: false`; when `haiku_run_next` is called; then no drift gate SHA work occurs, no `manual_change_assessment` action is emitted, and the tick proceeds to the normal stage handler. When that scenario exists and is referenced in this matrix's §2 (SC-1.7) and §3 (SC-2.10), the two hard blockers are resolved and this document can be updated to `APPROVED`.
-
-All non-hard-blocker deferred items (§9, §10) do not prevent gate passage — they are development-stage obligations with documented dispositions.
+All non-hard-blocker deferred items (§9, §10) do not prevent gate passage — they are development-stage obligations with documented dispositions (per-STAGE.md `tracked_paths`, reset semantics scenario, full telemetry-event scenario, runtime token-adherence lint, responsive/ARIA/a11y, AC-G5-A active-stage state during pending-revisit pending design clarification).

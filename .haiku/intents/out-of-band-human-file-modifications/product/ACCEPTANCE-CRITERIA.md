@@ -158,6 +158,23 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **And** any file whose current SHA does not match its baseline is recorded as a drift event for this tick
 - *Cites: Decision 1 (DEC-1) — both explicit and implicit detection required.*
 
+#### AC-G1-KS: Kill-switch makes the drift-detection gate a complete no-op — DESN-05
+
+- **Given** the plugin-settings flag `drift_detection: false` is set for the active intent
+- **When** `haiku_run_next` is called
+- **Then** the drift-detection gate performs zero SHA computations against tracked-surface files
+- **And** the gate enumerates zero baseline entries (no `baseline.json` reads, no walk of `artifacts/` / `outputs/` / `knowledge/`)
+- **And** zero drift events are emitted for this tick
+- **And** no `manual_change_assessment` action is queued on the workflow
+- **And** the tick proceeds to per-state dispatch (or to the next gate in the chain) exactly as it would on a tick with zero drift events
+- **And** no pending-assessment markers are written, modified, or read
+- **And** no entries are appended to `drift-assessments/DA-{NN}.json` or any audit log on account of this gate
+- **When** `drift_detection` is later flipped back to `true`
+- **Then** the next tick MUST NOT auto-establish a fresh baseline — re-establishment requires an explicit `haiku_repair` invocation by the operator (the existing baseline, if present, is reused; if absent, the gate falls through per AC-EE4's establish-mode fallback)
+- **And** no drift events are retroactively emitted for changes that occurred while the kill-switch was off
+- **Rationale:** DESN-05 names fail-safe / rollback as a hardened design requirement. The kill-switch must be a complete circuit-breaker — gate, action emission, marker writes, and baseline mutations all suppressed — so an operator can disable the feature mid-incident and rely on framework-pre-feature behavior. Auto-re-establishment on toggle-on would silently re-arm the feature against a now-stale baseline; requiring `haiku_repair` keeps the operator in control of the re-arming step.
+- *Cites: DESN-05 (failure-mode rollback). DISCOVERY.md §9 (operator-disables-mid-incident projected scenario). Closes COVERAGE-MAPPING.md §13 hard blockers SC-1.7, SC-2.10, SC-4.10.*
+
 #### AC-G2: Drift events emit a single workflow action per tick — DEC-3
 
 - **Given** one or more drift events recorded on a tick
@@ -825,7 +842,7 @@ The behavior of out-of-band detection and reaction varies along the following di
 ### P0 (must-have for completion)
 
 - US-01, US-02, US-03, US-04, US-05, US-07, US-08, US-09, US-11, US-12
-- All General Rules AC-G1 through AC-G13, including AC-G5-A (no special active-stage state introduced — concrete, testable per resolution path #2)
+- All General Rules AC-G1 through AC-G13, including AC-G1-KS (kill-switch no-op) and AC-G5-A (no special active-stage state introduced — concrete, testable per resolution path #2)
 - All Trust+Audit ACs: AC-TA1, AC-TA2, AC-TA3, AC-TA4
 - All Alias Canonicalization ACs: AC-ALIAS1, AC-ALIAS2, AC-ALIAS3
 - AC-FS1, AC-FS2, AC-FS3 (filesystem-drop variant)

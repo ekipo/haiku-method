@@ -104,6 +104,37 @@ Feature: Silent filesystem drop detection
     And state.json records drift_baseline_established_at for stage "design"
     And subsequent ticks run in drift-detection mode against the newly established baseline
   # ---------------------------------------------------------------------------
+  # Kill-switch: drift_detection: false plugin-setting disables the entire gate
+  # Closes COVERAGE-MAPPING.md §13 hard blockers SC-1.7, SC-2.10, SC-4.10.
+  # AC reference: ACCEPTANCE-CRITERIA.md AC-G1-KS. Design citation: DESN-05
+  # (failure-mode rollback / fail-safe). Origin: DISCOVERY.md §9 projected
+  # "Operator disables drift detection mid-incident" scenario.
+  # ---------------------------------------------------------------------------
+
+  Scenario: Kill-switch disabled — drift-detection gate is a complete no-op
+    Given the plugin-settings flag "drift_detection" for intent "demo-intent" is set to false
+    And the file "stages/design/artifacts/dashboard-layout.html" was last written by the agent with SHA "agent-sha-100"
+    And the Designer has replaced "stages/design/artifacts/dashboard-layout.html" via direct filesystem write with SHA "human-sha-101"
+    When the agent calls haiku_run_next
+    Then the pre-tick drift-detection gate performs zero SHA computations against tracked-surface files
+    And the gate does not read "stages/design/baseline.json"
+    And the gate does not enumerate "stages/design/artifacts/", "stages/design/outputs/", or "knowledge/"
+    And no DriftFinding is emitted for "stages/design/artifacts/dashboard-layout.html"
+    And no "manual_change_assessment" action is queued on the workflow for this tick
+    And no pending-assessment marker is written, modified, or read
+    And no entry is appended to any "stages/design/drift-assessments/DA-*.json" record on account of this gate
+    And the tick proceeds directly to per-state dispatch as if zero drift events occurred
+
+  Scenario: Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on
+    Given the plugin-settings flag "drift_detection" for intent "demo-intent" was set to false on the prior tick
+    And the file "stages/design/artifacts/dashboard-layout.html" drifted from baseline SHA "agent-sha-200" to "human-sha-201" while the kill-switch was off
+    And the operator now sets the plugin-settings flag "drift_detection" back to true
+    When the agent calls haiku_run_next on the next tick after re-enable
+    Then the drift-detection gate does NOT auto-establish a fresh baseline against the post-edit content
+    And no DriftFinding is retroactively emitted for changes that occurred while the kill-switch was off
+    And the existing "stages/design/baseline.json" (if present) is reused unchanged for subsequent comparisons
+    And re-arming the feature against the current worktree state requires an explicit "haiku_repair" invocation by the operator
+  # ---------------------------------------------------------------------------
   # Edge cases: editor temp files
   # ---------------------------------------------------------------------------
 

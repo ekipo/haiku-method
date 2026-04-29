@@ -145,12 +145,46 @@ files under this path is `"stage-output"` in both the canonical and alias forms.
 }
 ```
 
-**Storage reference:** `stages/{stage}/baseline.json` inside the intent directory. One file per
-stage. Cross-stage entries (a design artifact modified while development is active) are stored in the
-baseline file of the stage that originally produced the file.
+**Storage reference (normative):** `Baseline` entries are partitioned by the entry's `stage` field:
+
+- **Stage-scoped entries** (`stage` is a stage slug, e.g. `"product"`) live in
+  `.haiku/intents/{slug}/stages/{stage}/baseline.json`. One file per stage. Cross-stage entries
+  (a design artifact modified while development is active) are stored in the baseline file of the
+  stage that originally produced the file (i.e. the stage recorded in the `stage` field).
+- **Intent-scope entries** (`stage === null`) live in a single intent-scoped sidecar at
+  `.haiku/intents/{slug}/baseline.json`. This file holds every baseline entry whose `stage` field
+  is null — `tracking_class === "knowledge"` files (`knowledge/**`) and
+  `tracking_class === "intent-meta"` files (`intent.md`, `intent-state.json`, etc.) live here.
+  No `tracking_class` value other than `"knowledge"` or `"intent-meta"` is permitted to have
+  `stage === null`; this is enforced at write time (see "Cross-field invariants" below).
+
+**Path → stage derivation (normative).** Given a `Baseline.path`, the owning storage file is
+derived deterministically by inspecting the path prefix; the rule is the same one the drift gate
+and `haiku_baseline_clear_marker` (§4.4) use to locate the entry without an explicit `stage`
+input:
+
+| Path prefix | `tracking_class` | `stage` | Storage file |
+|---|---|---|---|
+| `stages/{stage}/artifacts/**` (alias: `stages/{stage}/outputs/**`) | `stage-output` | `{stage}` | `.haiku/intents/{slug}/stages/{stage}/baseline.json` |
+| `stages/{stage}/units/{unit-slug}/**` | `unit-output` | `{stage}` | `.haiku/intents/{slug}/stages/{stage}/baseline.json` |
+| `knowledge/**` | `knowledge` | `null` | `.haiku/intents/{slug}/baseline.json` |
+| `intent.md`, `intent-state.json`, `feedback/**` (root-level intent metadata) | `intent-meta` | `null` | `.haiku/intents/{slug}/baseline.json` |
+
+The `{stage}` capture group from a `stages/{stage}/**` path MUST match a known stage slug for the
+intent's studio; a path that begins with `stages/` but whose first path segment after `stages/` is
+not a known stage slug is rejected at write time with `error: "path_not_in_tracked_surface"`.
+
+**Cross-field invariants (enforced at write time):**
+
+1. `tracking_class === "stage-output" || tracking_class === "unit-output"` ⇒ `stage` MUST be
+   non-null AND `path` MUST begin with `stages/{stage}/` where `{stage}` matches the `stage` field.
+2. `tracking_class === "knowledge"` ⇒ `stage === null` AND `path` MUST begin with `knowledge/`.
+3. `tracking_class === "intent-meta"` ⇒ `stage === null` AND `path` MUST NOT begin with
+   `stages/` or `knowledge/`.
 
 **Logical indexes:** primary `(intent_slug, path)`; secondary `(intent_slug, stage)` for per-stage
-scans; secondary `(intent_slug, tracking_class)` for SPA filters.
+scans (treats `stage === null` as a distinct index value for intent-scope entries); secondary
+`(intent_slug, tracking_class)` for SPA filters.
 
 ---
 
@@ -177,6 +211,15 @@ Created when `haiku_classify_drift` records a classification with outcome `surfa
 
 **Storage reference:** Intent-scoped sidecar at `.haiku/intents/{slug}/drift-markers.json`. Not
 stage-scoped, because cross-stage markers may be open while a later stage is active.
+
+**Topology reconciliation with `Baseline`:** `PendingMarker` is intent-scoped and `Baseline`
+entries are partitioned by `stage` (per-stage files for stage-scoped entries, one intent-scope
+sidecar for `stage === null` entries — see §2.1). The two stores are reconciled by `path`: every
+`PendingMarker.path` is also a `Baseline.path`, and the §2.1 **Path → stage derivation** rule
+is the single normative source for resolving a `path` to its owning baseline file. No tool, gate,
+or SPA query parses path prefixes outside that rule. `haiku_baseline_clear_marker` (§4.4) and
+the pre-tick drift gate both apply this rule to locate the `Baseline` entry without an explicit
+`stage` input.
 
 **Worked example:**
 
@@ -798,6 +841,25 @@ a batch-clear operation. Multiple markers (one per file) require multiple invoca
 | `intent_slug` | string | yes | Active intent. |
 | `path` | string | yes | The `PendingMarker.path` to clear. Clears the newest open marker for this path (max `created_at` with `cleared_at IS NULL`). |
 | `trigger` | `"feedback-closed" \| "feedback-rejected" \| "revisit-complete"` | yes | The event that caused the clearance. `"feedback-closed"` and `"feedback-rejected"` are the only valid triggers for `surface-as-feedback` markers; `"revisit-complete"` is the only valid trigger for `trigger-revisit` markers. The mid-lifecycle `addressed` state is **not** a valid trigger value — invocations with `"trigger" = "feedback-addressed"` return `error: "invalid_trigger"` (see error table below). |
+
+**Note: no `stage` input.** The owning baseline file is derived from `path` using the normative
+**Path → stage derivation** rule documented in §2.1. Because `drift-markers.json` is intent-scoped
+while `Baseline` entries are partitioned per-stage, this tool reconciles the two topologies by:
+
+1. Looking up the open `PendingMarker` for `(intent_slug, path)` in the intent-scoped
+   `.haiku/intents/{intent_slug}/drift-markers.json`.
+2. Applying the §2.1 path-prefix rule to determine the owning baseline file:
+   - `stages/{stage}/...` paths → `.haiku/intents/{intent_slug}/stages/{stage}/baseline.json`.
+     The `{stage}` capture must match a known stage slug for the intent's studio.
+   - `knowledge/**` paths and root-level intent-meta paths (`intent.md`, `intent-state.json`,
+     `feedback/**`) → `.haiku/intents/{intent_slug}/baseline.json` (the intent-scope sidecar).
+3. Updating the resolved baseline file's entry for `path` (re-hash the on-disk file, update
+   `sha256`, `bytes`, `mtime_ns`, `acknowledged_at`, `acknowledged_via = "classification-terminal"`)
+   atomically with marking the marker `cleared_at`.
+
+If the `path` does not match any of the prefixes in the §2.1 derivation table, the tool returns
+`error: "path_not_in_tracked_surface"` (see error table below). No path-parsing logic exists
+outside the §2.1 rule.
 
 **Response (success):**
 

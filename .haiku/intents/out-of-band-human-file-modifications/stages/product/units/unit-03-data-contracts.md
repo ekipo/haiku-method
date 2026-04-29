@@ -15,7 +15,16 @@ inputs:
 outputs:
   - >-
     .haiku/intents/out-of-band-human-file-modifications/product/DATA-CONTRACTS.md
-status: pending
+status: active
+bolt: 1
+hat: product
+started_at: '2026-04-29T03:12:16Z'
+hat_started_at: '2026-04-29T03:12:16Z'
+iterations:
+  - hat: product
+    started_at: '2026-04-29T03:12:16Z'
+    completed_at: null
+    result: null
 ---
 # Data contracts
 

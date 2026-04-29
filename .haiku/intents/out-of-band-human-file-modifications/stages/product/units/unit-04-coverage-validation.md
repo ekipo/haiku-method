@@ -15,12 +15,16 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/product/COVERAGE-MAPPING.md
 status: active
 bolt: 1
-hat: product
+hat: specification
 started_at: '2026-04-29T03:23:34Z'
-hat_started_at: '2026-04-29T03:23:34Z'
+hat_started_at: '2026-04-29T03:30:32Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T03:23:34Z'
+    completed_at: '2026-04-29T03:30:32Z'
+    result: advance
+  - hat: specification
+    started_at: '2026-04-29T03:30:32Z'
     completed_at: null
     result: null
 ---

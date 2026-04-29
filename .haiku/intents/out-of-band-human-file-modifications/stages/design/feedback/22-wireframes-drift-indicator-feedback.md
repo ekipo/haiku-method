@@ -1,6 +1,6 @@
 ---
 title: 'wireframes/drift-indicator: Feedback'
-status: pending
+status: rejected
 origin: user-visual
 author: user
 author_type: human
@@ -19,4 +19,3 @@ attachment: 22-wireframes-drift-indicator-feedback.png
 Feedback
 
 ![annotation](/api/feedback-attachment/out-of-band-human-file-modifications/design/22-wireframes-drift-indicator-feedback.png)
-

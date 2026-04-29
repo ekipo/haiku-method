@@ -119,7 +119,7 @@ Feature: Internal workflow events
 
   Scenario: pending_marker_cleared is emitted when haiku_baseline_clear_marker clears a marker
     Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html"
-    When haiku_baseline_clear_marker fires with trigger "feedback-addressed"
+    When haiku_baseline_clear_marker fires with trigger "feedback-closed"
     Then a "pending_marker_cleared" event is appended to the log
 
   Scenario: pending_marker_cleared event contains required fields
@@ -145,10 +145,20 @@ Feature: Internal workflow events
     Then "trigger" = "<value>"
     Examples:
       | reason                               | value                |
-      | feedback transitioned to addressed   | feedback-addressed   |
       | feedback formally closed             | feedback-closed      |
       | feedback rejected as invalid         | feedback-rejected    |
       | revisit cycle completed              | revisit-complete     |
+
+  Scenario: feedback transition to addressed does NOT emit pending_marker_cleared
+    # Per unit-01 AC-G5/AC-SF3 + DATA-CONTRACTS.md §4.4 R5: only terminal feedback states
+    # (closed, rejected) and revisit-complete clear the marker. Addressed feedback can be
+    # reopened, so it is not a safe clearance signal.
+    Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html"
+    And the linked feedback "FB-12" transitions to "addressed" status
+    When the workflow processes the addressed transition
+    Then haiku_baseline_clear_marker is NOT invoked
+    And no "pending_marker_cleared" event is appended to the log
+    And the PendingMarker remains open with "cleared_at" = null
 
   Scenario: pending_marker_cleared is not emitted when no open marker exists
     Given no open PendingMarker exists for the given path
@@ -165,8 +175,8 @@ Feature: Internal workflow events
     Then "drift_detected" event is emitted with "file_path" = that file
     When the agent classifies as "surface-as-feedback"
     Then "assessment_recorded" event is emitted with "surface-as-feedback" in outcomes_count
-    When feedback "FB-12" transitions to "addressed"
-    Then "pending_marker_cleared" event is emitted with "trigger" = "feedback-addressed"
+    When feedback "FB-12" transitions to "closed"
+    Then "pending_marker_cleared" event is emitted with "trigger" = "feedback-closed"
     And the sequence is: drift_detected → assessment_recorded → pending_marker_cleared
 
   Scenario: Events are never modified after writing

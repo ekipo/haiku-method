@@ -263,11 +263,11 @@ Feature: MCP tool contracts
       Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html"
       And the marker has "cleared_at" = null
 
-    Scenario: Clearing marker with feedback-addressed trigger updates cleared_at and baseline
+    Scenario: Clearing marker with feedback-closed trigger updates cleared_at and baseline
       Given the agent calls haiku_baseline_clear_marker with:
         | intent_slug | out-of-band-human-file-modifications    |
         | path        | stages/design/artifacts/hero-layout.html |
-        | trigger     | feedback-addressed                       |
+        | trigger     | feedback-closed                          |
       When the tool executes
       Then the response is:
         | field           | value                                    |
@@ -278,12 +278,17 @@ Feature: MCP tool contracts
       And the PendingMarker's "cleared_at" is set
       And the Baseline entry's SHA is updated to the current on-disk SHA
 
-    Scenario: Clearing when feedback-addressed fires before feedback-closed (R5 contract)
+    Scenario: feedback-addressed transition does NOT clear the marker (R5 contract)
+      # Per unit-01 AC-G5/AC-SF3 + DATA-CONTRACTS.md §4.4 R5: addressed feedback can be
+      # reopened, so it is not a safe clearance signal. Only terminal states (closed, rejected)
+      # and revisit-complete clear the marker.
       Given feedback "FB-12" is linked to a PendingMarker and transitions to "addressed" (not yet "closed")
-      When haiku_baseline_clear_marker fires with trigger "feedback-addressed"
-      Then the marker is cleared immediately
-      And the baseline is updated
-      And a subsequent "feedback-closed" event does not re-fire the marker logic
+      When the workflow processes the addressed transition
+      Then haiku_baseline_clear_marker is NOT invoked with trigger "feedback-addressed"
+      And the PendingMarker remains open with "cleared_at" = null
+      And the Baseline entry is NOT updated
+      And a subsequent "feedback-closed" transition fires haiku_baseline_clear_marker with trigger "feedback-closed"
+      And that subsequent invocation clears the marker and updates the baseline
 
     Scenario: haiku_baseline_clear_marker targets a single path per invocation
       Given PendingMarkers exist for three different files
@@ -304,7 +309,15 @@ Feature: MCP tool contracts
       Then the response "ok" = true
       Examples:
         | trigger              |
-        | feedback-addressed   |
         | feedback-closed      |
         | feedback-rejected    |
         | revisit-complete     |
+
+    Scenario: feedback-addressed is not a valid trigger value
+      # Per unit-01 AC-G5/AC-SF3 + DATA-CONTRACTS.md §4.4 R5: the trigger enum is restricted
+      # to terminal feedback states and revisit completion.
+      Given an open PendingMarker for the path
+      When haiku_baseline_clear_marker is invoked with "trigger" = "feedback-addressed"
+      Then the response "ok" = false
+      And the response "error" = "invalid_trigger"
+      And the PendingMarker remains open with "cleared_at" = null

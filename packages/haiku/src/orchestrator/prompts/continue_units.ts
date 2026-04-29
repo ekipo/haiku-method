@@ -21,7 +21,6 @@ import {
 	resolveStageInputs,
 } from "../../studio-reader.js"
 import {
-	batchDispatchDirective,
 	buildInterpretationBlock,
 	emitSubagentDispatchBlock,
 	inlineFile,
@@ -76,13 +75,11 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 	}
 
 	const hatDefs = readHatDefs(studio, stage)
-	const wave = action.wave as number | undefined
-	const totalWaves = action.total_waves as number | undefined
+	const stageHats = (action.hats as string[]) || []
+	const firstStageHat = stageHats[0] || ""
 
 	const sections: string[] = []
-	sections.push(
-		`## Parallel Execution (continue): ${entries.length} active units in ${stage}${wave !== undefined ? ` — Wave ${wave}/${totalWaves ?? "?"}` : ""}`,
-	)
+	sections.push(`## Run these ${entries.length} subagent(s) in parallel`)
 
 	for (const entry of entries) {
 		const { name: unitName, hat, bolt, worktree: wt } = entry
@@ -250,12 +247,15 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 				`${step++}. Commit frequently inside the worktree: \`git add -A && git commit -m "..."\`. Do NOT push.`,
 			)
 		}
+		const isFirstHat = hat === firstStageHat
 		prompt.push(
 			`${step++}. When done: call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unitName}" }\``,
-			`${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unitName}" }\``,
-			`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
+			isFirstHat
+				? `${step++}. **If blocked**, you are the first hat in this stage's hat sequence — there is no previous hat to reject back to. Do NOT call \`haiku_unit_reject_hat\`. Instead: surface ambiguity via \`AskUserQuestion\` (or \`ask_user_visual_question\` for visual decisions); if upstream-stage outputs are missing, log a stage_revisit feedback at the upstream stage via \`haiku_feedback { intent: "${slug}", stage: "<earlier-stage>", title: "<upstream gap>", body: "<what's missing>", origin: "agent", resolution: "stage_revisit" }\` and call \`haiku_run_next\`; if you've found a real defect in the spec or upstream artifact, log it via \`haiku_feedback\`. The first hat escalates outward, not backward.`
+				: `${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unitName}" }\``,
+			`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\`${isFirstHat ? "" : " or `reject_hat`"} returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
 			`${step++}. Track outputs in unit frontmatter \`outputs:\` field`,
-			`${step++}. If outputs from a previous stage are missing: call \`haiku_revisit { intent: "${slug}" }\``,
+			`${step++}. If outputs from a previous stage are missing: log a stage_revisit feedback at that stage via \`haiku_feedback { intent: "${slug}", stage: "<earlier-stage>", title: "<missing output>", body: "<what's needed>", origin: "agent", resolution: "stage_revisit" }\` and call \`haiku_run_next\` — the pre-tick gate routes the rewind.`,
 			"",
 			"**Autonomy:** You are one of a parallel wave — execute without asking the user to confirm per-step. The workflow engine coordinates the wave. Do NOT ask which unit runs first, whether to advance a hat, whether to commit/push. Use `AskUserQuestion`/`ask_user_visual_question` only when genuinely blocked on ambiguous requirements.",
 			"",
@@ -277,24 +277,13 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 
 	sections.push(
 		[
-			"### Parent Instructions (do NOT include in subagent prompts)",
+			"### Parent Instructions",
 			"",
-			"For each `<subagent>` block, map attributes to Task-tool parameters:",
+			`Spawn each \`<subagent>\` block above using the Task tool: \`type\` → \`subagent_type\`; \`model\` → \`model\` (omit when absent); \`prompt_file\` → prompt body is literally \`"Read <path> and execute its instructions exactly."\`. Do not add anything beyond that one-line prompt body — the workflow engine owns the authoritative prompt at the file path.`,
 			"",
-			`- \`type="..."\` → \`subagent_type\``,
-			`- \`model="..."\` → \`model\` (OMIT when absent; do NOT supply a default)`,
-			`- \`prompt_file="..."\` → prompt body is literally \`"Read <path> and execute its instructions exactly."\``,
+			`**Run all ${entries.length} in parallel.** Each subagent's final message will be one of: (a) \`Workflow Result: <path>\` — read that JSON file, then call \`haiku_run_next { intent: "${slug}" }\`; (b) plaintext "job ends here" — another subagent in the wave will produce the structured result; do NOT dispatch yet; (c) anything else (non-compliant) — fall back to calling \`haiku_run_next { intent: "${slug}" }\`. \`haiku_run_next\` returns the next thing to do — either another subagent block to spawn, or a terminal action.`,
 			"",
-			"The workflow engine owns the authoritative prompt at `prompt_file`; do not paraphrase. Per-unit `model` attributes reflect the cascade the workflow engine resolved — dropping them defeats the selection.",
-			"",
-			batchDispatchDirective(entries.length, "units"),
-			"",
-			"**On each completion, inspect the result before (if applicable) refilling the slot:**",
-			`- \`Workflow Result: <path>\` → read that JSON file, then call \`haiku_run_next { intent: "${slug}" }\` (run_next is authoritative).`,
-			`- Plaintext "job ends here" → another subagent will emit the structured result; do NOT dispatch yet.`,
-			`- Anything else → fall back: call \`haiku_run_next { intent: "${slug}" }\`.`,
-			"",
-			"Stop driving only when run_next returns `gate_review`, `escalate`, `intent_complete`, or `error`.",
+			`Stop driving only when \`haiku_run_next\` returns a terminal action (\`gate_review\`, \`escalate\`, \`intent_complete\`, or \`error\`).`,
 		].join("\n"),
 	)
 

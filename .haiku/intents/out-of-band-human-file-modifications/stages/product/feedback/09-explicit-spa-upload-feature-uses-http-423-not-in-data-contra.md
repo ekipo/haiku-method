@@ -1,6 +1,6 @@
 ---
 title: explicit-spa-upload.feature uses HTTP 423 not in DATA-CONTRACTS.md error table
-status: pending
+status: fixing
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T03:43:03Z'
 resolution: null
 replies: []

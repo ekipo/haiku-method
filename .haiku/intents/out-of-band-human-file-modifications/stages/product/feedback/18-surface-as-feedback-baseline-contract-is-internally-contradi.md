@@ -2,7 +2,7 @@
 title: >-
   surface-as-feedback baseline contract is internally contradictory across
   DATA-CONTRACTS and feature files
-status: pending
+status: fixing
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 2
 visit: 2
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T20:32:52Z'
 resolution: null
 replies: []

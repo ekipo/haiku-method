@@ -2,7 +2,7 @@
 title: >-
   Re-loop 6 unvalidated fix-chain findings on product stage (orchestrator
   dispatch bug — issue #271)
-status: pending
+status: closed
 origin: agent
 author: parent-agent
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-29T17:20:47Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'revisit:product:visit-2'
 bolt: 0
 triaged_at: '2026-04-29T17:20:47Z'
 resolution: stage_revisit

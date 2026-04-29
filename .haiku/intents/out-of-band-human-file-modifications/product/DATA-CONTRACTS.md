@@ -620,6 +620,23 @@ The intentional asymmetry — HTTP request bodies use `target_path` (stage-relat
 
 ---
 
+## Appendix A — outputs/features/ catalog
+
+Appendix A — outputs/features/ catalog. The 8 .feature files at `stages/product/outputs/features/` are supplementary contract-verification scenarios that exercise the schemas, action payloads, MCP tools, HTTP API, and internal events defined in this document. They are NOT canonical user-behavior features — those live at the intent root in `features/` and are bound by the development stage's step-definition layer. The contract-verification scenarios in `outputs/features/` are bound separately by the contract-test layer.
+
+| File | DATA-CONTRACTS.md Section(s) | Verifies |
+|---|---|---|
+| `assessment_schema.feature` | §2.3 Assessment | Assessment record schema, append-only invariant, per-outcome resulting_sha semantics |
+| `pending_marker_schema.feature` | §2.2 PendingMarker | PendingMarker schema, resolved_sha lifecycle, terminal-only clearance trigger |
+| `baseline_schema.feature` | §2.1 Baseline | Baseline record schema (path, sha, author_class) |
+| `drift_finding_and_action.feature` | §3.1, §3.2 | DriftFinding shape, manual_change_assessment action payload |
+| `internal_events.feature` | §6 | drift_detected, assessment_recorded, pending_marker_cleared event payloads |
+| `mcp_tools.feature` | §4 | haiku_human_write_file, haiku_baseline_init, haiku_classify_drift, haiku_baseline_clear_marker contracts |
+| `http_api.feature` | §5 | POST /uploads/stage-output, POST /uploads/knowledge, GET /assessments[/{id}] |
+| `cross_surface_naming.feature` | §7 | Cross-surface naming audit (entity names match across disk/action/MCP/HTTP/events) |
+
+---
+
 ## 8. Boundary Notes (deferred to siblings)
 
 These contracts are written to be implementable, but the following choices are owned by sibling discovery artifacts and should be confirmed at design time:

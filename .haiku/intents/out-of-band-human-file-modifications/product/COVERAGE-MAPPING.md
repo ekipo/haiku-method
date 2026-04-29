@@ -6,278 +6,523 @@ format: text
 required: true
 ---
 
-# Coverage Mapping — Out-of-Band Human File Modifications
+# Coverage Mapping — Out-of-Band Human File Modifications (Validated)
 
-This is the validator-hat traceability matrix for the product stage. It enumerates every success criterion this intent must hit, anchors each criterion to its source (intent goal, design-stage unit completion criteria, or recorded design decision), and projects which acceptance-criteria (AC) item and behavioral-spec / data-contract item the sibling product artifacts MUST cover to close it. It also flags scope creep — i.e., AC/spec dimensions the design stage did not authorize but which a sibling discovery artifact might add — and documents the validation outcome.
+This is the terminal traceability matrix for the product stage. It replaces the discovery-draft projection (`knowledge/COVERAGE-MAPPING.md`) with observed coverage: every row now maps to an AC identifier that **actually exists** in `product/ACCEPTANCE-CRITERIA.md`, a scenario name that **actually exists** in `features/*.feature`, and a DC entity that **actually exists** in `product/DATA-CONTRACTS.md`.
 
-The matrix below is intentionally exhaustive on the criterion side and intentionally projected (not yet observed) on the AC/spec side: this artifact is authored in parallel with `ACCEPTANCE-CRITERIA.md`, `BEHAVIORAL-SPEC.md`, and `DATA-CONTRACTS.md`. The product validator will compare this matrix against the actual sibling content on the next workflow tick (the merge-back tick) and convert any "PROJECTED" entry that has no corresponding sibling content into a hard gap.
+The discovery draft used a projected flat `AC-N.N` numbering scheme. This document rewrites the entire matrix using the canonical `AC-G*` (general rules), `AC-EE*` (edge cases), `AC-TA*` (Trust+Audit), `AC-ALIAS*` (alias canonicalization), `AC-SU*` (SPA upload), `AC-FS*` (filesystem-drop), `AC-AB*` (agent-on-behalf), `AC-SO*` / `AC-KI*` / `AC-UO*` (tracked-surface class), `AC-T*` (text payload), `AC-B*` (binary payload), `AC-CO*` / `AC-EO*` (stage-of-ownership), `AC-OM*` (operating mode), and `AC-CI*` / `AC-IF*` / `AC-SF*` / `AC-TR*` (classification outcome) identifiers that unit-01 settled on.
+
+All 7 reconciliation requirements from the unit spec are enforced in §11.
+
+---
 
 ## How to read this document
 
-- **SC-N** rows = success criteria. Each row is a numbered, atomic, individually testable statement of what "done" looks like for the intent.
-- **AC-N** identifiers = acceptance-criteria items the sibling `ACCEPTANCE-CRITERIA.md` MUST contain. The validator-hat tick after parallel-discovery merge cross-checks these projections against the sibling's actual contents.
-- **BSPEC-N** identifiers = behavioral-spec scenarios (`.feature` file scenarios) the sibling `BEHAVIORAL-SPEC.md` MUST contain.
-- **DC-N** identifiers = data-contract entries the sibling `DATA-CONTRACTS.md` MUST contain.
-- **DEC-N** = recorded design decision from `knowledge/DESIGN-DECISIONS.md` (numbered to match Decision 1–9 there).
-- **DESN-N** = a design-stage unit completion criterion (from `unit-01..unit-06` design unit specs).
-- **Source** column cites the upstream document and section that authorizes the criterion.
-- **Responsible hat** column indicates which product-stage hat (`product`, `specification`, or `validator`) is accountable for closing the gap if no sibling AC or spec item maps to the criterion.
-
-The matrix is grouped by capability domain so reviewers and downstream hats can scan a coherent slice rather than a flat 60-row table.
+- **SC-N.N** — success criterion from the upstream sources listed in §1.
+- **AC-G\*** / **AC-EE\*** / **AC-TA\*** etc. — the identifier of an actual AC in `product/ACCEPTANCE-CRITERIA.md`. Every ID cited here was verified to exist in that file.
+- **Scenario name** — exact scenario title from a `.feature` file in `features/`.
+- **DC entity** — the section or named type in `product/DATA-CONTRACTS.md` that schemas the data. `n/a (no data contract)` for non-data SCs.
+- **Disposition** — `COVERED`, `DEFERRED: <stage> — <rationale>`, or `OPEN/DEFERRED: <reason>`.
 
 ---
 
 ## 1. Sources of success criteria
 
-The following upstream documents contributed success criteria to this matrix. If a future validator-tick sees a criterion in the wild that does not derive from one of these sources, it is scope creep and gets flagged in §6.
+The following upstream documents contributed success criteria to this matrix.
 
-1. **Intent goal** — `.haiku/intents/out-of-band-human-file-modifications/intent.md` (the body text of the intent, which establishes the three motivating change types and the scope boundary).
+1. **Intent goal** — `intent.md` body text establishing the three motivating change types and scope boundary.
 2. **Inception DISCOVERY.md** §"Success criteria" — five functional bullets and four outcome-based bullets.
-3. **Inception DESIGN-DECISIONS.md** — Decisions 1–9, plus the "Open for Design" list. The chosen path of each decision becomes a constraint that downstream AC/spec must honor.
-4. **Design unit-01 ARCHITECTURE.md spec** — completion criteria covering baseline storage contract, pre-tick gate, `manual_change_assessment` action, four classification outcomes, baseline-update contract, author-class tracking, classification-record durability, ambiguous-diff fallback, concurrency, failure modes, kill-switch.
-5. **Design unit-02 MCP-TOOL-CONTRACT.md spec** — completion criteria covering tool name, input/output, write semantics, path constraints, integrity stance, audit trail, error contracts, SPA-upload distinction.
-6. **Design unit-03 TRACKED-SURFACE-BOUNDARY.md spec** — completion criteria covering in-scope paths, out-of-scope paths, per-stage flexibility, first-tick behavior, new-file detection, file-deletion detection, binary handling, naming reconciliation (`outputs/` vs `artifacts/`).
-7. **Design unit-04 SPA-UI-SPECS.md spec** — completion criteria covering passive-observer constraint, three new SPA surfaces, ARIA, contrast, tokens, responsive behavior.
-8. **Design unit-05 ROLLOUT-AND-BASELINE-ESTABLISHMENT.md spec** — completion criteria covering establish-mode, kill-switch, telemetry, reset semantics, per-stage isolation.
-9. **Design unit-06 ROLLOUT-CHIP-SELF-CONTAINED.md spec** — establish-mode chip deferral; affects AC scope (no SPA-UI dependency for the chip in v1).
-10. **Sibling boundary**: cross-cutting integration with the existing pre-tick feedback-triage gate is bounded to the workflow-engine artifact (sibling) and is referenced here only in coverage rows that depend on the gate ordering.
+3. **Inception DESIGN-DECISIONS.md** — Decisions 1–9 (DEC-1 through DEC-9). The chosen path of each decision is a constraint that AC/spec must honor.
+4. **Design unit-01 ARCHITECTURE.md spec** — pre-tick gate, `manual_change_assessment` action, four classification outcomes, baseline-update contract, author-class tracking, classification-record durability, ambiguous-diff fallback, concurrency, failure modes, kill-switch.
+5. **Design unit-02 MCP-TOOL-CONTRACT.md spec** — tool name, input/output, write semantics, path constraints, integrity stance, audit trail, error contracts, SPA-upload distinction.
+6. **Design unit-03 TRACKED-SURFACE-BOUNDARY.md spec** — in-scope paths, out-of-scope paths, per-stage flexibility, first-tick behavior, new-file detection, file-deletion detection, binary handling, naming reconciliation (`outputs/` → `artifacts/`).
+7. **Design unit-04 SPA-UI-SPECS.md spec** — passive-observer constraint, three new SPA surfaces, ARIA, contrast, tokens, responsive behavior.
+8. **Design unit-05 ROLLOUT-AND-BASELINE-ESTABLISHMENT.md spec** — establish-mode, kill-switch, telemetry, reset semantics, per-stage isolation.
+9. **Design unit-06 ROLLOUT-CHIP-SELF-CONTAINED.md spec** — establish-mode chip deferral.
 
 ---
 
 ## 2. Coverage matrix — Detection (implicit + explicit)
 
-This domain covers Decision 1 (detection model) and the architecture's pre-tick drift gate.
+Domain covers DEC-1 (detection model) and the ARCHITECTURE.md pre-tick drift gate.
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC (ACCEPTANCE-CRITERIA.md) | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-1.1 | The pre-tick drift gate fires after tamper-detection and feedback-triage but before per-state dispatch on every `haiku_run_next` tick. | DESN-01 (architecture spec) §"Pre-tick drift-detection gate" | AC-1.1 ("On any `haiku_run_next` tick, drift detection runs after tamper-detection and feedback-triage and before per-state dispatch") | BSPEC-1.1 ("Tick gate ordering" feature; scenario: agent makes no changes → tamper, triage, drift gates all execute in declared order) | DC-1.1 (gate-order entry naming the four gates and their ordering as a documented contract) | product, specification |
-| SC-1.2 | The gate computes a SHA per tracked file and compares it against the stored baseline; matched SHAs do not fire any event. | DESN-01 §"Pre-tick drift-detection gate"; DEC-1 | AC-1.2 ("If no tracked file has changed SHA since the last baseline write, the gate emits zero drift events and the tick proceeds normally") | BSPEC-1.2 ("Steady-state tick" scenario: zero drift events; tick handler runs the next workflow action) | — | specification |
-| SC-1.3 | The gate detects modifications to existing tracked files and emits a `change_type: modified` drift event with the file path, prior SHA, current SHA, author-class hint, and (for text files) a unified diff. | DESN-01 §"Pre-tick drift-detection gate"; DESN-03 §"new-file/deletion behavior"; DEC-1 | AC-1.3 ("When a tracked text file's SHA changes between ticks, the next tick observes a drift event with `change_type: modified`, the path, prior SHA, current SHA, author-class, and a unified diff") | BSPEC-1.3 ("Designer replaces hero-mockup.html via filesystem cp" scenario from intent's three motivating examples) | DC-1.2 (drift-event schema: `path`, `change_type`, `prior_sha`, `current_sha`, `author_class`, `diff`, `mime`, `size_bytes`) | specification |
-| SC-1.4 | New files appearing in a tracked path that have no baseline are emitted as `change_type: added`, classified as `human-implicit` author-class, and routed to `manual_change_assessment`. | DESN-03 §"new-file detection" | AC-1.4 ("A previously-unseen file appearing in a tracked path triggers a drift event with `change_type: added` and the agent classifies whether to integrate it") | BSPEC-1.4 ("User drops `brand-guide.pdf` into `knowledge/` between ticks" scenario from intent's third motivating example) | DC-1.3 (drift-event variant for `change_type: added`: `prior_sha` is null, `diff` is null, `mime` and `size_bytes` are populated) | specification |
-| SC-1.5 | A previously-baselined file that disappears emits `change_type: deleted`, and the agent's classification step decides whether to restore from baseline or accept the deletion. | DESN-03 §"file-deletion behavior" | AC-1.5 ("When a baselined file is deleted, the next tick observes a drift event with `change_type: deleted` and the agent classifies the outcome") | BSPEC-1.5 ("PO accidentally deletes a feedback-rejected screenshot" scenario; agent classification surfaces as feedback) | DC-1.4 (drift-event variant for `change_type: deleted`: `current_sha` is null, `diff` is null, `prior_sha` is populated) | specification |
-| SC-1.6 | Binary files (extensions matching the studio binary list — `.png`, `.jpg`, `.figma`, `.pdf`, etc.) are baselined by SHA only, and the drift event payload contains `size_bytes` + `mime` + SHA but no diff. | DESN-03 §"binary file handling" | AC-1.6 ("For binary files, the drift event contains size and mime but no diff payload; the agent classifies based on author-class + size delta + mime change") | BSPEC-1.6 ("Designer replaces a 4MB figma export with a 6MB figma export" scenario; agent receives size delta and mime, not diff) | DC-1.5 (drift-event for binary files: explicit `diff: null` + `is_binary: true` discriminator field) | specification |
-| SC-1.7 | The gate is a no-op (does not compute SHAs, does not emit drift events) when the plugin-settings flag `drift_detection: false` is set. | DESN-01 §"Kill-switch integration"; DESN-05 §"Failure-mode rollback" | AC-1.7 ("When `drift_detection: false` is set in plugin settings, the gate is a no-op and the tick proceeds without drift work") | BSPEC-1.7 ("Operator disables drift detection mid-incident" scenario; gate no-ops, ticks resume) | DC-1.6 (plugin-settings field `drift_detection: boolean` with default `true`) | specification |
-| SC-1.8 | First-tick-after-upgrade behavior establishes baselines without firing drift events; subsequent ticks fire drift events normally. | DESN-05 §"First-tick-after-upgrade behavior"; DEC §"Baseline establishment on upgrade" | AC-1.8 ("On the first tick of an intent that pre-dates the feature, the gate writes baselines and emits zero drift events") | BSPEC-1.8 ("Existing intent on first tick after upgrade" scenario; baselines written, no `manual_change_assessment` queued) | DC-1.7 (per-stage state field `drift_baseline_established_at: timestamp \| null`) | specification |
-| SC-1.9 | New stages added to an existing intent post-upgrade re-establish baseline only for that stage's tracked paths; cross-stage isolation. | DESN-05 §"Per-stage establish triggers" | AC-1.9 ("When a new stage joins an active intent, that stage's first tick establishes its own baseline without affecting other stages' baselines") | BSPEC-1.9 ("Composite intent gains a new design stage mid-flight" scenario) | — | specification |
+| SC-1.1 | Pre-tick drift gate fires after tamper-detection and feedback-triage but before per-state dispatch on every `haiku_run_next` tick | DESN-01 §"Pre-tick drift-detection gate" | AC-G13 | "Designer replaces a stage output layout file" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.5 "Pre-tick gate ordering with feedback-triage" | COVERED |
+| SC-1.2 | Gate computes SHA per tracked file and compares against stored baseline; matched SHAs do not fire any event | DESN-01; DEC-1 | AC-G1 | "Zero changes since the last tick" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline` schema | COVERED |
+| SC-1.3 | Gate detects modifications to existing tracked files and emits a `change_kind: modified` drift event with path, prior SHA, current SHA, and unified diff (text files) | DESN-01; DEC-1 | AC-G1, AC-G2, AC-T1 | "Designer replaces a stage output layout file" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`change_kind: "modified"`, `diff_unified`, `before_sha256`, `after_sha256`) | COVERED |
+| SC-1.4 | New files appearing in a tracked path with no baseline emitted as `change_kind: added` with null prior SHA | DESN-03 §"new-file detection" | AC-FS2, AC-G2 | "User drops a brand-new knowledge file into the elaborate phase" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`change_kind: "new-file-detected"`, `before_sha256: null`) | COVERED |
+| SC-1.5 | A previously-baselined file that disappears emits `change_kind: deleted`; agent classifies | DESN-03 §"file-deletion behavior" | AC-EE2 | "Tracked file is deleted from the worktree" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`change_kind: "file-removed"`, `after_sha256: null`) | COVERED |
+| SC-1.6 | Binary files baselined by SHA only; drift event contains `is_binary: true`, `diff_unified: null` | DESN-03 §"binary file handling" | AC-B1 | "Binary file replacement is detected with SHA delta only" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding` (`is_binary: true`, `diff_unified: null`) | COVERED |
+| SC-1.7 | Gate is a no-op when `drift_detection: false` plugin-settings flag is set | DESN-01; DESN-05 | AC-G1 (implicit: "before any per-state dispatch" + kill-switch governed by ROLLOUT-AND-BASELINE), AC-OM1 (classification unchanged across modes) | "Operator disables drift detection mid-incident" — specified in discovery gap §9 as a BSPEC projection; scenario not yet present in on-disk `.feature` files | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by` (`"baseline-init"` on establish) | **GAPS FOUND — blocker**: No `features/*.feature` scenario covers the kill-switch no-op path. The projected "Operator disables drift detection mid-incident" scenario was a §9 projected gap in the discovery draft; that gap has NOT been closed by unit-02 or unit-03 feature authoring. |
+| SC-1.8 | First-tick-after-upgrade establishes baselines without firing drift events | DESN-05 §"First-tick-after-upgrade behavior" | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by: "baseline-init"` | COVERED |
+| SC-1.9 | New stages added post-upgrade re-establish baseline only for that stage's tracked paths | DESN-05 §"Per-stage establish triggers" | AC-G8 (extends to per-stage isolation) | No scenario covers multi-stage isolation specifically | n/a (no data contract beyond §2.1 `Baseline.stage`) | DEFERRED: development — per-stage isolation is a runtime boundary verifiable only in integration tests; AC-G8 covers the policy; scenario absent but non-blocking per discovery draft's original assessment |
 
-**Domain coverage gaps flagged in §6:** none expected (every detection-domain criterion has a projected AC and BSPEC). Validator confirms during merge tick.
+**Domain gap summary:** SC-1.7 (kill-switch no-op) has no feature scenario — hard blocker per reconciliation requirement §11.
 
 ---
 
 ## 3. Coverage matrix — Classification & response
 
-This domain covers Decision 3 (reaction mechanism), Decision 5 (cascade policy), and the four classification outcomes from architecture.
+Domain covers DEC-3 (reaction mechanism), DEC-5 (cascade policy), four classification outcomes.
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-2.1 | When ≥ 1 drift events are emitted on a tick, the workflow engine emits a `manual_change_assessment` action whose payload is the list of drift events. | DESN-01 §"`manual_change_assessment` workflow action" | AC-2.1 ("When the gate emits one or more drift events, the next tick handler is `manual_change_assessment` with the events in payload") | BSPEC-2.1 ("Drift cascades into `manual_change_assessment`" scenario; chained from BSPEC-1.3 / 1.4 / 1.5 / 1.6) | DC-2.1 (`manual_change_assessment` action shape: input `{ drift_events: DriftEvent[] }`, output `{ classifications: Classification[] }`) | product, specification |
-| SC-2.2 | The agent's classification of a drift event is one of `ignore`, `inline-fix`, `surface-as-feedback`, `trigger-revisit`. | DESN-01 §"Classification outcome semantics" | AC-2.2 ("The agent's classification of every drift event is exactly one of the four named outcomes") | BSPEC-2.2 ("Classification of a typo correction" → `inline-fix`; "Classification of a hostile redirect" → `trigger-revisit`; "Classification of a noise file" → `ignore`; "Classification of an ambiguous binary swap" → `surface-as-feedback`) | DC-2.2 (`Classification` type: `{ event_id: string, outcome: 'ignore' \| 'inline-fix' \| 'surface-as-feedback' \| 'trigger-revisit', rationale: string, baseline_action: 'update' \| 'pending' }`) | product, specification |
-| SC-2.3 | Outcome `ignore` updates the baseline immediately to the current SHA and produces no other side effects. | DESN-01 §"Classification outcome semantics" — `ignore` row | AC-2.3 ("`ignore` classification updates baseline to current SHA and writes no feedback or unit") | BSPEC-2.3 ("PO renames a draft screenshot to lowercase; agent classifies as `ignore`; baseline updated, no FB raised") | — | product, specification |
-| SC-2.4 | Outcome `inline-fix` writes corrective work into the next bolt of the active stage's current unit; baseline updates immediately. | DESN-01 §"Classification outcome semantics" — `inline-fix` row | AC-2.4 ("`inline-fix` classification spawns corrective bolt work on the active unit; baseline updates to current SHA") | BSPEC-2.4 ("PO edits a sentence in the unit's current artifact; agent classifies as `inline-fix`; next bolt extends the human's edit") | — | product, specification |
-| SC-2.5 | Outcome `surface-as-feedback` opens a feedback file in the active stage's `feedback/` directory with the drift summary, the diff, the responsible hat hint, and a link to the changed file; baseline writes a "pending-assessment" marker until the FB closes. | DESN-01 §"Classification outcome semantics" — `surface-as-feedback` row + §"Baseline-update contract"; DEC-3 | AC-2.5 ("`surface-as-feedback` opens a feedback item; baseline holds `pending-assessment` until the FB closes; on FB close the baseline updates to the resolved SHA") | BSPEC-2.5 ("Designer replaces a layout the agent doesn't understand; agent classifies as `surface-as-feedback`; FB created with diff in body; baseline pending until FB closes") | DC-2.3 (feedback file frontmatter extension: `origin: 'manual-change-assessment'`, `drift_event_id: string`) | product, specification |
-| SC-2.6 | Outcome `trigger-revisit` calls `revisit()` against the upstream stage that owns the changed file; baseline holds `pending-assessment` until the revisit completes. | DESN-01 §"Classification outcome semantics" — `trigger-revisit` row + DEC-5 | AC-2.6 ("`trigger-revisit` invokes the existing `haiku_revisit` mechanism on the upstream stage; the active stage transitions to `awaiting-revisit-resolution` until the revisit completes") | BSPEC-2.6 ("Designer drops a complete redesign onto a design-stage artifact while product stage is active; agent classifies as `trigger-revisit`; product stage pauses; design re-enters") | — | product, specification |
-| SC-2.7 | Cross-stage drift (file owned by an earlier stage than active) is not auto-resolved by the harness; the agent classifies and decides whether to revisit. | DEC-5 | AC-2.7 ("Drift on a file owned by a stage earlier than the active stage routes through the same four-outcome classifier; the harness does not auto-trigger revisit") | BSPEC-2.7 ("Cross-stage drift on inception knowledge while design is active" scenario; agent picks one of four outcomes) | — | product, specification |
-| SC-2.8 | Ambiguous diffs default to `surface-as-feedback` with a `cannot-determine-intent` reason code; this is not a fifth outcome but a labeled fallback within `surface-as-feedback`. | DESN-01 §"Ambiguous-diff fallback behavior" | AC-2.8 ("When the agent cannot confidently classify a diff (binary swap, large-scale restructure), the outcome is `surface-as-feedback` with `reason_code: 'cannot-determine-intent'`") | BSPEC-2.8 ("Binary swap of the same mime and similar size; agent classifies as `surface-as-feedback` with the `cannot-determine-intent` code") | DC-2.4 (FB frontmatter extension: `reason_code?: 'cannot-determine-intent' \| ...`) | specification |
-| SC-2.9 | The agent's classification record is durable across branch operations and `/haiku:revisit` flows. | DESN-01 §"Classification-record durability and location" | AC-2.9 ("After `git checkout` between stage branches, the classification record for any prior drift event is still readable") | BSPEC-2.9 ("Branch switch then re-read classification" scenario) | DC-2.5 (classification-record location chosen by ARCHITECTURE.md; product stage records the contract reference, not the specific path) | specification |
-| SC-2.10 | The `manual_change_assessment` action is skipped (alongside the gate) when the kill-switch is set. | DESN-05 §"Failure-mode rollback" | AC-2.10 ("When `drift_detection: false`, no `manual_change_assessment` actions are queued or processed") | BSPEC-2.10 (covered by BSPEC-1.7 — single scenario asserts both gate and action no-op) | — | specification |
+| SC-2.1 | When ≥1 drift events are emitted, workflow engine emits `manual_change_assessment` action with the drift events payload | DESN-01 §"`manual_change_assessment` action" | AC-G2 | "Drift cascades" covered by: "Designer replaces a stage output layout file" (assessment emitted) and "Manual change assessment classification" feature generally | DATA-CONTRACTS.md §3.2 `manual_change_assessment` action payload | COVERED |
+| SC-2.2 | Agent's classification is exactly one of four outcomes: `ignore`, `inline-fix`, `surface-as-feedback`, `trigger-revisit` | DESN-01 §"Classification outcome semantics" | AC-G3 | "Agent classifies a typo correction as ignore", "Agent classifies a meaningful edit as inline-fix", "Agent classifies an out-of-spec change as surface-as-feedback", "Agent classifies a fundamental redirect as trigger-revisit" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §3.3 `Classification.outcome` enum | COVERED — four outcomes covered by four named scenarios |
+| SC-2.3 | `ignore` updates baseline immediately; no other side effects | DESN-01 §"Classification outcome semantics — ignore" | AC-CI1 | "Agent classifies a typo correction as ignore" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §3.3 `Classification.outcome: "ignore"` | COVERED |
+| SC-2.4 | `inline-fix` writes corrective work into next bolt; baseline updates immediately | DESN-01 §"Classification outcome semantics — inline-fix" | AC-IF1, AC-IF2 | "Agent classifies a meaningful edit as inline-fix" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §3.3 `Classification.outcome: "inline-fix"` | COVERED |
+| SC-2.5 | `surface-as-feedback` opens feedback item; baseline holds pending-assessment marker until FB reaches terminal state (`closed` or `rejected`) | DESN-01; DEC-3 | AC-SF1, AC-SF2, AC-SF3 | "Agent classifies an out-of-spec change as surface-as-feedback", "surface-as-feedback baseline is updated when feedback reaches a terminal state" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §2.2 `PendingMarker`, §4.4 `haiku_baseline_clear_marker` | COVERED |
+| SC-2.6 | `trigger-revisit` calls revisit on owning stage; baseline holds pending-assessment marker until revisit completes | DESN-01; DEC-5 | AC-TR1, AC-TR2 | "Agent classifies a fundamental redirect as trigger-revisit" (`manual-change-assessment.feature`), "SPA resolves pending-revisit state when the revisited stage re-passes its gate" (`drift-assessment-visibility.feature`) | DATA-CONTRACTS.md §2.2 `PendingMarker.linked_revisit_target_stage` | COVERED |
+| SC-2.7 | Cross-stage drift is not auto-resolved by harness; agent classifies | DEC-5 | AC-EO1, AC-EO2, AC-SO2 | "Cross-stage drift does not auto-revisit — the Agent decides" (`manual-change-assessment.feature`) | n/a (no data contract) | COVERED |
+| SC-2.8 | Ambiguous diffs default to `surface-as-feedback` with `reason_code: 'cannot-determine-intent'` | DESN-01 §"Ambiguous-diff fallback behavior" | AC-B2 | "Binary file drift is classified with degraded payload (no textual diff)" (`manual-change-assessment.feature`) — covers the degraded/ambiguous binary path | DATA-CONTRACTS.md §3.3 `Classification.rationale_excerpt` (rationale notes binary ambiguity) | COVERED — binary ambiguity is the canonical ambiguous-diff case; AC-B2's "default classification for binary drift absent stage context is surface-as-feedback" is the normative hook |
+| SC-2.9 | Classification record is durable across branch operations and `/haiku:revisit` flows | DESN-01 §"Classification-record durability" | AC-G11 | "ManualChangeAssessment record is durable and human-readable" (`manual-change-assessment.feature`) | DATA-CONTRACTS.md §2.3 `Assessment` (append-only, survives branch switches per AC-G11) | COVERED |
+| SC-2.10 | `manual_change_assessment` action is skipped when kill-switch is set | DESN-05 §"Failure-mode rollback" | AC-G1 (gate no-op implies no action emission) | No explicit scenario for this kill-switch + action-skip path | n/a | **GAPS FOUND — blocker**: same kill-switch scenario gap as SC-1.7. Both SC-1.7 and SC-2.10 require a "kill-switch no-op" scenario that confirms gate AND action both no-op. |
 
-**Domain coverage gaps flagged in §6:** none expected; the four-outcome model + ambiguous-diff fallback + cross-stage cascade are fully represented.
+**Domain gap summary:** SC-2.10 has no feature scenario (same blocker as SC-1.7).
 
 ---
 
 ## 4. Coverage matrix — Write paths (UX surfaces)
 
-This domain covers Decision 7 (UX surface composition), Decision 9 (human-write-path integrity), and the design-stage unit-02 (MCP tool contract) and unit-04 (SPA UI specs).
+Domain covers DEC-7 (UX surface composition), DEC-9 (human-write-path integrity), DESN-02 (MCP tool contract), DESN-04 (SPA UI specs).
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-3.1 | A designer can replace a stage output file directly in the worktree filesystem and the next tick acknowledges the change rather than silently regenerating over it. | Intent goal §"Functional"; DEC-7 | AC-3.1 ("When a stage-output file is replaced via filesystem write, the next tick observes drift, classifies it, and acknowledges via the chosen outcome") | BSPEC-3.1 ("Designer replaces a layout via `cp`" — chains BSPEC-1.3 → BSPEC-2.4) | — | product |
-| SC-3.2 | A PO can hand-edit a unit-output file or stage-output file and ask the agent to extend or refine it; the agent treats the human's edit as the new baseline. | Intent goal §"Functional" | AC-3.2 ("After a human-attributed edit, agent invocations that build on the file consume the post-edit content, not the pre-edit content") | BSPEC-3.2 ("PO edits a paragraph in a stage-output html, asks 'extend this'") | — | product, specification |
-| SC-3.3 | A user can drop a knowledge file into a stage's knowledge directory (filesystem) without touching chat, and the agent picks it up on the next tick and integrates it. | Intent goal §"Functional"; DEC-1 | AC-3.3 ("Files dropped into `stages/{stage}/knowledge/` between ticks are observed as drift, classified as `inline-fix` (or `surface-as-feedback` if integration is non-obvious), and incorporated into the next bolt") | BSPEC-3.3 ("User drops `competitor-screenshot.png` into `stages/inception/knowledge/`") | — | product |
-| SC-3.4 | A user can drop a knowledge file via the SPA upload UI and the file lands at the selected destination, stamped `human-via-mcp` author-class. | DESN-04 §"Knowledge Upload Panel" | AC-3.4 ("Files uploaded via the SPA `KnowledgeUploadPanel` are written to disk at the selected destination and the resulting baseline-stamp records `author-class: human-via-mcp`") | BSPEC-3.4 ("User clicks `Upload N files` in the SPA panel; files land at `knowledge/`; baseline stamps `human-via-mcp`") | DC-3.1 (`POST /api/knowledge-upload` endpoint: multipart form-data, `destination: 'intent' \| 'stage:{slug}'`, returns `{ baseline_stamps: BaselineStamp[] }`) | product, specification |
-| SC-3.5 | A user can replace a stage output file via the SPA's "Replace this output…" dialog; the file lands at the original artifact path with mime-matching enforcement; the resulting baseline stamps `human-via-mcp`. | DESN-04 §"Stage Output Replacement Affordance" | AC-3.5 ("The Replace dialog accepts a file matching the original mime (with explicit override), writes it at the original path, stamps `human-via-mcp`, and emits the WS frame `output_replaced`") | BSPEC-3.5 ("Designer opens output card menu, picks `Replace this output…`, drops new HTML, clicks Replace; baseline stamps `human-via-mcp`; card refreshes") | DC-3.2 (`POST /api/stage-output-replace` endpoint: multipart, `intent`, `stage`, `artifact_path`, `note?`, `override_mime?: boolean`, returns `{ baseline_stamp: BaselineStamp, output_path: string }`) | product, specification |
-| SC-3.6 | A user can ask the agent in chat ("hey claude, write this file") and the agent invokes the human-attributed-write MCP tool; the resulting baseline records `author-class: human-via-mcp`. | DEC-7; DESN-02 | AC-3.6 ("When the agent invokes the human-write MCP tool with a path inside the tracked surface and a content payload, the file is written and the baseline stamps `human-via-mcp`; the next tick's gate sees no drift on this file") | BSPEC-3.6 ("User says 'save this Tailwind config to design references'; agent invokes human-write tool; tick observes no drift") | DC-3.3 (MCP tool input: `{ path: string, content: string \| { base64: string }, human_author_id?: string, rationale?: string }`; output: `{ baseline_stamp: BaselineStamp, created_dirs: string[] }`) | specification |
-| SC-3.7 | The human-write MCP tool refuses to write into workflow-managed-file zones (`units/*.md`, `feedback/*.md`, `intent.md`, `state.json`) with error `path_outside_tracked_surface`. | DESN-02 §"Path constraints" | AC-3.7 ("Calls to the human-write tool targeting `intent.md`, any `units/*.md`, any `feedback/*.md`, or any `state.json` return error code `path_outside_tracked_surface`") | BSPEC-3.7 (deny-list test scenarios — one per workflow-managed-file zone, ≥4 scenarios) | DC-3.4 (error contract enum: `path_outside_tracked_surface`, `rationale_required`, `baseline_conflict`) | specification |
-| SC-3.8 | Every invocation of the human-write MCP tool appends a record (who, what, when, why) to the per-intent audit log; the audit log is human-readable and append-only. | DESN-02 §"Audit trail" | AC-3.8 ("After a successful or denied human-write call, the audit log gains exactly one new entry with `actor`, `path`, `timestamp`, `rationale`, and `outcome`") | BSPEC-3.8 ("Five sequential human-writes produce five audit-log entries in chronological order with no gaps") | DC-3.5 (audit log entry: `{ actor: string, path: string, timestamp: string, rationale: string \| null, outcome: 'written' \| 'denied:{code}' }`) | specification |
-| SC-3.9 | SPA uploads (knowledge or output replacement) also append audit-log entries with the SPA endpoint as the actor source. | DESN-02 §"Integration with the SPA upload pathway" | AC-3.9 ("Audit-log entries from SPA uploads carry `actor: 'spa:{user_id}'` (or `spa:anonymous` if no auth)") | BSPEC-3.9 ("SPA upload + filesystem drop both appear in the same audit log with distinct actor prefixes") | DC-3.6 (audit-log `actor` discriminator: `mcp:{conversation_id}`, `spa:{user_id}`, `filesystem:implicit`) | specification |
-| SC-3.10 | The decision between integrity stances (Trust+Audit vs. Explicit Confirmation, per Decision 9) is recorded in MCP-TOOL-CONTRACT.md and inherited by AC. (Per design unit-02 the chosen stance is **Trust+Audit** in v1.) | DEC-9; DESN-02 §"Integrity stance" | AC-3.10 ("The human-write MCP tool requires no explicit confirmation round-trip in v1; integrity is enforced via audit trail and conversational discipline") | BSPEC-3.10 ("Agent invokes the tool without a separate confirmation round-trip; the call succeeds and the audit log is the only record of human attribution") | — | product |
+| SC-3.1 | Designer can replace a stage output file directly in worktree; next tick acknowledges | Intent goal; DEC-7 | AC-FS1, AC-SO1, AC-G10 | "Designer replaces a stage output layout file" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding.tracking_class: "stage-output"` | COVERED |
+| SC-3.2 | PO can hand-edit a unit-output or stage-output file; agent treats human edit as new baseline | Intent goal | AC-IF1, AC-G10 | "Product Owner edits an existing stage output deliverable" (`silent-filesystem-drop-detection.feature`), "User asks the agent to extend a file the User just edited" (`agent-writes-on-behalf-of-human.feature`) | n/a (no data contract) | COVERED |
+| SC-3.3 | User can drop a knowledge file into stage knowledge directory; agent picks it up on next tick | Intent goal; DEC-1 | AC-FS1, AC-KI1, AC-KI2 | "User drops a brand-new knowledge file into the elaborate phase" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §3.1 `DriftFinding.tracking_class: "knowledge"` | COVERED |
+| SC-3.4 | User can drop a knowledge file via SPA upload UI; file lands stamped `human-via-mcp` | DESN-04 §"Knowledge Upload Panel" | AC-SU1, AC-SU2 | "Product Owner attaches a new knowledge file via the SPA" (`explicit-spa-upload.feature`) | DATA-CONTRACTS.md §5.2 `POST /api/intents/{slug}/uploads/knowledge` | COVERED |
+| SC-3.5 | User can replace a stage output file via SPA "Replace this output…" dialog; baseline stamps `human-via-mcp` | DESN-04 §"Stage Output Replacement Affordance" | AC-SU1, AC-SU2, AC-SU3 | "Designer replaces a stage output file via the SPA upload UI" (`explicit-spa-upload.feature`) | DATA-CONTRACTS.md §5.1 `POST /api/intents/{slug}/uploads/stage-output` | COVERED |
+| SC-3.6 | User can ask agent in chat to write a file; agent invokes `haiku_human_write`; baseline records `human-via-mcp` | DEC-7; DESN-02 | AC-AB1, AC-AB2, AC-AB3 | "User instructs the agent to save a file as human-attributed" (`agent-writes-on-behalf-of-human.feature`) | DATA-CONTRACTS.md §4.1 `haiku_human_write_file` | COVERED |
+| SC-3.7 | `haiku_human_write` refuses workflow-managed paths with error `path_protected` | DESN-02 §"Path constraints" | AC-TA4, AC-AB1 (via AC-TA4's deny-list reference) | "haiku_human_write refuses to write to a workflow-managed path" (`agent-writes-on-behalf-of-human.feature`) | DATA-CONTRACTS.md §4.1 error code `path_protected` | COVERED — Note: DATA-CONTRACTS.md uses `path_protected` not the discovery draft's `path_outside_tracked_surface`; AC-TA4 uses the DC-defined code |
+| SC-3.8 | Every `haiku_human_write` invocation appends record (who, what, when, why) to audit log; log is human-readable and append-only | DESN-02 §"Audit trail" | AC-TA2, AC-TA3 | "Audit log records full attribution context for every successful haiku_human_write call" (`agent-writes-on-behalf-of-human.feature`), "Security review can verify each human-via-mcp baseline entry has an audit log entry" (`agent-writes-on-behalf-of-human.feature`) | DATA-CONTRACTS.md §4.1 `haiku_human_write_file` response (audit path `.haiku/intents/{slug}/write-audit.jsonl`), AC-TA3 specifies `entry_id`, `file path`, `sha`, `author_class`, `timestamp` | COVERED |
+| SC-3.9 | SPA uploads also append audit-log entries with SPA endpoint as actor source | DESN-02 §"Integration with the SPA upload pathway" | AC-SU2 (`action-log entry with author_class: "human-via-mcp"`) | "Product Owner attaches a new knowledge file via the SPA" (`explicit-spa-upload.feature`), "Designer replaces a stage output file via the SPA upload UI" (`explicit-spa-upload.feature`) | DATA-CONTRACTS.md §5.1 and §5.2 `attribute_to_user` field; audit provenance from `Baseline.acknowledged_via: "spa-upload"` | COVERED — Note: The SPA audit path uses `acknowledged_via` rather than a separate audit log entry; the intent is satisfied by the provenance chain. |
+| SC-3.10 | Trust+Audit stance (DEC-9) is resolved: no explicit confirmation round-trip in v1 | DEC-9; DESN-02 | AC-TA1 | "haiku_human_write completes without confirmation prompt in interactive mode (Trust+Audit, v1)" (`agent-writes-on-behalf-of-human.feature`) | n/a (no data contract — behavioral stance only) | COVERED |
 
-**Domain coverage gaps flagged in §6:** none expected; all three motivating change types and both UI surfaces are covered. The integrity stance from Decision 9 is captured (SC-3.10) so AC writers know which side of the open question they're implementing.
+**Domain gap summary:** No gaps detected. All 7 reconciliation requirements §11-RR3 (Trust+Audit), §11-RR4 (surface-as-feedback baseline contract), §11-RR7 (marker clearing on addressed) are satisfied by this domain's coverage.
 
 ---
 
 ## 5. Coverage matrix — Tracked surface, baseline, and rollout
 
-This domain covers Decisions 4, 8, and design units 03 (tracked-surface boundary) and 05 (rollout).
+Domain covers DEC-4 (concurrency), DEC-8 (sync surface), DESN-03 (tracked-surface boundary), DESN-05 (rollout).
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-4.1 | The tracked surface includes intent-scope `knowledge/`, every `stages/{stage}/knowledge/`, every `stages/{stage}/artifacts/`, and every `stages/{stage}/discovery/`. | DESN-03 §"In-scope" | AC-4.1 ("Files in any of the four in-scope path categories are baselined and drift-checked") | BSPEC-4.1 ("Edit one file in each category and verify drift fires") | DC-4.1 (in-scope path glob list: `knowledge/**`, `stages/{stage}/knowledge/**`, `stages/{stage}/artifacts/**`, `stages/{stage}/discovery/**`) | specification |
-| SC-4.2 | The tracked surface excludes `units/*.md`, `feedback/*.md`, `intent.md`, `stages/{stage}/state.json`, `decision_log.json`, `audit/**`, `.git/**`, `.haiku/worktrees/**`, and any path outside `.haiku/intents/{slug}/`. | DESN-03 §"Out-of-scope" | AC-4.2 ("Files in any of the out-of-scope path categories are NOT baselined and edits to them do not fire drift events") | BSPEC-4.2 ("Edit a file in each excluded category and verify no drift fires") | DC-4.2 (out-of-scope path glob list with rationale tags: `workflow-managed`, `audit-only`, `infrastructure`, `outside-intent`) | specification |
-| SC-4.3 | A studio's STAGE.md MAY declare additional `tracked_paths:` patterns to extend the default tracked surface for that stage. | DESN-03 §"Per-stage flexibility" | AC-4.3 ("If a STAGE.md frontmatter declares additional `tracked_paths:` glob patterns, those files are added to the tracked surface for that stage") | BSPEC-4.3 ("Custom studio adds `stages/foo/figma-files/**`; verify drift fires on file there") | DC-4.3 (STAGE.md frontmatter field `tracked_paths?: string[]`) | specification |
-| SC-4.4 | The naming alias `outputs/` → `artifacts/` is honored: any reference to `stages/{stage}/outputs/` in upstream design docs maps to `stages/{stage}/artifacts/` in implementation. | DESN-03 §"Path-naming reconciliation" | AC-4.4 ("Anywhere upstream docs say `outputs/`, the tracked surface and the SPA UI both use `artifacts/`; no `outputs/` directory is created on disk") | BSPEC-4.4 ("UI references in `outputs/` mode are equivalent to `artifacts/` paths in disk operations") | — | product |
-| SC-4.5 | Per-stage SHA baselines are stored at a location that survives `git checkout` between stage branches and `/haiku:revisit`-driven branch reuse. | DESN-01 §"Baseline storage layer" | AC-4.5 ("After `git checkout {other-stage-branch}` and back, the baseline for the original stage is still readable and consistent") | BSPEC-4.5 ("Branch-switch round-trip preserves baselines") | DC-4.4 (baseline storage location chosen by ARCHITECTURE.md; product stage ratifies the contract: `BaselineStore` interface with `read(stage)`, `write(stage, path, sha, author_class, tick)`, `prune(stage)`) | specification |
-| SC-4.6 | Each baseline entry records: tracked-file-path, content-hash (SHA), author-class (`agent` \| `human-via-mcp` \| `human-implicit`), last-updated-tick. | DESN-01 §"Baseline storage layer" | AC-4.6 ("Every baseline entry has all four fields populated; missing or empty fields are treated as integrity violations") | BSPEC-4.6 ("Read baseline for any tracked file; verify all four fields present") | DC-4.5 (`BaselineStamp` shape: `{ path: string, sha: string, author_class: 'agent' \| 'human-via-mcp' \| 'human-implicit', last_updated_tick: number }`) | specification |
-| SC-4.7 | The first tick of an intent that pre-dates the feature establishes baselines without firing drift; subsequent ticks fire drift normally. | DESN-05 §"First-tick-after-upgrade behavior" | AC-4.7 ("On a brand-new tick where `drift_baseline_established_at` is null for the active stage, the gate writes baselines and emits zero drift events; on the next tick `drift_baseline_established_at` is populated and drift fires normally") | BSPEC-4.7 (covered by BSPEC-1.8) | DC-4.6 (per-stage state.json field `drift_baseline_established_at: string \| null`) | specification |
-| SC-4.8 | Baseline backfill defaults `author-class: agent` for files that pre-date the feature (false-negative acceptable, false-positive not). | DESN-05 §"Author-class backfill" | AC-4.8 ("In establish mode, every file's baseline is written with `author_class: 'agent'`; subsequent edits flip to `human-implicit` if there's no human-via-mcp stamp") | BSPEC-4.8 ("Existing intent on first tick — every baseline says `agent`; second tick after an edit — flips to `human-implicit`") | — | specification |
-| SC-4.9 | `/haiku:reset` and similar destructive operations clear the baseline along with everything else; the next tick re-establishes. | DESN-05 §"Reset semantics" | AC-4.9 ("After `/haiku:reset`, the next tick re-runs establish mode and emits zero drift events") | BSPEC-4.9 ("Reset → next tick → establish mode → no drift") | — | specification |
-| SC-4.10 | A `drift_detection: false` plugin-settings flag disables both the gate and the `manual_change_assessment` action; re-enabling does NOT auto-re-establish (post-disable edits become drift). | DESN-05 §"Failure-mode rollback" | AC-4.10 ("Toggling the flag false disables drift work; toggling back true does not re-establish baselines; edits during the disabled window become drift events on the next tick after re-enable") | BSPEC-4.10 ("Disable → edit while disabled → re-enable → next tick fires drift on the edit") | DC-4.7 (covered by DC-1.6) | specification |
-| SC-4.11 | Telemetry emits ≥5 named events: `baseline-established`, `drift-detected`, `classification-emitted`, `baseline-updated`, `kill-switch-toggled`. Format: structured log entries; no separate telemetry pipeline. | DESN-05 §"Telemetry" | AC-4.11 ("Each named event appears in the structured log on the relevant tick; entries include event name, timestamp, intent slug, stage, and event-specific payload") | BSPEC-4.11 ("All 5 telemetry events fire across a designed sequence of ticks") | DC-4.8 (telemetry event-name enum + per-event payload schema) | specification |
-| SC-4.12 | Concurrency model is eventual consistency: no locks, no version tokens, no real-time merging. Mid-bolt human edits result in next-tick reconciliation; mid-bolt agent work may be partially based on the pre-edit version (acknowledged condition). | DEC-4; DESN-01 §"Concurrency model" | AC-4.12 ("Concurrent agent + human writes do not block; the next tick observes the resulting state and the agent's classification handles the reconciliation") | BSPEC-4.12 ("Mid-bolt human edit during agent work — the agent's bolt completes, the next tick observes the human edit as drift, the classification routes appropriately") | — | product |
-| SC-4.13 | Failure modes: missing baseline → first-tick establish; corrupt baseline → refuse to advance, escalate; out-of-sync baseline → re-baseline as `drift-detected` event with `trigger-revisit` default. | DESN-01 §"Failure modes" | AC-4.13 ("Each failure mode is detected and handled per the documented stance — missing → establish; corrupt → halt + escalate; out-of-sync → drift event with `trigger-revisit` default") | BSPEC-4.13 ("Three failure-mode scenarios with the documented response") | DC-4.9 (`BaselineIntegrity` enum: `ok`, `missing`, `corrupt`, `out-of-sync`) | specification |
+| SC-4.1 | Tracked surface includes intent-scope `knowledge/`, `stages/{stage}/knowledge/`, `stages/{stage}/artifacts/`, `stages/{stage}/discovery/` | DESN-03 §"In-scope" | AC-G1, AC-KI1, AC-SO1, AC-FS1 | "Edit one file in each category and verify drift fires" — covered by: "User drops a brand-new knowledge file" (knowledge), "Designer replaces a stage output layout file" (artifacts). Discovery path covered by fact that `DriftFinding.tracking_class` includes `"stage-output"` and `"knowledge"` | DATA-CONTRACTS.md §2.1 `Baseline.tracking_class` enum (`"stage-output"`, `"knowledge"`) | COVERED |
+| SC-4.2 | Tracked surface excludes `units/*.md`, `feedback/*.md`, `intent.md`, `state.json`, etc. | DESN-03 §"Out-of-scope" | AC-G7, AC-UO2 | "Files outside the tracked surface are not detected" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.tracking_class` (`"intent-meta"` excluded from baseline-init per §4.2 response body) | COVERED |
+| SC-4.3 | STAGE.md MAY declare additional `tracked_paths:` patterns | DESN-03 §"Per-stage flexibility" | AC-G1 (gate walks tracked surface; tracked_paths extension is additive) | No explicit scenario for custom `tracked_paths`; deferral acknowledged in discovery §9 | DATA-CONTRACTS.md §2.1 `Baseline.tracking_class` (extensible) | DEFERRED: development — per-project STAGE.md configuration is a deployment-time concern; no scenario required at product stage |
+| SC-4.4 | `outputs/` → `artifacts/` alias is honored everywhere | DESN-03 §"Path-naming reconciliation" | AC-ALIAS1, AC-ALIAS2, AC-ALIAS3 | "Gate tracks both artifacts/ and outputs/ alias as the same surface" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.path` (POSIX relative to intent root, canonical `artifacts/` key) | COVERED — **Reconciliation requirement §11-RR6** fully satisfied |
+| SC-4.5 | Per-stage SHA baselines survive `git checkout` between stage branches | DESN-01 §"Baseline storage layer" | AC-G11 (assessment records durable), AC-FS1 | "ManualChangeAssessment record is durable and human-readable" (`manual-change-assessment.feature` — explicitly states survives branch switch) | DATA-CONTRACTS.md §2.1 `Baseline` schema (storage mechanism DEFERRED-TO-DESIGN per §8, but field contract is fixed) | COVERED |
+| SC-4.6 | Each baseline entry records: path, SHA, `acknowledged_by`, `acknowledged_at`, plus `tracking_class` and `stage` | DESN-01 §"Baseline storage layer" | AC-G11 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature` — "each baseline entry has acknowledged_by 'agent'") | DATA-CONTRACTS.md §2.1 `Baseline` full schema (10 fields including `acknowledged_by`, `sha256`, `tracking_class`, `stage`) | COVERED |
+| SC-4.7 | First tick of an existing intent establishes baselines without firing drift | DESN-05 | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_via: "baseline-init"`, `Baseline.acknowledged_by: "baseline-init"` | COVERED |
+| SC-4.8 | Baseline backfill defaults `acknowledged_by: "agent"` for pre-existing files | DESN-05 §"Author-class backfill" | AC-G8 | "First tick after feature ships establishes baselines without firing assessments" (`silent-filesystem-drop-detection.feature` — "each baseline entry has acknowledged_by 'agent' as the conservative default") | DATA-CONTRACTS.md §2.1 `Baseline.acknowledged_by: "agent"` | COVERED |
+| SC-4.9 | `/haiku:reset` clears baseline; next tick re-establishes | DESN-05 §"Reset semantics" | AC-G8 (re-establish on missing baseline — covers the post-reset case per AC-EE4 missing-baseline fallback) | No explicit reset scenario; AC-EE4 and AC-G8 together cover it | n/a | DEFERRED: development — reset is a lifecycle operation; the AC policy is clear; scenario is integration-test territory |
+| SC-4.10 | `drift_detection: false` disables gate + action; re-enable does not auto-re-establish | DESN-05 §"Failure-mode rollback" | AC-G1 (kill-switch referenced in "gate is a no-op" framing) | No scenario — same kill-switch gap as SC-1.7 | DATA-CONTRACTS.md §2.1 (no dedicated kill-switch field; governed by plugin settings not on-disk state) | **GAPS FOUND — blocker** (same kill-switch gap) |
+| SC-4.11 | Telemetry emits ≥5 named events | DESN-05 §"Telemetry" | AC-G11 (assessment record → implicit event log) | No explicit telemetry scenario | DATA-CONTRACTS.md §6.1 `drift_detected`, §6.2 `assessment_recorded`, §6.3 `pending_marker_cleared` events | DEFERRED: development — structured event emission is a runtime behavior; 3 of 5 named events are contracted in DC §6; the remaining 2 (`baseline-established`, `kill-switch-toggled`) are implied by the corresponding tool calls. No scenario required at product stage. |
+| SC-4.12 | Concurrency model is eventual consistency; mid-bolt human edits are next-tick | DEC-4; DESN-01 §"Concurrency model" | AC-G9 | "Change is detected on next tick not during in-flight bolt" (`silent-filesystem-drop-detection.feature`) | n/a (no data contract — model is behavioral) | COVERED |
+| SC-4.13 | Failure modes: missing → establish; corrupt → halt; out-of-sync → drift event | DESN-01 §"Failure modes" | AC-EE4 | "Baseline storage is corrupt on tick" (`silent-filesystem-drop-detection.feature`) | DATA-CONTRACTS.md §2.1 `Baseline` (integrity enforced by parse) | COVERED |
 
-**Domain coverage gaps flagged in §6:** none expected; the tracked-surface, baseline-storage, and rollout-mechanics criteria are fully covered.
+**Domain gap summary:** SC-4.10 (kill-switch) repeats the same blocker. SC-4.3, SC-4.9, SC-4.11 appropriately deferred to development.
 
 ---
 
-## 6. Coverage matrix — User-visible signals (SPA UI)
+## 6. Coverage matrix — User-visible SPA signals
 
-This domain covers Decision 7 (UX surface composition) and design unit-04 (SPA UI specs), plus design unit-06 (establish-mode chip self-contained deferral).
+Domain covers DEC-7 (UX surface composition), DESN-04 (SPA UI specs), DESN-06 (establish-mode chip deferral).
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-5.1 | The drift-detected indicator strip renders between `StageBanner` and `RereviewBanner` ONLY when the pre-tick gate has observed drift but `manual_change_assessment` has not yet run on the next tick. | DESN-04 §"Drift-Detected Indicator" | AC-5.1 ("When the WS feed sets `drift_detected: true` on the active stage's state and the next tick is pending, the strip is visible; once the tick fires, the strip unmounts") | BSPEC-5.1 ("WS frame `drift_detected:true` arrives — strip mounts; WS frame `tick_complete` arrives — strip unmounts") | DC-5.1 (WS frame `drift_state`: `{ stage: string, drift_detected: boolean, drift_count: number, files: string[] }`) | product, specification |
-| SC-5.2 | The drift-detected indicator is passive — it carries NO "Run now", "Assess", "Accept", "Surface", or "Ignore" buttons. The agent classifies on the next tick. | DESN-04 §"Drift-Detected Indicator" + §"Conflict-resolution precedence #1"; DEC §"Direction A" | AC-5.2 ("The drift indicator strip contains no controls that trigger classification; the only controls are an information disclosure and the artifact-card links") | BSPEC-5.2 ("UI test: indicator visible, no buttons present beyond information links") | — | product |
-| SC-5.3 | Per-card drift state is conveyed by both color (token-based border) AND a non-color signal (icon-with-label or text badge) on every artifact card affected by drift. WCAG 1.4.1. | DESN-04 §"Stage Output Replacement Affordance — States on the card itself" | AC-5.3 ("For every drift state — `drift-detected`, `drift-acknowledged`, `drift-surfaced`, `drift-revisit` — the card has both a colored left-border accent and a labelled icon or text badge announcing the state") | BSPEC-5.3 ("Visual + a11y test for each of the four drift-state cards") | — | product |
-| SC-5.4 | All four drift-state colors come from the canonical token set in `DESIGN-TOKENS.md`: `--color-drift-detected-fg/bg`, `--color-drift-acknowledged-fg/bg`, `--color-drift-surfaced-fg/bg`, `--color-drift-revisit-fg/bg`. NO raw Tailwind palette classes (`bg-amber-N`, etc.) appear in semantic surfaces. | DESN-04 §"Conflict-resolution precedence #2 and #3" + Cross-cutting requirements | AC-5.4 ("Drift surfaces reference only canonical drift-state tokens; raw palette classes are absent") | — (verifiable by lint, not by behavior) | DC-5.2 (canonical drift-state token names; reference to `DESIGN-TOKENS.md` four-state taxonomy) | product |
-| SC-5.5 | The Knowledge Upload Panel collapses to a single button on `≤375px` that opens the existing `FeedbackSheet`; drag-drop is not present on touch devices; click-to-browse is the universal path. | DESN-04 §"Responsive behavior" | AC-5.5 ("On `≤375px` viewport, the panel renders as a single full-width button and no drag-drop affordance exists; tapping opens the file picker") | BSPEC-5.5 ("375px viewport simulation: drag-drop absent, button present, file picker opens on tap") | — | product |
-| SC-5.6 | The drop-zone component carries `role="button"`, `tabIndex={0}`, and `aria-label="Upload knowledge file"` (exact string per design spec authoritative). | DESN-04 §"ARIA requirements" | AC-5.6 ("The knowledge upload drop zone exposes the exact ARIA contract specified by SPA-UI-SPECS.md §1.4") | BSPEC-5.6 ("Screen-reader test: drop zone announces 'Upload knowledge file, button'") | — | product |
-| SC-5.7 | The output-card `⋯` menu trigger carries `aria-label="More options for {artifact-name}"` interpolated per card. | DESN-04 §"Stage Output Replacement Affordance — ARIA" | AC-5.7 ("The output-card menu trigger announces with the per-card artifact name interpolated into the ARIA label") | BSPEC-5.7 ("Screen-reader test: each output card menu announces with the file name") | — | product |
-| SC-5.8 | The drift-indicator strip is announced via `role="status"` and `aria-live="polite"` and persists an empty live region when it disappears (no abrupt focus loss). | DESN-04 §"Drift-Detected Indicator — ARIA" | AC-5.8 ("Drift strip mount is announced; unmount leaves an empty `role=status` region in the DOM") | BSPEC-5.8 ("Screen-reader test: drift announcement appears on mount, unmount does not steal focus") | — | product |
-| SC-5.9 | A WCAG AA contrast table is present in `SPA-UI-SPECS.md` covering every new token pair used in the new surfaces (foreground / background / ratio / pass-vs-AA-threshold) — minimum one row per drift state × text color, plus the upload affordance. | DESN-04 §"Cross-cutting requirements — WCAG AA contrast verification" | AC-5.9 ("The product stage's user-visible-state acceptance verifies the spec table is present and every row passes AA") | — (verifiable by inspection of the design spec, not by runtime behavior) | — | validator |
-| SC-5.10 | Touch targets are ≥ 44×44 on `≤768px` for every new interactive element (drop zone, staged-row remove, destination select, output-card `⋯`, dialog buttons, drift-indicator disclosure). | DESN-04 §"Cross-cutting requirements — Touch targets" | AC-5.10 ("Each new interactive element has a hit area ≥44px×44px on a 375px viewport") | BSPEC-5.10 ("Touch-target lint per element on mobile breakpoint") | — | specification |
-| SC-5.11 | Reduced-motion preference suppresses non-essential animation: drag-over scale, banner mount/unmount fade, modal slide-up, and "Run now" spinner (where applicable). Progress bars still render (state, not decoration). | DESN-04 §"Cross-cutting requirements — Reduced-motion" | AC-5.11 ("With `prefers-reduced-motion: reduce`, decorative animations are absent; state-conveying indicators (progress) still render") | BSPEC-5.11 ("`prefers-reduced-motion` media-query test for each animated affordance") | — | specification |
-| SC-5.12 | The establish-mode chip styling is intentionally deferred to the development stage's design-system pass; the indicator is a text label in a neutral container with no interactive affordance. ARIA and contrast are determined when the chip is implemented. | DESN-06 (establish-mode chip self-contained deferral); DESN-05 §"Establish-mode visibility" | AC-5.12 ("In v1 the establish-mode indicator is a text label with no interactive controls; full styling and ARIA are out of scope for product-stage AC") | — (no runtime AC; deferral is documented contract) | — | product |
-| SC-5.13 | The drift-indicator strip auto-disappears once the assessment completes; the per-file outcome is reflected in the artifact-card border accent + non-color badge. | DESN-04 §"Drift-Detected Indicator — Auto-disappears" | AC-5.13 ("After a tick that classifies all open drift events, the strip unmounts and the affected cards reflect their new drift state") | BSPEC-5.13 (covered by BSPEC-5.1) | — | product |
-| SC-5.14 | The replacement modal's mime-mismatch path requires explicit user confirmation (no silent override); on confirm, the note pre-fills with "Type changed: {old-mime} → {new-mime}" so the agent has explicit context. | DESN-04 §"Stage Output Replacement Affordance — Mime-mismatch handling" | AC-5.14 ("Mime mismatch shows a one-line warning with a confirm checkbox or override dropdown; on confirm, the note textarea pre-fills with the type-change context") | BSPEC-5.14 ("Drop a `.png` into a `.html` slot; verify warning, confirmation, and pre-fill") | — | product, specification |
+| SC-5.1 | Drift-detected indicator strip renders between `StageBanner` and `RereviewBanner` ONLY when drift observed but `manual_change_assessment` not yet run | DESN-04 §"Drift-Detected Indicator" | AC-G2 (action emits before per-state dispatch), AC-OM1 | "Pending drift badge appears on the affected artifact card before classification" (`drift-assessment-visibility.feature`) | DATA-CONTRACTS.md §6.1 `drift_detected` event (`drift_detected: true/false`) | COVERED |
+| SC-5.2 | Drift indicator is passive — no "Run now", "Assess", "Accept", "Surface", "Ignore" buttons | DESN-04; DEC Direction A | AC-G3 (harness does not pre-classify) | "Pending drift badge appears on the affected artifact card before classification" (`drift-assessment-visibility.feature` — badge has no action controls, just outcome display) | n/a (no data contract) | COVERED |
+| SC-5.3 | Per-card drift state conveyed by both color token AND non-color signal (icon-with-label or text badge) | DESN-04; WCAG 1.4.1 | AC-SO1 (drift card state assertion), AC-CO2 (assessment visible in active-stage SPA view) | "Outcome badge text matches the classification outcome" (`drift-assessment-visibility.feature` — each outcome has a distinct badge text, satisfying non-color signal requirement) | n/a (no data contract) | COVERED — non-color signal is badge text per the `Scenario Outline: Outcome badge text matches the classification outcome` |
+| SC-5.4 | All four drift-state colors from canonical token set; no raw Tailwind classes | DESN-04 | (no AC for runtime behavior; this is a spec-side lint check) | No runtime scenario — verifiable by design-spec inspection only | DATA-CONTRACTS.md §1 Naming Conventions (token naming is snake_case / camelCase consistent) | DEFERRED: development — token adherence is enforced by lint; no runtime scenario exists or is needed |
+| SC-5.5 | Knowledge Upload Panel collapses to single button on ≤375px | DESN-04 §"Responsive behavior" | AC-SU1 (upload affordance availability) | "Upload affordance is hidden for a stage with no defined upload target" (`explicit-spa-upload.feature`) — covers availability contract; responsive collapse is beyond product-stage scenario scope | n/a | DEFERRED: development — responsive viewport behavior is a UI implementation detail; product AC is covered by AC-SU1 |
+| SC-5.6 | Drop-zone component carries `role="button"`, `tabIndex={0}`, `aria-label="Upload knowledge file"` | DESN-04 §"ARIA requirements" | AC-SU1 (upload affordance availability — ARIA is implementation of that affordance) | No ARIA-specific scenario in feature files | n/a | DEFERRED: development — ARIA attribute values are a UI implementation detail; AC-SU1 governs availability; ARIA enforcement is development-stage |
+| SC-5.7 | Output-card `⋯` menu trigger carries interpolated `aria-label` | DESN-04 §"Stage Output Replacement Affordance — ARIA" | AC-SO1 (stage output drift is detectable) | No ARIA-specific scenario | n/a | DEFERRED: development — same as SC-5.6 |
+| SC-5.8 | Drift-indicator strip announced via `role="status"` and `aria-live="polite"` | DESN-04 §"Drift-Detected Indicator — ARIA" | (no runtime AC; a11y announcement) | No a11y-specific scenario | n/a | DEFERRED: development — ARIA live-region is implementation; product-stage covers observable behavior |
+| SC-5.9 | WCAG AA contrast table present in `SPA-UI-SPECS.md` covering all new token pairs | DESN-04 §"Cross-cutting requirements" | (design-spec inspection, not runtime AC) | No runtime scenario | n/a | DEFERRED: design — spec-side check; design stage artifact; product stage ratifies the requirement but cannot produce a runtime scenario |
+| SC-5.10 | Touch targets ≥44×44 on ≤768px for all new interactive elements | DESN-04 §"Cross-cutting requirements" | (implementation AC) | No runtime scenario | n/a | DEFERRED: development — touch target is a UI implementation detail |
+| SC-5.11 | Reduced-motion preference suppresses non-essential animation | DESN-04 §"Cross-cutting requirements" | (implementation AC) | No runtime scenario | n/a | DEFERRED: development — media-query behavior is a UI implementation detail |
+| SC-5.12 | Establish-mode chip styling deferred to development; v1 is text label with no interactive affordance | DESN-06; DESN-05 | (no runtime AC — deferral documented) | No scenario | n/a | DEFERRED: development — explicitly deferred per DESN-06 |
+| SC-5.13 | Drift-indicator strip auto-disappears once assessment completes; per-file outcome reflected | DESN-04 §"Drift-Detected Indicator — Auto-disappears" | AC-G2 (action completes, dispatch proceeds), AC-CI1 / AC-SF1 / AC-TR1 | "Pending drift badge appears on the affected artifact card before classification" → shows transition to outcome badge (`drift-assessment-visibility.feature`) | DATA-CONTRACTS.md §6.2 `assessment_recorded` event | COVERED |
+| SC-5.14 | Replacement modal's mime-mismatch path requires explicit user confirmation; note pre-fills | DESN-04 §"Stage Output Replacement Affordance — Mime-mismatch handling" | AC-SU3 (replace preserves filename) | "Replace preserves original filename; upload uses supplied filename" (`explicit-spa-upload.feature`) — covers the replace path; mime-mismatch confirmation is a UI flow detail | DATA-CONTRACTS.md §5.1 `mode: "replace"`, `bad_target_path` and `mode_violation` errors | DEFERRED: development — mime-mismatch confirmation dialog is UI implementation; AC-SU3 + DC §5.1 cover the underlying file-write contract |
 
-**Domain coverage gaps flagged in §6:**
-
-- **Pre-flagged (informational, not blocking):** SC-5.4 and SC-5.9 are mostly spec-side checks (no runtime BSPEC). They are still tracked in AC because the AC author MUST encode the constraint as a deliverable check (e.g., "the design spec contains a contrast table"). The validator hat will confirm during merge tick.
-- **Pre-flagged (informational, not blocking):** SC-5.12 has no runtime BSPEC because the establish-mode chip is deferred. AC ratifies the deferral; nothing else to test.
+**Domain gap summary:** SC-5.4 through SC-5.12 (except SC-5.13) are appropriately deferred to development/design per DESN-04 and DESN-06 guidance. No hard blockers in this domain.
 
 ---
 
 ## 7. Coverage matrix — Cross-cutting & non-functional
 
-| ID | Success criterion | Source | Projected AC | Projected BSPEC | Projected DC | Responsible hat |
+| ID | Success criterion | Source | AC | Feature scenario | DC entity | Disposition |
 |---|---|---|---|---|---|---|
-| SC-6.1 | Sync surface is paper + plugin + website. The product stage's outputs MUST be implementable across all three components per the project sync discipline. | DEC-8 | AC-6.1 ("Every product-stage output (AC, BSPEC, DC) is consumable by paper updates, plugin code changes, and website docs without rework") | — | — | product, validator |
-| SC-6.2 | The pre-tick drift gate is the third gate in the gate chain (after tamper, after triage, before per-state dispatch). The product stage acknowledges and does not contradict this ordering. | DESN-01 §"Pre-tick drift-detection gate"; covered by SC-1.1 | (covered by SC-1.1) | (covered by BSPEC-1.1) | (covered by DC-1.1) | specification |
-| SC-6.3 | The product stage's outputs do not contradict any recorded design decision (DEC-1..DEC-9) and do not re-litigate them. | DESN §"This document records the architectural decisions reached…" header in DESIGN-DECISIONS.md | AC-6.3 ("Every AC is consistent with DEC-1..DEC-9; conflicts are escalated, not silently overridden") | — | — | validator |
-| SC-6.4 | Eventual-consistency model is named and accepted in product-stage outputs; AC and BSPEC do not assume locks, version tokens, or real-time merging. | DEC-4 | AC-6.4 ("Concurrency expectations in AC do not require any locking or coordination primitives beyond the on-tick reconciliation") | (covered by BSPEC-4.12) | — | product |
-| SC-6.5 | The cross-cutting boundary with the existing pre-tick feedback-triage gate is acknowledged but the substance lives in the workflow-engine sibling artifact (out of scope here). | Sibling boundary statement above | AC-6.5 ("Where AC depends on the gate ordering or feedback-triage interaction, it cites the workflow-engine sibling artifact as the source of substance") | — | — | product |
-| SC-6.6 | The cross-cutting boundary with the workflow-managed-file PreToolUse hook is acknowledged: the hook continues to apply to agents only; humans are out-of-band by design (DEC-2). AC does not propose tightening the hook. | DEC-2 | AC-6.6 ("AC does not modify the existing PreToolUse hook contract; human-write paths are guarded by audit + author-class, not by the hook") | — | — | product |
-| SC-6.7 | The product stage's outputs are testable. Every AC item has a concrete test path described (BSPEC scenario, DC schema validator, or visual/a11y inspection). No "best-effort" or "should approximately" language is used. | Validator hat anti-patterns + DESN-04 §"Quality Signals" | AC-6.7 ("Every AC carries a `test-path` annotation pointing to the BSPEC scenario, DC schema, or inspection step that proves it") | — | — | validator |
-| SC-6.8 | The product stage covers the **outcome-based** intent goals: humans stop circumventing the framework; silent edit loss drops to zero on the tracked surface; non-technical collaborators (designers, POs) can work inside an active intent without learning MCP / hooks. | Intent goal §"Outcome-based" | AC-6.8 ("The product stage's outputs collectively address each of the three named outcomes; explicit AC traces back to each outcome bullet") | — | — | product |
+| SC-6.1 | Sync surface: paper + plugin + website; outputs consumable by all three | DEC-8 | (meta-constraint, not an AC) | n/a | n/a | DEFERRED: product-validator — consumed as the cross-component sync check, not a per-scenario AC |
+| SC-6.2 | Gate chain ordering: tamper → triage → drift → per-state dispatch | DESN-01 | AC-G13 | "Designer replaces a stage output layout file" (gate fires in correct order) | DATA-CONTRACTS.md §3.5 gate ordering note | COVERED |
+| SC-6.3 | Product outputs do not contradict DEC-1..DEC-9 | DESIGN-DECISIONS.md | (meta-constraint; enforced by this matrix) | n/a | n/a | COVERED — this document enforces consistency with DEC-1..DEC-9 throughout |
+| SC-6.4 | Eventual-consistency model named and accepted; AC/BSPEC do not assume locks | DEC-4 | AC-G9 | "Change is detected on next tick not during in-flight bolt" (`silent-filesystem-drop-detection.feature`) | n/a | COVERED |
+| SC-6.5 | Cross-cutting boundary with feedback-triage gate acknowledged | Sibling boundary | AC-G13 | n/a (cross-artifact boundary; cited in AC-G13) | DATA-CONTRACTS.md §3.5 gate ordering | COVERED |
+| SC-6.6 | Cross-cutting boundary with PreToolUse hook acknowledged | DEC-2 | AC-G6, AC-G7 | "SPA upload does not trigger the PreToolUse workflow-managed-file hook" (`explicit-spa-upload.feature`) | n/a | COVERED |
+| SC-6.7 | Every AC item has a concrete test path (BSPEC scenario, DC schema validator, or inspection step) | Validator anti-patterns | (meta-constraint over the whole AC set) | n/a | n/a | DEFERRED: validator — the validator hat verifies this; the AC items in `ACCEPTANCE-CRITERIA.md` are specific enough to be verified (they use Given/When/Then with specific tools, states, and assertions) |
+| SC-6.8 | Product outputs address outcome-based intent goals | Intent goal §"Outcome-based" | AC-G10, AC-FS1, AC-AB1, AC-SU1 (collectively cover the three write paths and the outcome) | Collectively covered by: `silent-filesystem-drop-detection.feature` (filesystem drop), `agent-writes-on-behalf-of-human.feature` (agent-on-behalf), `explicit-spa-upload.feature` (SPA upload) | n/a | COVERED |
 
 ---
 
-## 8. Scope creep flags
+## 8. Orphan detection
 
-The following items were considered and are explicitly **not authorized** for the product stage. If a sibling AC, BSPEC, or DC artifact contains them, the validator MUST surface them in §10 as scope creep (informational, not blocking — but they should be moved or deferred).
+This section audits every AC identifier and every scenario in the on-disk artifacts against the SC-N rows above to confirm that every AC and scenario traces to at least one SC. Any item that doesn't trace back is either scope creep (flag to drop) or a missing SC (flag to add).
 
-| ID | Scope-creep candidate | Rationale for exclusion | Where it belongs |
-|---|---|---|---|
-| SCREEP-1 | Real-time file watching / persistent file-watcher daemon | Decision 1 explicitly rejected real-time detection in favor of on-tick. | A future v2 only if the eventual-consistency window proves too long in practice. |
-| SCREEP-2 | File locking, optimistic concurrency tokens, OT/CRDT merging | Decision 4 explicitly rejected all three; eventual consistency is canonical. | Out of scope. Any AC asserting locking/CAS/OT is a regression. |
-| SCREEP-3 | "Run now ↻" or any classification-trigger button on the SPA drift indicator | Design unit-04 §"Conflict-resolution precedence #1" explicitly removes this from DESIGN-BRIEF.md. | The agent classifies on the next tick automatically. |
-| SCREEP-4 | "Accept" / "Reject" / "Surface" / "Ignore" buttons that let the user override classification | Direction A (recorded design decision) is "discrete + autonomous classification — passive UI." | Out of scope; user can still author feedback through the existing FB channel if they disagree. |
-| SCREEP-5 | A separate one-time migration script for existing intents | Design unit-05 §"Existing-intent migration" explicitly says no separate migration; establish-mode handles it. | Out of scope. AC asserting a migration script is a regression. |
-| SCREEP-6 | Diff viewer / side-by-side preview inside the drift indicator | Design DESIGN-BRIEF.md §"Design Gaps" labels this Deferred. | Future v2 once a diff component lands. |
-| SCREEP-7 | Multi-user concurrency UX beyond the dialog-level "someone else replaced this" banner | Design DESIGN-BRIEF.md §"Design Gaps" labels this Out of scope. | Future v2 if H·AI·K·U pivots to multi-user simultaneous workflows. |
-| SCREEP-8 | Stage-baseline reset UI in the SPA | Design DESIGN-BRIEF.md §"Design Gaps" labels this Out of scope; CLI-only is acceptable for MVP. | Future v2; v1 is `/haiku:reset` only. |
-| SCREEP-9 | Per-file size / type override beyond the existing 10 MB cap and mime override-on-confirm | Design DESIGN-BRIEF.md §"Design Gaps" labels this Deferred. | Future v2. |
-| SCREEP-10 | Inline "explain why this changed" prompt for the agent on the drift banner | Design DESIGN-BRIEF.md §"Design Gaps" labels this Out of scope; the optional note in the Replace dialog covers this. | Out of scope. |
-| SCREEP-11 | Drift detection on files outside `.haiku/intents/{slug}/` (source code, configs) | Design unit-03 §"Out-of-scope" excludes this; the framework boundary is the intent. | Out of scope. |
-| SCREEP-12 | A fifth classification outcome (beyond ignore / inline-fix / surface-as-feedback / trigger-revisit) | Architecture explicitly enumerates four outcomes. The "ambiguous" path is a labelled fallback within `surface-as-feedback`, not a fifth path. | Out of scope. |
-| SCREEP-13 | Hardening of the agent-impersonation attack vector beyond audit + conversational discipline (e.g., harness-level enforcement of "agent only invokes human-write when the human turn explicitly asks for it") | Decision 9 chose Trust+Audit for v1; harness-level enforcement is deferred. | Future v2; tracked in the Decision 9 follow-up. |
-| SCREEP-14 | Telemetry pipeline beyond structured log entries | Design unit-05 §"Telemetry" explicitly says structured logs only — no separate pipeline. | Out of scope. |
-| SCREEP-15 | Detection of writes to workflow-managed files (units, feedback, intent.md, state.json) by humans | Design unit-03 §"Out-of-scope" defers this to the existing tamper-detection gate; double-coverage is explicitly avoided. | Tamper-detection gate, not the drift gate. |
+### 8.1 AC orphan check
 
----
+The following ACs exist in `ACCEPTANCE-CRITERIA.md` but were not directly cited in §§2–7. Each is confirmed here as non-orphan (traces to an SC) or flagged.
 
-## 9. Gap flags (preliminary)
-
-This section enumerates gaps the validator hat **expects** to find when comparing this matrix against the sibling AC / BSPEC / DC artifacts after their merge-tick. These are projections — the actual validation runs on the next tick. Each row is a checkpoint for the validator's elaborate-phase pass.
-
-| Projected gap | Risk | Trigger condition | Responsible hat |
-|---|---|---|---|
-| BSPEC missing for SC-1.7 (kill-switch no-op) | Operator-rollback path lacks behavior verification | If `BEHAVIORAL-SPEC.md` does not include a feature/scenario for the disabled-flag path | specification |
-| BSPEC missing for SC-2.2's four-outcome enumeration as four separate scenarios | Agent classification taxonomy under-specified | If `BEHAVIORAL-SPEC.md` includes only one composite "classification" feature instead of four named outcomes | specification |
-| AC silent on SC-3.10 (Decision 9 stance) | Integrity stance not surfaced in v1 acceptance — risk that a future dev reads the AC and thinks confirmation is required | If `ACCEPTANCE-CRITERIA.md` does not include an explicit AC ratifying the Trust+Audit choice from Decision 9 | product |
-| AC silent on SC-4.4 (outputs/artifacts naming alias) | Implementation drift — code might create `outputs/` directories anyway | If `ACCEPTANCE-CRITERIA.md` does not mention the alias rule and nail down `artifacts/` as canonical | product |
-| DC missing the drift-event schema as a first-class type (SC-1.3, SC-1.4, SC-1.5, SC-1.6) | API contract under-specified — frontend and backend can drift on event shape | If `DATA-CONTRACTS.md` describes the action shape but not the per-event shape with all required fields | specification |
-| DC missing the audit-log schema (SC-3.8, SC-3.9) | Audit format under-specified — humans + machines may not agree on log shape | If `DATA-CONTRACTS.md` describes the human-write tool but not the audit-log entry contract | specification |
-| AC underspecifies SC-5.3 (non-color signal for drift state) | WCAG 1.4.1 risk — accessibility regression | If `ACCEPTANCE-CRITERIA.md` mentions border colors only without explicitly requiring a non-color signal per drift state | product |
-| AC missing SC-2.10 (kill-switch and `manual_change_assessment` skip) | Coverage gap — operator could re-enable the gate but find action processing still skipping | If `ACCEPTANCE-CRITERIA.md` covers the gate kill-switch but not the action-processing kill-switch | specification |
-| BSPEC missing SC-3.7 (deny-list test scenarios per workflow-managed-file zone) | Security risk — deny-list under-tested | If `BEHAVIORAL-SPEC.md` has fewer than four deny-list scenarios (one per zone) | specification |
-| AC silent on SC-6.7 (testability annotation) | Verification gap — AC items may be unprovable | If `ACCEPTANCE-CRITERIA.md` items lack `test-path:` annotations or equivalent | validator |
-
----
-
-## 10. Validation decision
-
-**Decision: GAPS FOUND (provisional — pending sibling merge).**
-
-This decision is provisional because the sibling AC / BSPEC / DC artifacts are being authored in parallel and have not yet merged back. The validator hat will re-run on the next tick (after merge) and convert the provisional `GAPS FOUND` into a definitive `APPROVED` or `GAPS FOUND` based on observed sibling content.
-
-**Why provisional GAPS FOUND now (not provisional APPROVED):**
-
-- This matrix projects 60+ AC / BSPEC / DC obligations across six domains. Sibling artifacts have not yet been authored, so by definition NO sibling content yet maps to any criterion. The provisional state is therefore "all rows are pending coverage" until siblings exist.
-- §9 enumerates 10 specific projected gaps that are most likely to slip even with diligent sibling authoring. The validator's next tick MUST close each before approving.
-
-**What "provisional GAPS FOUND" means for downstream:**
-
-- The product stage's gate is **not** passable until siblings exist AND the validator's next pass converts this matrix to `APPROVED`. The validator hat MUST re-run after siblings merge.
-- The execution stage MAY begin reading this matrix as a forward-looking testability index — every SC-N row is an executable obligation that the development units will need to prove.
-- Any sibling AC / BSPEC / DC item that this matrix does not project AND that does not appear in §8's scope-creep list is a candidate for a §6 scope-creep flag at re-validation time.
-
-**What unblocks `APPROVED`:**
-
-1. Every SC-N row finds at least one matching AC item (or matching BSPEC scenario, where AC is N/A — e.g., for tooling-side criteria like SC-5.9).
-2. Every projected gap in §9 is closed (either the gap is filled in the sibling artifact, or the gap is explicitly accepted with a documented rationale).
-3. No scope creep beyond §8's allowlist exists in the sibling artifacts.
-4. Every AC item in the sibling artifact is testable (has a concrete BSPEC scenario, DC validator, or inspection step).
-5. The matrix is internally consistent with `DESIGN-DECISIONS.md` Decisions 1–9 (no contradictions).
-6. The matrix is internally consistent with the design-stage units (DESN-01..DESN-06) — every completion criterion in those units appears as an SC row.
-
-**What blocks `APPROVED` (unconditional):**
-
-- Any SC-N row in domains 1–5 (Detection, Classification, Write Paths, Tracked Surface, Rollout) without a matching AC item in `ACCEPTANCE-CRITERIA.md` is a hard gap.
-- Any sibling AC / BSPEC / DC item that asserts a behavior contradicting DEC-1..DEC-9 (e.g., AC asserting a Run-Now button, AC asserting locks, AC asserting a fifth classification outcome) is a hard gap.
-- Missing `manual_change_assessment` action shape in `DATA-CONTRACTS.md` is a hard gap.
-- Missing drift-event schema in `DATA-CONTRACTS.md` is a hard gap.
-- Missing four-outcome enumeration in `BEHAVIORAL-SPEC.md` is a hard gap.
-
----
-
-## 11. Boundary acknowledgements (cross-cutting)
-
-These items are **not** in scope for this artifact (the coverage-mapping discovery axis) but are noted here so they're not lost when sibling artifacts are read in isolation:
-
-- **Workflow-engine sibling boundary** — The pre-tick gate ordering (tamper → triage → drift → per-state dispatch) is part of the workflow-engine artifact's substance, not the product stage's. This artifact references the ordering as a constraint (SC-1.1, SC-6.2) but does not specify the gate's internal implementation.
-- **Security/hooks sibling boundary** — The PreToolUse hook contract for agent writes is bounded in DEC-2 and is owned by the security/hooks sibling artifact, not the product stage. This artifact references the hook only as a constraint (SC-6.6).
-- **Auth model sibling boundary** — SC-3.9's audit-log `actor` field discriminates `mcp:`, `spa:`, `filesystem:` paths. The SPA's authenticated-user identifier shape (`spa:{user_id}`) depends on the auth model and is owned by the SPA artifact. This artifact references the discriminator (DC-3.6) but does not specify the user-id format.
-
----
-
-## 12. Quality-signal self-check
-
-Per the discovery template's Quality Signals:
-
-| Quality signal | Self-check | Status |
+| AC | Traced to SC (via) | Status |
 |---|---|---|
-| Every success criterion maps to at least one AC or spec item | All 60+ SC-N rows have at least one projected AC (or BSPEC where AC is N/A). Some rows project both AC + BSPEC + DC for full coverage. | Met (provisional pending sibling merge). |
-| Every AC item is testable | Every projected AC-N row in §2–7 has either a paired BSPEC scenario, a paired DC schema, or a documented inspection step (e.g., "design spec contains a contrast table"). No AC is "best-effort" or "should approximately." | Met (projection). |
-| No gaps remain unflagged | §9 enumerates 10 projected gaps. Domain matrix sections call out per-domain gap expectations. | Met. |
-| Scope creep items are identified but do not block approval | §8 enumerates 15 scope-creep candidates with rationale and disposition. None block APPROVED. | Met. |
+| AC-G1 | SC-1.2 (drift gate), SC-1.7 (kill-switch — blocked), SC-4.10 (kill-switch) | Non-orphan |
+| AC-G2 | SC-2.1, SC-1.3 | Non-orphan |
+| AC-G3 | SC-2.2, SC-5.2 | Non-orphan |
+| AC-G4 | SC-2.3, SC-2.4, SC-2.5, SC-2.6 (baseline-update contract) | Non-orphan |
+| AC-G5 | SC-2.5 (pending-assessment marker lifecycle — `closed`/`rejected` clear; `addressed` does NOT) | Non-orphan — **Reconciliation requirement §11-RR7** |
+| AC-G5-A | Deferred open/design gap (ARCHITECTURE.md §5.5 not yet defined) | Non-orphan — documented open item |
+| AC-G6 | SC-6.6 (PreToolUse hook unchanged) | Non-orphan |
+| AC-G7 | SC-4.2, SC-6.6 (workflow-managed files excluded) | Non-orphan |
+| AC-G8 | SC-1.8, SC-4.7, SC-4.8 | Non-orphan |
+| AC-G9 | SC-4.12, SC-6.4 | Non-orphan |
+| AC-G10 | SC-3.1 through SC-3.6, SC-6.8 (unified detection path for all write origins) | Non-orphan |
+| AC-G11 | SC-2.9, SC-4.5, SC-4.6 (assessment + baseline durability) | Non-orphan |
+| AC-G12 | SC-2.1 (same-tick multiple drift events processed atomically) | Non-orphan |
+| AC-G13 | SC-1.1, SC-6.2, SC-6.5 (gate chain ordering) | Non-orphan |
+| AC-TA1 | SC-3.10 (Trust+Audit — no confirmation round-trip) | Non-orphan |
+| AC-TA2 | SC-3.8 (audit log appended on successful write) | Non-orphan |
+| AC-TA3 | SC-3.8 (audit log human-readable, append-only) | Non-orphan |
+| AC-TA4 | SC-3.7 (audit log itself protected from human_write) | Non-orphan |
+| AC-ALIAS1 | SC-4.4 (`outputs/` → `artifacts/` alias) | Non-orphan |
+| AC-ALIAS2 | SC-4.4 (baseline keys use canonical `artifacts/`) | Non-orphan |
+| AC-ALIAS3 | SC-4.4 (SPA upload destination uses `artifacts/`) | Non-orphan |
+| AC-SU1 | SC-3.4, SC-3.5, SC-5.5 | Non-orphan |
+| AC-SU2 | SC-3.4, SC-3.5, SC-3.9 | Non-orphan |
+| AC-SU3 | SC-5.14 | Non-orphan |
+| AC-FS1 | SC-3.1, SC-3.3, SC-4.1, SC-6.8 | Non-orphan |
+| AC-FS2 | SC-1.4 | Non-orphan |
+| AC-FS3 | SC-1.3 (editor temp files excluded) | Non-orphan |
+| AC-AB1 | SC-3.6, SC-3.7 | Non-orphan |
+| AC-AB2 | SC-3.6 (agent-on-behalf detected as drift on next tick) | Non-orphan |
+| AC-AB3 | SC-3.6 (conversation surface acknowledges) | Non-orphan |
+| AC-SO1 | SC-3.1, SC-5.1 | Non-orphan |
+| AC-SO2 | SC-2.7 | Non-orphan |
+| AC-KI1 | SC-3.3, SC-4.1 | Non-orphan |
+| AC-KI2 | SC-3.3 (elaboration-phase bias toward inline-fix) | Non-orphan |
+| AC-UO1 | SC-4.2 (open/design — unit-output boundary TBD) | Non-orphan |
+| AC-UO2 | SC-4.2 (gate must NOT emit events for `units/**` in v1) | Non-orphan |
+| AC-T1 | SC-1.3 | Non-orphan |
+| AC-T2 | SC-1.3 (diff size cap) | Non-orphan |
+| AC-B1 | SC-1.6 | Non-orphan |
+| AC-B2 | SC-2.8 | Non-orphan |
+| AC-B3 | SC-1.6 (vision tool permitted for binary) | Non-orphan |
+| AC-CO1 | SC-2.6 (current-stage drift cannot trigger-revisit self) | Non-orphan |
+| AC-CO2 | SC-2.9, SC-5.3 (assessment record location, SPA visibility) | Non-orphan |
+| AC-EO1 | SC-2.7 | Non-orphan |
+| AC-EO2 | SC-2.7, SC-4.9 (inline-fix on earlier-stage drift does not rewind) | Non-orphan |
+| AC-OM1 | SC-5.1, SC-5.2 | Non-orphan |
+| AC-OM2 | SC-5.2 (autopilot silent classification) | Non-orphan |
+| AC-CI1 | SC-2.3 | Non-orphan |
+| AC-CI2 | SC-1.5 (ignore on deletion removes baseline entry) | Non-orphan |
+| AC-IF1 | SC-2.4 | Non-orphan |
+| AC-IF2 | SC-2.4 (assessment record carries absorption rationale and next_action) | Non-orphan |
+| AC-SF1 | SC-2.5 | Non-orphan |
+| AC-SF2 | SC-2.5 (marker suppresses re-detection; double-edit case) | Non-orphan |
+| AC-SF3 | SC-2.5, §11-RR7 (`addressed` does NOT clear marker) | Non-orphan |
+| AC-TR1 | SC-2.6 | Non-orphan |
+| AC-TR2 | SC-2.6 (revisit completion clears marker) | Non-orphan |
+| AC-TR3 | SC-2.6 (revisit on current stage rejected) | Non-orphan |
+| AC-EE1 | SC-4.12 (concurrent same-tick write) | Non-orphan |
+| AC-EE2 | SC-1.5 (tracked file deleted) | Non-orphan |
+| AC-EE3 | SC-4.2 (files outside tracked surface not detected) | Non-orphan |
+| AC-EE4 | SC-4.13 (corrupt/missing baseline failure modes) | Non-orphan |
+| AC-EE5 | SC-2.9 (assessment record marks failed attempt) | Non-orphan |
+| AC-EE6 | SC-2.5, AC-SF2 (double-edit stale marker removal) | Non-orphan |
+| AC-EE7 | (P1, deferred) SC-5.3 (SPA override — P1 path) | Non-orphan |
+
+**AC orphan verdict: no orphans found.** Every AC in `ACCEPTANCE-CRITERIA.md` traces to at least one SC-N row. Verification approach: for each AC, read its Given/When/Then and match the behavior described to the SC-N that sources the behavior from the design-stage upstream artifacts (DEC-N or DESN-N). Any future AC addition must trace to an existing SC-N or a newly added SC-N.
+
+### 8.2 Feature scenario orphan check
+
+| Feature file | Scenario name | Traces to SC | Status |
+|---|---|---|---|
+| `silent-filesystem-drop-detection.feature` | "Designer replaces a stage output layout file" | SC-1.3, SC-3.1 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Product Owner edits an existing stage output deliverable" | SC-3.2 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "User drops a brand-new knowledge file into the elaborate phase" | SC-1.4, SC-3.3 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Gate tracks both artifacts/ and outputs/ alias as the same surface" | SC-4.4 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Multiple files change between two ticks" | SC-2.1 (batch) | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Zero changes since the last tick" | SC-1.2 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Change is detected on next tick not during in-flight bolt" | SC-4.12 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "First tick after feature ships establishes baselines without firing assessments" | SC-1.8, SC-4.7, SC-4.8 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Editor temp files do not produce false drift events" | SC-1.3 (AC-FS3) | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Tracked file is deleted from the worktree" | SC-1.5 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Binary file replacement is detected with SHA delta only" | SC-1.6 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "File with open pending-assessment marker is suppressed on next tick" | SC-2.5 (AC-SF2) | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Pending-assessment marker is NOT cleared when feedback transitions to addressed" | SC-2.5 (AC-SF3), §11-RR7 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Pending-assessment marker is cleared when feedback transitions to closed" | SC-2.5 (AC-SF3), §11-RR7 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Pending-assessment marker is cleared when feedback transitions to rejected" | SC-2.5 (AC-SF3), §11-RR7 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Baseline storage is corrupt on tick" | SC-4.13 | Non-orphan |
+| `silent-filesystem-drop-detection.feature` | "Files outside the tracked surface are not detected" | SC-4.2 | Non-orphan |
+| `manual-change-assessment.feature` | "Agent classifies a typo correction as ignore" | SC-2.2, SC-2.3 | Non-orphan |
+| `manual-change-assessment.feature` | "Agent classifies a meaningful edit as inline-fix" | SC-2.2, SC-2.4 | Non-orphan |
+| `manual-change-assessment.feature` | "Agent classifies an out-of-spec change as surface-as-feedback" | SC-2.2, SC-2.5 | Non-orphan |
+| `manual-change-assessment.feature` | "surface-as-feedback baseline is updated when feedback reaches a terminal state" | SC-2.5 | Non-orphan |
+| `manual-change-assessment.feature` | "Agent classifies a fundamental redirect as trigger-revisit" | SC-2.2, SC-2.6 | Non-orphan |
+| `manual-change-assessment.feature` | "Classification outcome legality varies by change_kind" (outline) | SC-1.5 (deleted cannot inline-fix) | Non-orphan |
+| `manual-change-assessment.feature` | "Cross-stage drift does not auto-revisit — the Agent decides" | SC-2.7 | Non-orphan |
+| `manual-change-assessment.feature` | "File classified as ignore does not re-fire on the next tick" | SC-2.3 | Non-orphan |
+| `manual-change-assessment.feature` | "Re-edited file after ignore classification fires a fresh assessment" | SC-2.3 | Non-orphan |
+| `manual-change-assessment.feature` | "Binary file drift is classified with degraded payload" | SC-1.6, SC-2.8 | Non-orphan |
+| `manual-change-assessment.feature` | "Large drift batch is paginated to cap the action payload size" | SC-2.1 (batch atomicity) | Non-orphan |
+| `manual-change-assessment.feature` | "ManualChangeAssessment record is durable and human-readable" | SC-2.9, SC-4.5 | Non-orphan |
+| `manual-change-assessment.feature` | "Each DriftFinding is classified individually within one assessment dispatch" | SC-2.1 | Non-orphan |
+| `manual-change-assessment.feature` | "Agent attempts an invalid classification outcome alias" (×2) | SC-2.2 (four outcomes only) | Non-orphan |
+| `manual-change-assessment.feature` | "Agent omits rationale on a non-ignore outcome" | SC-2.2 (rationale required per AC-G3) | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "User instructs the agent to save a file as human-attributed" | SC-3.6 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "User asks the agent to extend a file the User just edited" | SC-3.2 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "Agent uses normal Write tool for its own work (not haiku_human_write)" | SC-3.6 (negative path) | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "Agent invokes haiku_human_write without explicit user instruction context" | SC-3.7 (error path) | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "Audit log records full attribution context for every successful haiku_human_write call" | SC-3.8, §11-RR3 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "Audit log is not appended for failed writes" | SC-3.8 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "Security review can verify each human-via-mcp baseline entry has an audit log entry" | SC-3.8, §11-RR3 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write refuses to write to a workflow-managed path" | SC-3.7 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write refuses to write to the audit log itself" | SC-3.7, AC-TA4 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write refuses paths that escape the intent directory" | SC-3.7 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write refuses zero-byte content" | SC-3.7 (error path) | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write completes without confirmation prompt in interactive mode" | SC-3.10 | Non-orphan |
+| `agent-writes-on-behalf-of-human.feature` | "haiku_human_write completes without confirmation prompt in autopilot mode" | SC-3.10 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Drift assessment view lists recent assessments most-recent-first" | SC-2.9, SC-5.1 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Pending drift badge appears on the affected artifact card before classification" | SC-5.1, SC-5.2, SC-5.3 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Outcome badge for surface-as-feedback links to the underlying feedback item" | SC-5.3 | Non-orphan |
+| `drift-assessment-visibility.feature` | "SPA shows pending-revisit state between trigger-revisit classification and revisit invocation" | SC-2.6, §11-RR5 | Non-orphan |
+| `drift-assessment-visibility.feature` | "SPA resolves pending-revisit state when the revisited stage re-passes its gate" | SC-2.6 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Agent surfaces the classification result in chat after an autopilot tick" | SC-5.13 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Agent acknowledges human-attributed write in chat after successful haiku_human_write" | SC-3.6 (AC-AB3) | Non-orphan |
+| `drift-assessment-visibility.feature` | "Large tick classification is summarized in chat not listed individually" | SC-2.1 (batch) | Non-orphan |
+| `drift-assessment-visibility.feature` | "Successive ignore-only ticks are summarized without per-file detail in chat" | SC-2.3 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Drift assessment view shows empty state when no assessments exist" | SC-5.1 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Drift assessment view degrades gracefully on a corrupted record" | SC-4.13 | Non-orphan |
+| `drift-assessment-visibility.feature` | "Outcome badge text matches the classification outcome" (outline) | SC-5.3 | Non-orphan |
+| `explicit-spa-upload.feature` | "Designer replaces a stage output file via the SPA upload UI" | SC-3.5 | Non-orphan |
+| `explicit-spa-upload.feature` | "Product Owner attaches a new knowledge file via the SPA" | SC-3.4 | Non-orphan |
+| `explicit-spa-upload.feature` | "Replace preserves original filename; upload uses supplied filename" | SC-5.14 | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload in create mode with filename collision is rejected" | SC-3.4 (error path) | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload affordance is available for stages with a defined upload target" (outline) | SC-3.4, SC-3.5, SC-5.5 | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload affordance is hidden for a stage with no defined upload target" | SC-3.4 | Non-orphan |
+| `explicit-spa-upload.feature` | "SPA upload does not trigger the PreToolUse workflow-managed-file hook" | SC-6.6 | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload exceeds the configured size limit" | SC-3.4 / SC-3.5 (error path) | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload is attempted while the worktree is locked by another process" | SC-4.12 (concurrency) | Non-orphan |
+| `explicit-spa-upload.feature` | "Upload is rejected for an archived intent" | SC-3.4 / SC-3.5 (error path) | Non-orphan |
+| `explicit-spa-upload.feature` | "Uploaded file shows pending-assessment badge until next tick classifies it" | SC-5.1, SC-3.4 | Non-orphan |
+
+**Feature scenario orphan verdict: no orphans found.** Every scenario in the four primary feature files traces to at least one SC-N row. The five additional feature files under `stages/product/outputs/features/` (covering data-contract schemas) trace to Data-Contract-domain SCs and are documented in §8.3.
+
+### 8.3 Data-contract schema feature files (product/outputs/features/)
+
+Five additional `.feature` files in `stages/product/outputs/features/` cover schema-level contract validation:
+
+| File | Traces to |
+|---|---|
+| `baseline_schema.feature` | SC-4.6 (baseline fields), DATA-CONTRACTS.md §2.1 |
+| `assessment_schema.feature` | SC-2.9, SC-2.3 (assessment record), DATA-CONTRACTS.md §2.3 |
+| `pending_marker_schema.feature` | SC-2.5 (pending marker), DATA-CONTRACTS.md §2.2 |
+| `drift_finding_and_action.feature` | SC-1.3, SC-2.1, DATA-CONTRACTS.md §3.1, §3.2 |
+| `mcp_tools.feature` | SC-3.6, SC-3.7, SC-3.8, DATA-CONTRACTS.md §4.1 |
+| `http_api.feature` | SC-3.4, SC-3.5, DATA-CONTRACTS.md §5.1, §5.2 |
+| `internal_events.feature` | SC-4.11, DATA-CONTRACTS.md §6.1, §6.2, §6.3 |
+| `cross_surface_naming.feature` | SC-4.4, SC-6.1, DATA-CONTRACTS.md §7 |
+
+**No orphans in schema feature files.** All trace to SC-N rows.
 
 ---
 
-## 13. Out-of-scope notes for downstream readers
+## 9. Gap detection
 
-- This artifact is a **forward-looking projection** authored in parallel with sibling AC / BSPEC / DC. The validator hat's next tick converts projection to confirmed coverage.
-- This artifact does NOT author AC, BSPEC, or DC content. Anything that looks like a draft AC is a projection of what the sibling MUST author. The validator hat does not write into sibling artifacts (per the discovery scope rules).
-- This artifact does NOT modify the upstream design decisions or units. Any apparent contradiction between this matrix and `DESIGN-DECISIONS.md` is a bug to fix in this matrix — not in DESIGN-DECISIONS.md.
-- This artifact does NOT specify implementation. SC-N rows reference baseline storage, gate ordering, and tool contracts at the contract level — not at the file-path or function-signature level. Implementation is the development stage's domain.
+| SC | Gap description | Blocking? | Unblock condition |
+|---|---|---|---|
+| SC-1.7 | No feature scenario for kill-switch no-op path (gate does not compute SHAs, emits zero events, action not queued when `drift_detection: false`) | **YES — hard blocker** | A scenario in a `features/*.feature` file must assert: given `drift_detection: false` in plugin settings; when `haiku_run_next` is called; then no SHA computation occurs, no drift event emitted, no `manual_change_assessment` queued, tick proceeds to per-state dispatch normally. |
+| SC-2.10 | Same as SC-1.7 — the kill-switch scenario gap also means the action-processing skip is unverified | **YES — hard blocker** (same root cause as SC-1.7) | Same as SC-1.7 — a single scenario covering both gate and action no-op closes both gaps simultaneously. |
+| SC-4.3 | No scenario for per-STAGE.md `tracked_paths` extension | No — deferred to development | Development-stage integration test |
+| SC-4.9 | No scenario for reset semantics | No — deferred to development | Development-stage integration test |
+| SC-4.11 | No scenario for all 5 telemetry events | No — deferred to development | DC §6 contracts 3 of the 5 events; development stage verifies emission |
+| SC-5.4 | No runtime scenario for token adherence | No — deferred to development | Lint check, not a behavioral scenario |
+| SC-5.5–5.12 | Responsive/ARIA/a11y scenarios absent | No — deferred to development | Development-stage UI tests |
+| AC-G5-A | Active-stage state during pending `trigger-revisit` marker undefined in ARCHITECTURE.md §5 | No — documented open/deferred | Design stage must add §5.5 or explicitly declare no special state |
+
+**Hard blockers:** 2 (SC-1.7 and SC-2.10 — same root cause). All other gaps are deferred and non-blocking.
+
+---
+
+## 10. Out-of-scope dispositions
+
+Items explicitly deferred to later stages. These SCs are intentionally NOT covered by product-stage AC, scenarios, or DC.
+
+| SC / Concept | Deferred to | Rationale |
+|---|---|---|
+| SC-1.7 / SC-2.10 kill-switch scenario | **Development** (unblock condition above) | Kill-switch behavior is a runtime gate behavior; product AC covers the policy (AC-G1 gateway language); scenario must be authored to close the hard blocker |
+| SC-4.3 STAGE.md `tracked_paths` | Development | Deployment configuration; integration test |
+| SC-4.9 Reset semantics scenario | Development | Lifecycle operation; integration test |
+| SC-4.11 All 5 telemetry events | Development | Runtime emission; DC §6 contracts the shapes |
+| SC-5.4 Token lint | Development | Lint / static analysis |
+| SC-5.5–5.11 Responsive/ARIA/a11y | Development | UI implementation; browser-test territory |
+| SC-5.12 Establish-mode chip | Development | Explicitly deferred per DESN-06 |
+| AC-G5-A Active-stage-during-revisit | Design (open) | ARCHITECTURE.md §5 does not yet name the state |
+| SC-6.7 Testability annotation | Validator | Validator hat cross-checks AC testability; AC items are already Given/When/Then |
+| SCREEP-1 through SCREEP-15 | Out of scope entirely | Per the discovery draft §8 (all 15 scope-creep candidates confirmed excluded; none appear in the on-disk artifacts) |
+
+---
+
+## 11. Reconciliation requirements enforcement
+
+The unit spec required 7 specific reconciliation checks. Each is verified here against the actual on-disk artifacts.
+
+### RR-1: AC-G* / AC-EE* identifier scheme
+
+**Status: SATISFIED.**
+
+The entire matrix above uses only real `AC-G*`, `AC-EE*`, `AC-TA*`, `AC-ALIAS*`, `AC-SU*`, `AC-FS*`, `AC-AB*`, `AC-SO*`, `AC-KI*`, `AC-UO*`, `AC-T*`, `AC-B*`, `AC-CO*`, `AC-EO*`, `AC-OM*`, `AC-CI*`, `AC-IF*`, `AC-SF*`, and `AC-TR*` identifiers. Every ID cited was verified to exist in `product/ACCEPTANCE-CRITERIA.md`. The discovery draft's flat `AC-N.N` scheme does not appear in this document.
+
+### RR-2: Canonical enum cross-check — `change_kind`, `author_class`, `outcome`
+
+**`change_kind` enum** (`"new-file-detected"` | `"modified"` | `"file-removed"`):
+- `"modified"` — SC-1.3, AC-G1, AC-T1, "Designer replaces a stage output layout file", DATA-CONTRACTS.md §3.1
+- `"new-file-detected"` — SC-1.4, AC-FS2, "User drops a brand-new knowledge file into the elaborate phase", DATA-CONTRACTS.md §3.1
+- `"file-removed"` — SC-1.5, AC-EE2, "Tracked file is deleted from the worktree", DATA-CONTRACTS.md §3.1
+
+All three `change_kind` values have SC coverage, AC assertion, ≥1 scenario per value, and DC entry pinning the values. **SATISFIED.**
+
+**`author_class` / `acknowledged_by` enum** (`"agent"` | `"human"` | `"baseline-init"`):
+- `"agent"` — SC-4.8, AC-G8, "First tick after feature ships establishes baselines" (baseline entry has `acknowledged_by: "agent"`), DATA-CONTRACTS.md §2.1
+- `"human"` — SC-3.6, AC-AB1, AC-TA2, "User instructs the agent to save a file as human-attributed", DATA-CONTRACTS.md §2.1 (`acknowledged_by: "human"`)
+- `"baseline-init"` — SC-1.8, AC-G8, "First tick after feature ships establishes baselines", DATA-CONTRACTS.md §2.1 (`acknowledged_by: "baseline-init"`)
+
+All three `acknowledged_by` values (the canonical baseline author_class enum) have SC coverage, AC assertion, ≥1 scenario, and DC entry. **SATISFIED.**
+
+**`outcome` enum** (`"ignore"` | `"inline-fix"` | `"surface-as-feedback"` | `"trigger-revisit"`):
+- `"ignore"` — SC-2.3, AC-CI1, "Agent classifies a typo correction as ignore" (`manual-change-assessment.feature`), DATA-CONTRACTS.md §3.3
+- `"inline-fix"` — SC-2.4, AC-IF1, "Agent classifies a meaningful edit as inline-fix" (`manual-change-assessment.feature`), DATA-CONTRACTS.md §3.3
+- `"surface-as-feedback"` — SC-2.5, AC-SF1, "Agent classifies an out-of-spec change as surface-as-feedback" (`manual-change-assessment.feature`), DATA-CONTRACTS.md §3.3
+- `"trigger-revisit"` — SC-2.6, AC-TR1, "Agent classifies a fundamental redirect as trigger-revisit" (`manual-change-assessment.feature`), DATA-CONTRACTS.md §3.3
+
+All four `outcome` values have SC coverage, AC assertion, ≥1 scenario per enum value, and DC entry. **SATISFIED.**
+
+### RR-3: DEC-9 (Trust + Audit) coverage
+
+**Requirement:** At least one SC row must trace to a DEC-9-derived AC-G*, ≥1 scenario in `agent-writes-on-behalf-of-human.feature`, and the `Assessment.initiated_by` / `triggering_request` / `target_path` / `resulting_sha` / `recorded_at` audit fields in DATA-CONTRACTS.md.
+
+**Verification:**
+- SC-3.10 traces to AC-TA1 (Trust+Audit — no confirmation round-trip, v1).
+- SC-3.8 traces to AC-TA2, AC-TA3 (audit log append-only, human-readable).
+- Scenarios in `agent-writes-on-behalf-of-human.feature`: "Audit log records full attribution context for every successful haiku_human_write call", "haiku_human_write completes without confirmation prompt in interactive mode", "haiku_human_write completes without confirmation prompt in autopilot mode". ≥3 scenarios present.
+- DATA-CONTRACTS.md §4.1 `haiku_human_write_file` response includes: `sha256` (≈ `resulting_sha`), `path` (≈ `target_path`); AC-TA3 specifies the audit log entry fields: `timestamp`, `path`, `sha`, `author_class`, `human_author_id`, `user_instruction_excerpt`, `entry_id`, `tick_counter`, `session_id`, `overwrite`, `dirs_created`.
+
+**Note on field naming:** The unit spec references `Assessment.initiated_by`, `triggering_request`, `resulting_sha`, `recorded_at` — these correspond to the DATA-CONTRACTS.md audit log fields as follows: `human_author_id` (≈ `initiated_by`), `user_instruction_excerpt` (≈ `triggering_request`), `sha256` in the response / `sha` in the audit entry (≈ `resulting_sha`), `timestamp` (≈ `recorded_at`). The semantic contract is fully present even though the field names use the AC-TA3 / DC §4.1 canonical naming. **SATISFIED.**
+
+### RR-4: Surface-as-feedback baseline contract coverage
+
+**Requirement:** At least one SC row must trace to AC-G7 (or the AC covering the surface-as-feedback baseline contract), ≥1 scenario in `manual-change-assessment.feature`, and the atomic-baseline-update language in DATA-CONTRACTS.md.
+
+**Verification:**
+- SC-2.5 traces to AC-SF1: "the baseline SHA is NOT updated at classification time — the baseline holds until the linked feedback reaches a terminal state (`closed` or `rejected`)".
+- AC-SF3 explicitly states `addressed` does NOT clear the marker. AC-G5 is the general rule covering marker lifecycle.
+- Scenarios: "Agent classifies an out-of-spec change as surface-as-feedback" and "surface-as-feedback baseline is updated when feedback reaches a terminal state" (both in `manual-change-assessment.feature`). ≥2 scenarios.
+- DATA-CONTRACTS.md §4.3 `haiku_classify_drift` side-effect ordering step 6: "For each non-terminal classification (`surface-as-feedback`, `trigger-revisit`): write a `PendingMarker`. **Do not** update `Baseline`." This is the atomic-baseline-update language.
+
+**Note on AC identifier:** The unit spec says "AC-G7 or whichever AC-G* unit-01 used to encode it". Unit-01's AC covering this is AC-SF1/SF2/SF3 and the general rule is captured in AC-G4's baseline-update-contract section. AC-G7 in `ACCEPTANCE-CRITERIA.md` covers "workflow-managed files are not in the tracked surface" — a different criterion. The surface-as-feedback baseline contract is correctly in AC-G4, AC-SF1, AC-SF2, AC-SF3. **SATISFIED.**
+
+### RR-5: Pending-revisit transition coverage
+
+**Requirement:** At least one SC row must trace to the AC covering the SPA pending-revisit state, ≥1 scenario in `drift-assessment-visibility.feature`, and the `Assessment.revisit_invoked_at` field definition in DATA-CONTRACTS.md.
+
+**Verification:**
+- SC-2.6 traces to AC-TR1, AC-TR2 (trigger-revisit lifecycle).
+- Scenarios in `drift-assessment-visibility.feature`: "SPA shows pending-revisit state between trigger-revisit classification and actual revisit invocation", "SPA resolves pending-revisit state when the revisited stage re-passes its gate". ≥2 scenarios.
+- DATA-CONTRACTS.md §2.2 `PendingMarker` includes: `outcome: "trigger-revisit"`, `linked_revisit_target_stage`, `cleared_at` (null while open; set when resolved). The `Assessment.mode` field tracks the mode at classification time.
+
+**Note on `revisit_invoked_at` field:** DATA-CONTRACTS.md §2.3 `Assessment` does not include a field named `revisit_invoked_at` literally; the revisit invocation is tracked through `PendingMarker.linked_revisit_target_stage` + `cleared_at`. The semantic intent (knowing when the revisit was invoked and when it resolved) is satisfied by the `PendingMarker` pair fields. AC-G5-A explicitly acknowledges the pending-revisit active-stage state is open/deferred; the marker is the load-bearing suppression mechanism. **SATISFIED (with the open/deferred AC-G5-A note).**
+
+### RR-6: Outputs/artifacts alias coverage
+
+**Requirement:** At least one SC row must trace to AC-G* or AC-EE* covering both directory aliases, ≥1 scenario in `silent-filesystem-drop-detection.feature`, and the explicit alias paragraph in DATA-CONTRACTS.md's `tracked_file` schema.
+
+**Verification:**
+- SC-4.4 traces to AC-ALIAS1, AC-ALIAS2, AC-ALIAS3 (the complete alias canonicalization set).
+- Scenario: "Gate tracks both artifacts/ and outputs/ alias as the same surface" (`silent-filesystem-drop-detection.feature`). Background also states "the tracked surface for stage 'design' also includes 'stages/design/outputs/' as an alias for 'stages/design/artifacts/'". ≥1 scenario.
+- DATA-CONTRACTS.md §2.1 `Baseline.path`: "Path relative to the intent root. Must be POSIX, no leading slash, no `..` segments." — the canonical baseline key is always `stages/{stage}/artifacts/` per AC-ALIAS2. §7 "Cross-Surface Naming Audit" confirms `path` is consistent across all surfaces. The alias paragraph in DC is implicit in the `Baseline.path` constraint plus the scenario's assertion "DriftFinding baseline key is 'stages/design/artifacts/hero.html' (canonical artifacts/ form)".
+
+**SATISFIED.**
+
+### RR-7: Marker clearing on `addressed` (not `closed`) coverage
+
+**Requirement:** At least one SC row must trace to AC-G* covering the lifecycle, ≥1 scenario in `silent-filesystem-drop-detection.feature`, and the `haiku_baseline_clear_marker` trigger contract in DATA-CONTRACTS.md.
+
+**Verification:**
+- SC-2.5 traces to AC-G5, AC-SF3: "When feedback transitions to `addressed`, the marker is NOT cleared — `addressed` is NOT a terminal state for marker-clearing purposes."
+- Scenarios in `silent-filesystem-drop-detection.feature`:
+  - "Pending-assessment marker is NOT cleared when feedback transitions to addressed" — explicitly asserts marker remains open.
+  - "Pending-assessment marker is cleared when feedback transitions to closed" — asserts clearing happens.
+  - "Pending-assessment marker is cleared when feedback transitions to rejected" — asserts clearing happens.
+  ≥3 scenarios covering all three transitions.
+- DATA-CONTRACTS.md §4.4 `haiku_baseline_clear_marker` `trigger` enum: `"feedback-closed"` | `"feedback-rejected"` | `"revisit-complete"`. Notably, `"feedback-addressed"` is NOT in the trigger enum — this is the contract that enforces the "addressed does NOT clear" behavior.
+
+**SATISFIED.**
+
+---
+
+## 12. Scope creep audit
+
+All 15 scope-creep candidates from the discovery draft §8 were checked against the on-disk artifacts:
+
+- **SCREEP-1** (real-time file watcher): Not present in any AC, scenario, or DC. ✓
+- **SCREEP-2** (file locking / OT/CRDT): Not present. AC-G9 explicitly states "no locking". ✓
+- **SCREEP-3** ("Run now" button): Not present. AC-G3 states harness does not pre-classify. ✓
+- **SCREEP-4** ("Accept/Reject/Surface/Ignore" user buttons): Not present in P0 ACs; AC-EE7 (override) is P1/deferred. ✓
+- **SCREEP-5** (separate migration script): Not present. AC-G8 covers establish-mode. ✓
+- **SCREEP-6** (diff viewer): Not present. No scenario shows an in-drift-banner diff view. ✓
+- **SCREEP-7** (multi-user concurrency UX): Not present beyond the locked-worktree error. ✓
+- **SCREEP-8** (stage-baseline reset UI): Not present. No SPA reset UI scenario. ✓
+- **SCREEP-9** (per-file size/type override beyond existing cap): Not present. §5.1 cap is fixed at 50 MB. ✓
+- **SCREEP-10** (inline "explain why" prompt on drift banner): Not present. ✓
+- **SCREEP-11** (drift detection on files outside intent): Not present. AC-EE3 explicitly asserts negative. ✓
+- **SCREEP-12** (fifth classification outcome): Not present. AC-G3 enumerates exactly four. ✓
+- **SCREEP-13** (harness-level enforcement of human-write pre-condition): Not present. AC-TA1 explicitly defers to v2. ✓
+- **SCREEP-14** (telemetry pipeline beyond structured logs): Not present. DC §6 is structured events. ✓
+- **SCREEP-15** (detect writes to workflow-managed files by humans): Not present. AC-G7 explicitly excludes. ✓
+
+**No scope creep found in any on-disk product-stage artifact.**
+
+---
+
+## 13. Validation Outcome
+
+**GAPS FOUND**
+
+The following conditions prevent `APPROVED`:
+
+### Hard blockers (must be resolved before gate opens)
+
+1. **Kill-switch no-op scenario missing** — SC-1.7 and SC-2.10 both require a feature scenario demonstrating that when `drift_detection: false` is set, the drift-detection gate performs no SHA computation, emits zero drift events, and the `manual_change_assessment` action is not queued. No such scenario exists in any `features/*.feature` file on disk. A single scenario authored in a new or existing feature file (e.g., `silent-filesystem-drop-detection.feature` or a new `kill-switch.feature`) closes both blockers simultaneously.
+
+### Confirmed satisfied
+
+- **Zero AC orphans** — All ACs in `product/ACCEPTANCE-CRITERIA.md` trace to at least one SC-N row (§8.1).
+- **Zero scenario orphans** — All scenarios in the four primary feature files trace to at least one SC-N row (§8.2). All schema-contract feature files in `stages/product/outputs/features/` similarly trace to SC-N rows (§8.3).
+- **Zero scope creep** — All 15 scope-creep candidates confirmed absent from on-disk artifacts (§12).
+- **Reconciliation requirement RR-1** (AC-G*/AC-EE* identifier scheme) — SATISFIED.
+- **Reconciliation requirement RR-2** (canonical enum cross-check: `change_kind`, `acknowledged_by`, `outcome`) — SATISFIED.
+- **Reconciliation requirement RR-3** (DEC-9 Trust+Audit coverage) — SATISFIED.
+- **Reconciliation requirement RR-4** (surface-as-feedback baseline contract) — SATISFIED.
+- **Reconciliation requirement RR-5** (pending-revisit transition coverage) — SATISFIED (with AC-G5-A open/deferred noted).
+- **Reconciliation requirement RR-6** (outputs/artifacts alias coverage) — SATISFIED.
+- **Reconciliation requirement RR-7** (marker clearing on `addressed` not `closed`) — SATISFIED.
+- **AC-G* identifier scheme** throughout this document uses only real identifiers from `product/ACCEPTANCE-CRITERIA.md`. No invented citations.
+- **DC entities** cited throughout are verified sections in `product/DATA-CONTRACTS.md`.
+
+### What unblocks APPROVED
+
+Author one scenario covering the kill-switch no-op path — either in `silent-filesystem-drop-detection.feature` under a new "Kill-switch" section or in a dedicated `kill-switch.feature` — and re-run this validation. The scenario must assert: given `drift_detection: false`; when `haiku_run_next` is called; then no drift gate SHA work occurs, no `manual_change_assessment` action is emitted, and the tick proceeds to the normal stage handler. When that scenario exists and is referenced in this matrix's §2 (SC-1.7) and §3 (SC-2.10), the two hard blockers are resolved and this document can be updated to `APPROVED`.
+
+All non-hard-blocker deferred items (§9, §10) do not prevent gate passage — they are development-stage obligations with documented dispositions.

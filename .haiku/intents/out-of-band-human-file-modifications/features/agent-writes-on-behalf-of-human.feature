@@ -85,7 +85,7 @@ Feature: Agent writes a file on behalf of a human via haiku_human_write
   Scenario: Security review can verify each human-via-mcp baseline entry has an audit log entry
     Given multiple "haiku_human_write" calls have been made across the intent lifetime
     When a security reviewer inspects "write-audit.jsonl"
-    Then for every baseline.json entry with acknowledged_by "human" or acknowledged_via "human-write-tool" there is a corresponding audit log entry with a matching path, sha, and non-null user_instruction_excerpt
+    Then for every baseline.json entry with author_class "human-via-mcp" or acknowledged_via "human-write-tool" there is a corresponding audit log entry with a matching path, sha, and non-null user_instruction_excerpt
     And the audit log is directly inspectable with any standard text viewer without a proprietary reader
   # ---------------------------------------------------------------------------
   # Refusals: workflow-managed paths

@@ -26,7 +26,7 @@ To meet the "naming is consistent across all contracts" quality signal, the same
 | One agent-authored classification of a drift finding | `assessment` / `Assessment` / `assessments` |
 | The four legal classification outcomes | `classification` (string enum); never `decision`, never `verdict` |
 | A pending-assessment marker that suppresses re-detection | `pending_marker` / `PendingMarker` / `pending-markers` |
-| A write attributed to a human (vs. an agent) | `author_type: "human"` (mirrors existing feedback `author_type` field — same vocabulary) |
+| A write attributed to a human (vs. an agent) | `author_class: "human-via-mcp"` or `"human-implicit"` (canonical field on `Baseline`; `"human-via-mcp"` for agent-mediated writes via `haiku_human_write`, `"human-implicit"` for filesystem drops) |
 
 Status enums and origin enums reuse the existing feedback vocabulary where semantically equivalent, to avoid parallel taxonomies. Where this intent introduces genuinely new vocabulary it is marked **NEW** in the table above (`baseline`, `tracked_file`, `drift_finding`, `assessment`, `classification`, `pending_marker`).
 
@@ -45,7 +45,7 @@ The workflow engine persists three new state shapes. The exact storage mechanism
 | `bytes` | integer | yes | — | File size in bytes at acknowledgment. Required even when `sha256` is present, for cheap pre-check before re-hashing on tick. |
 | `mtime_ns` | integer | yes | — | File mtime in nanoseconds since epoch at acknowledgment. Used as a hashing skip-hint only — `sha256` is authoritative. |
 | `is_binary` | boolean | yes | `false` | True if the file fails the UTF-8 / nul-byte heuristic. Affects diff payload (binary signal vs unified diff) downstream. |
-| `acknowledged_by` | string | yes | — | Enum: `"agent"` \| `"human"` \| `"baseline-init"`. Records who/what last set this baseline. `"baseline-init"` is the bootstrap-on-upgrade case. |
+| `author_class` | string | yes | — | Enum: `"agent"` \| `"human-via-mcp"` \| `"human-implicit"`. Records who/what last set this baseline. `"human-via-mcp"` = written by agent on explicit user instruction via `haiku_human_write`; `"human-implicit"` = filesystem drop detected at tick time. |
 | `acknowledged_at` | string (RFC 3339) | yes | — | UTC ISO-8601 timestamp with `Z` suffix. Example: `"2026-04-28T14:32:00Z"`. |
 | `acknowledged_via` | string | yes | — | Enum: `"agent-write"` \| `"human-write-tool"` \| `"spa-upload"` \| `"classification-terminal"` \| `"baseline-init"`. Names the *path* through which the baseline was last written. |
 | `stage` | string \| null | yes | — | Owning stage slug (e.g. `"product"`, `"design"`, `"development"`). `null` for intent-scope files (e.g. `intent.md`, `feedback/*.md` at intent root). |
@@ -60,7 +60,7 @@ The workflow engine persists three new state shapes. The exact storage mechanism
   "bytes": 4821,
   "mtime_ns": 1714312320123456789,
   "is_binary": false,
-  "acknowledged_by": "agent",
+  "author_class": "agent",
   "acknowledged_at": "2026-04-28T14:32:00Z",
   "acknowledged_via": "agent-write",
   "stage": "product",
@@ -82,13 +82,16 @@ Created by `manual_change_assessment` when the classification is `surface-as-fee
 | `outcome` | string | yes | — | Enum: `"surface-as-feedback"` \| `"trigger-revisit"`. The non-terminal classification that produced this marker. |
 | `linked_feedback_id` | string \| null | yes | — | `"FB-NN"` of the feedback item the marker is waiting on, or `null` if `outcome === "trigger-revisit"`. |
 | `linked_revisit_target_stage` | string \| null | yes | — | Stage slug being revisited, or `null` if `outcome === "surface-as-feedback"`. Exactly one of `linked_feedback_id` / `linked_revisit_target_stage` is non-null per marker (mutual exclusion enforced at write time). |
-| `cleared_at` | string (RFC 3339) \| null | yes | `null` | Set when the linked downstream action resolves; once non-null the marker is logically deleted (or hard-deleted, design choice). |
+| `cleared_at` | string (RFC 3339) \| null | yes | `null` | Set atomically with `resolved_sha` when the linked downstream action resolves; once non-null the marker is logically deleted (or hard-deleted, design choice). |
+| `resolved_sha` | string \| null | yes | `null` | The on-disk SHA-256 of the file at clearance time. `null` while pending. Set atomically with `cleared_at` exactly once — never updated after that point. |
+
+**Mutation contract:** `PendingMarker` is intentionally *not* append-only. `cleared_at` and `resolved_sha` are the only fields ever mutated, and they are set together in a single atomic write at clearance time. After that write the record is logically frozen — no further mutations are permitted.
 
 **Constraints:**
 - `(intent_slug, path)` is **NOT** unique here — multiple markers may queue on the same file across separate assessments. Newest open marker (max `created_at` with `cleared_at IS NULL`) is the suppressing one.
 - The drift-detection gate's "skip if pending" check is: *exists any row with this `path` and `cleared_at IS NULL`*. Implementation may collapse multiple markers on the same path to one open row at design time — that is a denormalization choice, not a contract change.
 
-**Example:**
+**Example (open marker):**
 
 ```json
 {
@@ -98,13 +101,14 @@ Created by `manual_change_assessment` when the classification is `surface-as-fee
   "outcome": "surface-as-feedback",
   "linked_feedback_id": "FB-12",
   "linked_revisit_target_stage": null,
-  "cleared_at": null
+  "cleared_at": null,
+  "resolved_sha": null
 }
 ```
 
 ### 2.3 `Assessment` — one record per agent classification decision
 
-Append-only. The durable record of "what changed, what the agent decided, why."
+Append-only. The durable record of "what changed, what the agent decided, why." Records are **never modified after writing** — `resulting_sha` is set once at classification time and never updated.
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
@@ -114,6 +118,7 @@ Append-only. The durable record of "what changed, what the agent decided, why."
 | `findings` | array of `DriftFinding` | yes | — | The full set of findings the agent classified in this dispatch. Always at least 1 element. |
 | `classifications` | array of `Classification` | yes | — | One classification per finding, parallel-indexed (`classifications[i]` corresponds to `findings[i]`). Length must equal `findings.length`. |
 | `agent_rationale` | string | yes | — | Free-form prose, the agent's explanation of *why* it classified each finding the way it did. Used by the SPA's drift assessment view; `>= 1` non-whitespace character. |
+| `resulting_sha` | string \| null | yes | — | For terminal outcomes (`ignore`, `inline-fix`): the on-disk SHA-256 of the file at classification time. For non-terminal outcomes (`surface-as-feedback`, `trigger-revisit`): `null` — always. Never updated after the record is written. The post-clearance SHA for non-terminal outcomes lives on `PendingMarker.resolved_sha` and the `pending_marker_cleared` event payload (§ 6.3). |
 | `mode` | string | yes | — | Enum: `"interactive"` \| `"pickup"` \| `"autopilot"` \| `"hybrid"`. Captured at assessment time so the SPA can render mode-aware context (e.g. "this was decided silently in autopilot"). |
 | `confirmed_by_user` | boolean | yes | `false` | True only when the user explicitly confirmed the agent's classification in interactive mode. False in autopilot. False when the user hasn't acted on a surfaced classification. |
 
@@ -149,6 +154,7 @@ Append-only. The durable record of "what changed, what the agent decided, why."
     }
   ],
   "agent_rationale": "The diff replaces the entire navigation block with a sidebar variant that is not specified in the design unit. Surfacing as feedback so the design lead can confirm before we re-elaborate.",
+  "resulting_sha": null,
   "mode": "autopilot",
   "confirmed_by_user": false
 }
@@ -255,7 +261,7 @@ This section specifies the *interface shape* of new MCP tools. Tool names below 
 
 ### 4.1 `haiku_human_write_file` — agent writes on behalf of human
 
-Purpose: when a user instructs the agent in chat to "save this Tailwind config to the design references," the agent uses this tool instead of `Write`. The tool sets `Baseline.acknowledged_by = "human"` so the drift gate does not re-flag the write on the next tick.
+Purpose: when a user instructs the agent in chat to "save this Tailwind config to the design references," the agent uses this tool instead of `Write`. The tool sets `Baseline.author_class = "human-via-mcp"` so the drift gate does not re-flag the write on the next tick.
 
 **Authentication / scope:** Any agent invocation; no user-token required. Audit linkage to the user instruction is established via the surrounding chat context, not a tool argument. *Boundary: the security stance of this tool — trust + audit vs. explicit-confirmation prompt — is decided in the security/hooks sibling artifact (DESIGN-DECISIONS Decision 9).*
 
@@ -372,9 +378,9 @@ Purpose: the agent's response to a `manual_change_assessment` action.
 1. Write feedback files (if any in `feedback_creates`).
 2. Resolve `linked_feedback_id` for any classifications that omitted it.
 3. Validate every classification against `legal_outcomes` for the dispatched tick.
-4. Write the `Assessment` record.
-5. For each terminal classification (`ignore`, `inline-fix`): update `Baseline` to the on-disk `(sha256, bytes, mtime_ns, is_binary)` with `acknowledged_by = "agent"`, `acknowledged_via = "classification-terminal"`.
-6. For each non-terminal classification (`surface-as-feedback`, `trigger-revisit`): write a `PendingMarker`. **Do not** update `Baseline`.
+4. Write the `Assessment` record. For terminal outcomes (`ignore`, `inline-fix`), `Assessment.resulting_sha` is set to the current on-disk SHA-256 of the file. For non-terminal outcomes (`surface-as-feedback`, `trigger-revisit`), `Assessment.resulting_sha` is `null`. The `Assessment` record is **never** modified after this write.
+5. For each terminal classification (`ignore`, `inline-fix`): update `Baseline` to the on-disk `(sha256, bytes, mtime_ns, is_binary)` with `author_class = "agent"`, `acknowledged_via = "classification-terminal"`.
+6. For each non-terminal classification (`surface-as-feedback`, `trigger-revisit`): write a `PendingMarker` with `resolved_sha = null` and `cleared_at = null`. **Do not** update `Baseline`. The post-clearance SHA for non-terminal outcomes will land on `PendingMarker.resolved_sha` at clearance time (see § 4.4).
 7. Return.
 
 **Errors:**
@@ -390,13 +396,15 @@ Purpose: the agent's response to a `manual_change_assessment` action.
 
 ### 4.4 `haiku_baseline_clear_marker` — internal lifecycle
 
-Purpose: invoked by the workflow engine itself (not the agent) when a linked feedback closes or a revisit completes, clearing the pending marker and updating the baseline. Specified here for completeness; tool name and exposure (internal-only vs MCP-callable) are **DEFERRED-TO-DESIGN**.
+Purpose: invoked by the workflow engine itself (not the agent) when a linked feedback reaches a **terminal state** (`closed` or `rejected`) or a revisit completes, clearing the pending marker and updating the baseline. Specified here for completeness; tool name and exposure (internal-only vs MCP-callable) are **DEFERRED-TO-DESIGN**.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `intent_slug` | string | yes | — |
 | `path` | string | yes | The marker's `path`. |
 | `trigger` | string | yes | Enum: `"feedback-closed"` \| `"feedback-rejected"` \| `"revisit-complete"`. |
+
+> **Normative constraint:** `"feedback-addressed"` is **not** a valid trigger and does **not** clear a `PendingMarker`. The `addressed` status is a mid-state — addressed feedback can be reopened, so it does not provide the immutability guarantee required to safely update the baseline and lift re-detection suppression. Only terminal states (`closed`, `rejected`) and `revisit-complete` provide that guarantee. This aligns with unit-01 AC-G5 and AC-SF3.
 
 Response: `{ ok: true, marker_cleared: true, baseline_updated: true }` or `{ ok: true, marker_cleared: false, reason: "no_open_marker" }`.
 
@@ -422,7 +430,7 @@ Replace or attach a file in a stage's outputs directory.
 | `target_path` | string | yes | Path **relative to the stage outputs directory** (e.g. `outputs/layout-v2.html`). The full intent-relative path is `stages/{stage}/{target_path}`. |
 | `file` | file | yes | The uploaded content. Max 50 MB (configurable). |
 | `mode` | string | yes | Enum: `"replace"` (target must exist) \| `"create"` (target must NOT exist) \| `"upsert"` (either). |
-| `attribute_to_user` | string | yes | The authenticated user's display name; written to the audit log and to `Baseline.acknowledged_by` provenance. |
+| `attribute_to_user` | string | yes | The authenticated user's display name; written to the audit log and to `Baseline.author_class` provenance. |
 
 **Response (200):**
 
@@ -561,7 +569,7 @@ Emitted when the agent submits classifications via `haiku_classify_drift`.
 
 ### 6.3 `pending_marker_cleared`
 
-Emitted when a non-terminal classification's downstream action resolves (feedback closes/rejects, revisit completes) and the marker is cleared + baseline updated.
+Emitted when a non-terminal classification's downstream action resolves (feedback reaches a terminal state `closed` or `rejected`, or a revisit completes) and the marker is cleared + baseline updated.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -573,6 +581,8 @@ Emitted when a non-terminal classification's downstream action resolves (feedbac
 | `trigger` | string | yes | Enum: `"feedback-closed"` \| `"feedback-rejected"` \| `"revisit-complete"`. |
 | `linked_feedback_id` | string \| null | yes | — |
 | `linked_revisit_target_stage` | string \| null | yes | — |
+
+> **Normative constraint:** This event is never emitted on `feedback-addressed`. The `addressed` status is a mid-state that does not guarantee finality. Only `feedback-closed`, `feedback-rejected`, and `revisit-complete` produce this event. See §4.4 for rationale.
 
 **Producer:** `haiku_baseline_clear_marker` (the workflow engine's internal lifecycle handler).
 

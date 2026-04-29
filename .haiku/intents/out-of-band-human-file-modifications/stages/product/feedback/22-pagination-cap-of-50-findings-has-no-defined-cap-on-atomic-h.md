@@ -2,7 +2,7 @@
 title: >-
   Pagination cap of 50 findings has no defined cap on atomic
   haiku_classify_drift payload — unreasonable O(n) allocation
-status: fixing
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:33:57Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-22:bolt-1'
 bolt: 1
 triaged_at: '2026-04-29T20:33:57Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T20:40:09Z'
+    result: advanced
+  - bolt: 1
+    hat: feedback-assessor
+    completed_at: '2026-04-29T20:41:45Z'
+    result: closed
 ---
-
 **Mandate lens:** Performance targets must be realistic given the data model; no specification may assume capabilities that require unreasonable effort to build.
 
 **Finding:**

@@ -2,7 +2,7 @@
 title: >-
   surface-as-feedback baseline contract is internally contradictory across
   DATA-CONTRACTS and feature files
-status: fixing
+status: addressed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -15,8 +15,13 @@ bolt: 1
 triaged_at: '2026-04-29T20:32:52Z'
 resolution: null
 replies: []
+hat: product
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T20:40:26Z'
+    result: advanced
 ---
-
 **Mandate lens:** Data contracts must be compatible with each other — no breaking contradictions without explicit resolution.
 
 **Finding:**

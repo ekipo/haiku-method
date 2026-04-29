@@ -71,12 +71,32 @@ export default definePromptBuilder(({ slug, studio, action, dir }) => {
 		unit.endsWith(".md") ? unit : `${unit}.md`,
 	)
 
-	// Need unit inputs + model hint from its frontmatter.
+	// Migration recovery for intents committed before the haiku_unit_set
+	// type gate landed: legacy `inputs: >- ["..."]` (folded-scalar JSON)
+	// gets parsed back to an array so the prompt builder doesn't crash.
+	// New writes can't produce that shape anymore.
 	let unitInputs: string[] = []
 	let unitModel: string | undefined
 	if (existsSync(unitFile)) {
 		const { data } = parseFrontmatter(readFileSync(unitFile, "utf8"))
-		unitInputs = (data.inputs as string[]) || (data.refs as string[]) || []
+		const rawInputs = data.inputs ?? data.refs
+		if (Array.isArray(rawInputs)) {
+			unitInputs = rawInputs.filter((r): r is string => typeof r === "string")
+		} else if (typeof rawInputs === "string") {
+			const trimmed = rawInputs.trim()
+			if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+				try {
+					const parsed = JSON.parse(trimmed)
+					if (Array.isArray(parsed)) {
+						unitInputs = parsed.filter(
+							(r): r is string => typeof r === "string",
+						)
+					}
+				} catch {
+					/* leave unitInputs empty */
+				}
+			}
+		}
 		unitModel = (data.model as string) || undefined
 	}
 
@@ -301,12 +321,15 @@ If a command times out, do NOT retry blindly — diagnose why (hanging test, net
 			`${step++}. Commit frequently inside the worktree: \`git add -A && git commit -m "..."\`. Do NOT push.`,
 		)
 	}
+	const isFirstHat = hat === (hats[0] || "")
 	prompt.push(
 		`${step++}. When done: call \`haiku_unit_advance_hat { intent: "${slug}", unit: "${unit}" }\``,
-		`${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unit}" }\``,
-		`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\` or \`reject_hat\` returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
+		isFirstHat
+			? `${step++}. **If blocked**, you are the first hat in this stage's hat sequence — there is no previous hat to reject back to. Do NOT call \`haiku_unit_reject_hat\`. Instead: surface ambiguity via \`AskUserQuestion\` (or \`ask_user_visual_question\` for visual decisions); if upstream-stage outputs are missing, log a stage_revisit feedback at the upstream stage via \`haiku_feedback { intent: "${slug}", stage: "<earlier-stage>", title: "<upstream gap>", body: "<what's missing>", origin: "agent", resolution: "stage_revisit" }\` and call \`haiku_run_next\`; if you've found a real defect in the spec or upstream artifact, log it via \`haiku_feedback\`. The first hat escalates outward, not backward.`
+			: `${step++}. If blocked: call \`haiku_unit_reject_hat { intent: "${slug}", unit: "${unit}" }\``,
+		`${step++}. **CRITICAL — Relay the Workflow Result path.** When \`advance_hat\`${isFirstHat ? "" : " or `reject_hat`"} returns, its tool response contains a result-file path and instructs you to reply with exactly \`Workflow Result: <path>\`. Your FINAL MESSAGE to the parent MUST BE EXACTLY that one line — nothing before, nothing after. Do NOT summarize the work, do NOT describe what you did, do NOT paraphrase the result. The parent reads the file to drive the next workflow action. If the tool returned plaintext instead of a result path (e.g. "job ends here — parent will call haiku_run_next"), relay THAT plaintext verbatim as your final message.`,
 		`${step++}. Track outputs in unit frontmatter \`outputs:\` field`,
-		`${step++}. If outputs from a previous stage are missing: call \`haiku_revisit { intent: "${slug}" }\``,
+		`${step++}. If outputs from a previous stage are missing: log a stage_revisit feedback at that stage via \`haiku_feedback { intent: "${slug}", stage: "<earlier-stage>", title: "<missing output>", body: "<what's needed>", origin: "agent", resolution: "stage_revisit" }\` and call \`haiku_run_next\` — the pre-tick gate routes the rewind.`,
 		"",
 		"**Autonomy:** You are in the execution phase. Execute without asking the user to confirm per-step. Use `AskUserQuestion`/`ask_user_visual_question` only when genuinely blocked on ambiguous requirements — always with pre-populated options.",
 		"",

@@ -1,8 +1,15 @@
 # Acceptance Criteria — Out-of-band Human File Modifications
 
 > **Scope axis:** acceptance-criteria — what "done" looks like from the user's perspective.
-> Sibling artifacts in this stage cover behavioral spec, data contracts, and coverage mapping; their substance is not duplicated here.
-> Implementation details (tool signatures, baseline storage format, gate ordering) are out of scope for this artifact — design-stage decisions feed back into AC at refinement time.
+> Sibling artifacts in this stage cover behavioral spec (`.feature` files), data contracts (DATA-CONTRACTS.md), and coverage mapping (COVERAGE-MAPPING.md); their substance is not duplicated here.
+> Implementation details (tool signatures, baseline storage format, gate ordering) are out of scope for this artifact — design-stage decisions in ARCHITECTURE.md feed back into AC at refinement time.
+>
+> **Reconciliation note (unit-01):** Five cross-document gaps surfaced during pre-execute review and are closed in this revision:
+> 1. DEC-9 stance resolved: Trust+Audit (replaces AC-AB4 placeholder).
+> 2. `surface-as-feedback` baseline contract corrected: baseline is NOT updated at classification time.
+> 3. Active-stage transition during pending `trigger-revisit` marker added (AC-G5-A).
+> 4. `outputs/` → `artifacts/` alias canonicalization added (AC-ALIAS*).
+> 5. Terminal-state clarification: `closed` and `rejected` clear markers; `addressed` does NOT.
 
 ---
 
@@ -15,9 +22,9 @@ The behavior of out-of-band detection and reaction varies along the following di
    - `filesystem-drop` — file written directly into the worktree (designer's local tool, IDE save, drag-and-drop, `cp`, etc.) with no SPA involvement.
    - `agent-on-behalf` — agent writes via the sanctioned human-attributed MCP tool in response to a user instruction in chat ("hey claude write this file").
 2. **Tracked-surface class** — The file under drift detection falls into one of three classes:
-   - `stage-output` — a deliverable file produced by a stage hat (layouts, generated HTML, screenshots, figma exports).
+   - `stage-output` — a deliverable file produced by a stage hat. Canonical directory: `stages/{stage}/artifacts/`. Alias: `stages/{stage}/outputs/` maps to `artifacts/` — see AC-ALIAS1.
    - `knowledge-input` — a reference / context file in a stage's knowledge directory (research notes, design tokens, market data).
-   - `unit-output` — a file produced by a hat during execution within a unit's working surface (the design stage explicitly carved off as design-stage open question; v1 boundary set by design stage).
+   - `unit-output` — a file produced by a hat during execution within a unit's working surface (v1 boundary set by design stage; see AC-UO1).
 3. **File payload type** — Diff payload available to the agent at classification time:
    - `text` — full unified diff is meaningful and shown.
    - `binary` — only file-changed signal + size delta + mime hint; no textual diff.
@@ -34,8 +41,8 @@ The behavior of out-of-band detection and reaction varies along the following di
 7. **Classification outcome** — One of four:
    - `ignore` — change observed, no further action; baseline updates immediately.
    - `inline-fix` — agent absorbs the change into the current bolt; baseline updates immediately.
-   - `surface-as-feedback` — open feedback item created; baseline holds (pending-assessment marker recorded), updates when feedback closes.
-   - `trigger-revisit` — earlier stage revisited; baseline holds (pending-assessment marker recorded), updates when revisit completes.
+   - `surface-as-feedback` — open feedback item created; baseline does NOT update at classification time (pending-assessment marker written); baseline updates when feedback reaches a terminal state (`closed` or `rejected`).
+   - `trigger-revisit` — earlier stage revisited; baseline does NOT update at classification time (pending-assessment marker written); baseline updates when revisit completes.
 
 ---
 
@@ -116,7 +123,7 @@ The behavior of out-of-band detection and reaction varies along the following di
 ### US-10: User Uses the SPA Upload Affordance Per Stage
 
 **As** a user wanting an explicit upload UI rather than a filesystem drop,
-**I want to** upload files through the SPA at the appropriate per-stage target (knowledge for elaborate-class stages, outputs for output-producing stages),
+**I want to** upload files through the SPA at the appropriate per-stage target (knowledge for elaborate-class stages, outputs/artifacts for output-producing stages),
 **so that** I have a sanctioned, discoverable path that doesn't require me to know the worktree layout.
 
 **Priority:** P1 (filesystem drop covers the base case; SPA upload is a UX upgrade)
@@ -143,30 +150,33 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 ### General Rules
 
-#### AC-G1: Drift detection runs on every workflow tick
+#### AC-G1: Drift detection runs on every workflow tick — DEC-1
 
 - **Given** an active intent with at least one tracked file
 - **When** `haiku_run_next` is called
 - **Then** before any per-state dispatch, a drift-detection gate walks the tracked surface and compares each file's current SHA against its recorded baseline SHA
 - **And** any file whose current SHA does not match its baseline is recorded as a drift event for this tick
+- *Cites: Decision 1 (DEC-1) — both explicit and implicit detection required.*
 
-#### AC-G2: Drift events emit a single workflow action per tick
+#### AC-G2: Drift events emit a single workflow action per tick — DEC-3
 
 - **Given** one or more drift events recorded on a tick
 - **When** the drift-detection gate completes
-- **Then** the workflow emits a single `manual_change_assessment` action (working name) carrying the full set of drift events for that tick
+- **Then** the workflow emits a single `manual_change_assessment` action carrying the full set of drift events for that tick
 - **And** the action payload includes, per event: file path, owning stage, file class (`stage-output` / `knowledge-input` / `unit-output`), payload type (`text` / `binary`), unified diff (if text) or change signal (if binary), prior baseline SHA, observed SHA
 - **And** no `manual_change_assessment` action is emitted on a tick with zero drift events
+- *Cites: DEC-3 — new first-class workflow action, distinct from feedback-triage.*
 
-#### AC-G3: Classification is agent-driven, not harness-driven
+#### AC-G3: Classification is agent-driven, not harness-driven — DEC-3
 
 - **Given** a `manual_change_assessment` action has been emitted
 - **When** the agent processes the action
 - **Then** the agent classifies each drift event into exactly one of four outcomes: `ignore`, `inline-fix`, `surface-as-feedback`, `trigger-revisit`
 - **And** the harness does not pre-classify based on heuristics (file extension, size delta, file class, payload type)
 - **And** the agent's classification rationale is recorded alongside each outcome in the assessment record
+- *Cites: DEC-3 — agent owns the classification decision, not the harness.*
 
-#### AC-G4: Baseline-update contract by outcome
+#### AC-G4: Baseline-update contract by outcome — ARCHITECTURE.md §5.4
 
 - **Given** an agent classification of a drift event
 - **When** the classification is `ignore`
@@ -178,78 +188,189 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **When** the classification is `surface-as-feedback`
 - **Then** an open feedback item is created describing the drift
 - **And** a pending-assessment marker is recorded for this file
-- **And** the baseline SHA is NOT updated at classification time
+- **And** the baseline SHA is **NOT** updated at classification time — the baseline holds until the linked feedback reaches a terminal state (`closed` or `rejected`)
 - **And** the drift-detection gate skips this file on subsequent ticks while the marker is open
 - **When** the classification is `trigger-revisit`
 - **Then** a revisit is dispatched targeting the stage that owns the drifted file
 - **And** a pending-assessment marker is recorded for this file
-- **And** the baseline SHA is NOT updated at classification time
+- **And** the baseline SHA is **NOT** updated at classification time — the baseline holds until the revisit completes
 - **And** the drift-detection gate skips this file on subsequent ticks while the marker is open
+- *Cites: ARCHITECTURE.md §5.4 (baseline-update contract table — the authoritative reference). Any AC that says "baseline updated immediately on surface-as-feedback" is incorrect; this is the correct contract.*
 
-#### AC-G5: Pending-assessment marker lifecycle
+#### AC-G5: Pending-assessment marker lifecycle — terminal states — ARCHITECTURE.md §5.3
 
 - **Given** a pending-assessment marker is open for a file (from `surface-as-feedback` or `trigger-revisit`)
-- **When** the underlying feedback item closes (status becomes `addressed`, `closed`, or `rejected`)
+- **When** the underlying feedback item transitions to `closed`
 - **Then** the marker is cleared
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
+- **When** the underlying feedback item transitions to `rejected`
+- **Then** the marker is cleared
+- **And** the baseline SHA updates to the file's SHA at marker-clearing time
+- **When** the underlying feedback item transitions to `addressed`
+- **Then** the marker is **NOT** cleared — `addressed` is NOT a terminal state for marker-clearing purposes
+- **And** the drift-detection gate continues to skip this file while the marker remains open
+- **Rationale:** The `addressed` status is not terminal because addressed feedback items can still be reopened. The conservative path is: only `closed` and `rejected` — statuses that cannot be undone — clear the marker and update the baseline.
 - **When** the underlying revisit completes (the targeted stage re-passes its gate)
 - **Then** the marker is cleared
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
+- *Cites: ARCHITECTURE.md §5.3 (marker lifecycle). DEC-4 (eventual consistency).*
 
-#### AC-G6: Existing PreToolUse hook on workflow-managed files is unchanged
+#### AC-G5-A: Active-stage state during pending `trigger-revisit` marker — ARCHITECTURE.md §5.5
+
+- **Given** a `trigger-revisit` classification was produced for a drift event targeting an upstream stage
+- **When** a pending-assessment marker for that `trigger-revisit` is written and the revisit dispatch is initiated
+- **Then** the active stage transitions to `awaiting-revisit-resolution` (or the equivalent state named in ARCHITECTURE.md §5.5) for the duration the marker is open
+- **And** no new per-state dispatch actions are issued against the active stage's normal workflow while in `awaiting-revisit-resolution`
+- **And** the `awaiting-revisit-resolution` state clears when the targeted upstream stage re-passes its gate (the same event that clears the pending-assessment marker per AC-G5)
+- **And** normal active-stage workflow resumes immediately upon marker clearing
+- *Cites: ARCHITECTURE.md §5.5 (pending-revisit active-stage state).*
+
+#### AC-G6: Existing PreToolUse hook on workflow-managed files is unchanged — DEC-2
 
 - **Given** an agent attempts to write directly to a workflow-managed file (`units/*.md`, `feedback/*.md`, `intent.md`, `stages/*/state.json`) via `Write` or `Edit`
 - **When** the PreToolUse hook fires
 - **Then** the write is blocked with the existing redirect message naming the correct MCP tool
 - **And** this behavior is identical before and after this feature ships
+- *Cites: DEC-2 — agent guardrail boundary is unchanged.*
 
-#### AC-G7: Workflow-managed files are not in the tracked surface
+#### AC-G7: Workflow-managed files are not in the tracked surface — DEC-2, TRACKED-SURFACE-BOUNDARY.md §3.1
 
 - **Given** the drift-detection gate walks the tracked surface
 - **When** it encounters a workflow-managed file (`units/*.md`, `feedback/*.md`, `intent.md`, `stages/*/state.json`)
 - **Then** the file is excluded from baselining and from drift detection
 - **Note:** Workflow-managed files are agent-only by contract. Human writes to them via the filesystem are out of scope for v1; they are treated as the user violating the framework contract, not as a sanctioned out-of-band write.
+- *Cites: DEC-2, TRACKED-SURFACE-BOUNDARY.md §3.1.*
 
-#### AC-G8: First-tick-after-upgrade silently establishes baselines
+#### AC-G8: First-tick-after-upgrade silently establishes baselines — DEC-1, ROLLOUT-AND-BASELINE-ESTABLISHMENT.md §3
 
 - **Given** an intent that existed before the feature shipped, and the feature has now shipped
 - **When** the first `haiku_run_next` tick after upgrade runs
 - **Then** the gate records a baseline SHA for every file in the tracked surface
 - **And** zero `manual_change_assessment` actions are emitted on this first tick, regardless of how many files differ from any prior agent-written state
-- **And** the gate records a "baselines established" marker for the intent so subsequent ticks know to fire assessments
+- **And** the gate records `drift_baseline_established_at` in the per-stage `state.json` so subsequent ticks know to fire assessments
+- **And** every pre-existing file is written to the baseline with `author_class: "agent"` (conservative default — no provenance signal available for files that predate the feature)
+- *Cites: ROLLOUT-AND-BASELINE-ESTABLISHMENT.md §3.1 (first-tick behavior). DEC-1.*
 
-#### AC-G9: Concurrency model — eventual consistency, no locking
+#### AC-G9: Concurrency model — eventual consistency, no locking — DEC-4
 
 - **Given** the agent is mid-bolt
 - **When** a human writes to a tracked file (filesystem, SPA, or via the human-write MCP tool)
 - **Then** the write is not blocked
 - **And** the agent's mid-bolt work continues without interruption
 - **And** the next `haiku_run_next` tick observes the drift via the gate
-- **And** the agent's mid-bolt result may be partially based on the pre-edit version of the file; this is accepted
+- **And** the agent's mid-bolt result may be partially based on the pre-edit version of the file; this is accepted behavior, not a bug
+- *Cites: DEC-4 (eventual consistency model).*
 
-#### AC-G10: All three write-path origins produce the same downstream detection signal
+#### AC-G10: All three write-path origins produce the same downstream detection signal — DEC-1, DEC-7
 
 - **Given** a file is written via `spa-upload`, `filesystem-drop`, or `agent-on-behalf`
 - **When** the next workflow tick runs
 - **Then** the drift-detection gate observes the SHA mismatch identically in all three cases
-- **And** the resulting `manual_change_assessment` action payload does not differ structurally based on origin (the gate only sees SHAs and file content; the origin signal is recorded separately on the assessment record where it is available, but is not required for classification)
+- **And** the resulting `manual_change_assessment` action payload does not differ structurally based on origin (the gate only sees SHAs and file content; the origin signal is recorded separately in the assessment record where available, but is not required for classification)
+- *Cites: DEC-1 (both explicit and implicit detection), DEC-7 (three write paths, unified by implicit baseline gate).*
 
-#### AC-G11: Drift assessment record is durable and human-readable
+#### AC-G11: Drift assessment record is durable and human-readable — ARCHITECTURE.md §4.6
 
 - **Given** an agent classifies a drift event
 - **When** the classification is recorded
-- **Then** an assessment record is persisted that survives branch switches, worktree operations, and session restarts
+- **Then** an assessment record is persisted at `stages/{stage}/drift-assessments/DA-{NN}.json` that survives branch switches, worktree operations, and session restarts
 - **And** the record contains: timestamp, file path, owning stage, payload type, prior baseline SHA, observed SHA, write-path origin (if known), classification outcome, agent rationale
 - **And** the record is visible in the SPA's drift assessment view (US-05)
+- **And** records are append-only — no record is modified after writing
+- *Cites: ARCHITECTURE.md §4.6.*
 
-#### AC-G12: Same-tick multiple drift events are processed atomically
+#### AC-G12: Same-tick multiple drift events are processed atomically — ARCHITECTURE.md §4.3
 
 - **Given** multiple files have drifted since the last tick
 - **When** the gate emits `manual_change_assessment`
 - **Then** all drift events are presented to the agent in a single action payload
 - **And** the agent's classification of each event is recorded as a single batch
-- **And** baselines for all "ignore" / "inline-fix" outcomes update together
-- **And** pending-assessment markers for all "surface-as-feedback" / "trigger-revisit" outcomes are recorded together
+- **And** baselines for all `ignore` / `inline-fix` outcomes update together
+- **And** pending-assessment markers for all `surface-as-feedback` / `trigger-revisit` outcomes are recorded together
+- *Cites: ARCHITECTURE.md §4.3 (output shape — per-finding classification in single response).*
+
+#### AC-G13: Gate chain ordering — ARCHITECTURE.md §3.1
+
+- **Given** a `haiku_run_next` tick runs
+- **When** the pre-tick gate chain executes
+- **Then** the ordering is: tamper-detection → feedback-triage → drift-detection → per-state dispatch
+- **And** if feedback-triage emits a `feedback_triage` action, the drift-detection gate still runs (the two are independent)
+- **And** if tamper-detection fires, the tick halts before either gate runs
+- **And** if drift-detection emits findings, per-state dispatch is blocked until `manual_change_assessment` completes
+- *Cites: ARCHITECTURE.md §3.1.*
+
+---
+
+### Trust+Audit: DEC-9 Resolved — AC-AB4 Replacement
+
+> **Context:** DEC-9 in DESIGN-DECISIONS.md was deliberately left open at inception with two candidate stances (trust + audit vs. explicit human confirmation). ARCHITECTURE.md §6.3 resolves this decision: **v1 ships Trust+Audit**. The original AC-AB4 placeholder ("stance deferred to design") is removed and replaced by the following concrete criteria.
+
+#### AC-TA1: Human-write MCP tool fires without interrupt-driven human confirmation in v1 — DEC-9, ARCHITECTURE.md §6.3
+
+- **Given** a user instructs the agent in chat to write a specific file (e.g., "save this content to the design references")
+- **When** the agent invokes the sanctioned `haiku_human_write` MCP tool
+- **Then** the tool completes the disk write without requiring an intermediate `ask_user_visual_question` prompt, UI confirmation, or ambient approval token from the human
+- **And** the write proceeds if the path is valid and all inputs meet their constraints
+- **Rationale:** The human is present in the conversation and has explicitly given the instruction. Adding a confirmation step to an action the user already authorized is friction, not safety. The audit log is the safety mechanism. (ARCHITECTURE.md §6.3: "The primary use case is interactive — the user is in the chat and their intent is unambiguous.")
+- **Note:** Harness-level enforcement (e.g., a hook that checks a human turn precedes the tool invocation) is architecturally possible and deferred to v2. This criterion only governs v1 behavior.
+- *Cites: DEC-9 resolved as Trust+Audit. ARCHITECTURE.md §6.3.*
+
+#### AC-TA2: Every `haiku_human_write` invocation appends to a per-intent audit log — DEC-9, MCP-TOOL-CONTRACT.md §8
+
+- **Given** the agent successfully invokes the `haiku_human_write` tool (path valid, inputs accepted)
+- **When** the disk write completes
+- **Then** a record is appended to the intent-scoped audit log at `.haiku/intents/{slug}/write-audit.jsonl`
+- **And** failed writes (e.g., `path_outside_tracked_surface` errors) do NOT append to the audit log — only successful writes are logged
+- **And** the audit log is opened in append mode; no prior record is overwritten or deleted
+- *Cites: DEC-9 Trust+Audit. MCP-TOOL-CONTRACT.md §8.*
+
+#### AC-TA3: Audit log is human-readable and append-only — DEC-9, MCP-TOOL-CONTRACT.md §8.3
+
+- **Given** the `write-audit.jsonl` file exists for an intent
+- **When** a user or security reviewer inspects it
+- **Then** the file is directly inspectable with any text viewer or standard shell tools (no proprietary reader required)
+- **And** each line is a complete, self-contained JSON object
+- **And** each record carries: timestamp (ISO-8601 UTC), entry_id, file path, SHA-256 of content written, `author_class: "human-via-mcp"`, human_author_id (may be null), rationale (may be null), user_instruction_excerpt (first 200 chars of user's message, may be null), tick_counter, session_id (may be null), overwrite flag, dirs_created array
+- **And** a security review can verify that every `human-via-mcp` entry in any `baseline.json` has a corresponding audit log entry with user instruction context, confirming the write was accompanied by an explicit human turn
+- *Cites: DEC-9 Trust+Audit. MCP-TOOL-CONTRACT.md §8.3 (audit log properties: human-readable, append-only, security posture).*
+
+#### AC-TA4: Audit log path is protected against direct writes — MCP-TOOL-CONTRACT.md §5.2
+
+- **Given** the agent attempts to invoke `haiku_human_write` with path `write-audit.jsonl` or any sub-path resolving to the audit log
+- **When** path validation runs
+- **Then** the write is refused with `path_outside_tracked_surface` and `reason: "deny_list_match"`
+- **And** the audit log is only appended to by the tool itself, never externally writable
+- *Cites: MCP-TOOL-CONTRACT.md §5.2 deny-list (write-audit.jsonl explicitly listed).*
+
+---
+
+### Alias Canonicalization: `outputs/` → `artifacts/`
+
+> **Context:** TRACKED-SURFACE-BOUNDARY.md §0 declares `artifacts/` canonical and `outputs/` an alias. Design artifacts (ARCHITECTURE.md, SPA-UI-SPECS.md) sometimes used `outputs/` in examples. This section canonicalizes the naming in acceptance-criteria terms.
+
+#### AC-ALIAS1: `stages/{stage}/outputs/` is implementation-equivalent to `stages/{stage}/artifacts/` — TRACKED-SURFACE-BOUNDARY.md §0
+
+- **Given** any AC, scenario, or implementation that references `stages/{stage}/outputs/` as an output directory
+- **When** the path is evaluated by the drift-detection gate, the `haiku_human_write` tool, the SPA upload endpoint, or any other component of this feature
+- **Then** `stages/{stage}/outputs/` is treated as an alias for `stages/{stage}/artifacts/`; the behavior is identical
+- **And** new code MUST write to `stages/{stage}/artifacts/` and MUST NOT create a separate `outputs/` directory
+- **And** if a `stages/{stage}/outputs/` directory exists on disk from a prior artifact (pre-rename), its contents are tracked under the canonical `stages/{stage}/artifacts/` key in `baseline.json`
+- *Cites: TRACKED-SURFACE-BOUNDARY.md §0 (canonical directory name declaration).*
+
+#### AC-ALIAS2: Baseline keys use canonical `artifacts/` paths — TRACKED-SURFACE-BOUNDARY.md §6
+
+- **Given** a file located at `stages/{stage}/artifacts/hero.html` (canonical) or discovered via an `outputs/` alias
+- **When** the drift-detection gate writes or reads the baseline entry
+- **Then** the key in `baseline.json` is `stages/{stage}/artifacts/hero.html` (canonical form)
+- **And** no `baseline.json` contains entries with `outputs/` in the key
+- *Cites: TRACKED-SURFACE-BOUNDARY.md §6 (baseline storage contract table).*
+
+#### AC-ALIAS3: SPA upload destination selector uses canonical `artifacts/` label — SPA-UI-SPECS.md §2.1
+
+- **Given** the Stage Output Replacement affordance is displayed in the SPA
+- **When** a user selects a target directory for their upload
+- **Then** the UI labels and API destination parameters use `artifacts/` not `outputs/`
+- *Cites: TRACKED-SURFACE-BOUNDARY.md §0, SPA-UI-SPECS.md §2.1.*
 
 ---
 
@@ -258,19 +379,21 @@ The behavior of out-of-band detection and reaction varies along the following di
 #### AC-SU1: SPA upload affordance is available per stage where a target exists
 
 - **Given** the SPA is rendering an intent's stage view
-- **When** the stage has a defined upload target (knowledge directory for elaborate-class stages, outputs directory for output-producing stages)
+- **When** the stage has a defined upload target (knowledge directory for elaborate-class stages, artifacts directory for output-producing stages)
 - **Then** an upload affordance is visible in that stage's view
 - **When** the stage has no defined upload target
 - **Then** no upload affordance is rendered in that stage's view
 
-#### AC-SU2: SPA upload writes to the worktree
+#### AC-SU2: SPA upload writes to the worktree and flows through unified detection path
 
 - **Given** a user uploads a file via the SPA upload affordance
 - **When** the upload completes
-- **Then** the file is written to the appropriate target directory in the worktree (knowledge or outputs)
-- **And** the upload does NOT directly invoke the workflow engine
-- **And** the next `haiku_run_next` tick's drift-detection gate observes the new or changed file
-- **Note:** The SPA writes to disk and lets the next tick discover the change. This keeps the implementation surface small and unifies SPA, filesystem-drop, and agent-on-behalf through the same detection path.
+- **Then** the file is written to the appropriate target directory in the worktree (knowledge or artifacts)
+- **And** the upload endpoint stamps an action-log entry with `author_class: "human-via-mcp"` but does NOT update `baseline.json` directly
+- **And** the next `haiku_run_next` tick's drift-detection gate observes the new or changed file via SHA comparison
+- **And** the gate emits a drift event with `author_class: "human-via-mcp"` (read from the action log)
+- **And** `manual_change_assessment` fires on that tick exactly as it would for any filesystem-drop or agent-on-behalf write
+- **Note:** No fast-path special case for SPA uploads. All three write-path origins flow through the same detection-and-classification pipeline (DEC-1, DEC-7).
 
 #### AC-SU3: SPA upload preserves the file name unless the user renames
 
@@ -284,13 +407,14 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 ### Variant: Write-Path Origin — `filesystem-drop`
 
-#### AC-FS1: Manual filesystem writes require zero tooling knowledge
+#### AC-FS1: Manual filesystem writes require zero tooling knowledge — DEC-1
 
 - **Given** a user writes a file directly into the worktree using any local tool (editor save, `cp`, drag-and-drop, IDE)
 - **When** the next `haiku_run_next` tick runs
 - **Then** the drift-detection gate observes the file as drifted (or new)
 - **And** the user did not invoke any MCP tool, skill, or SPA action
 - **And** no announcement step is required from the user
+- *Cites: DEC-1 (implicit detection is required; system can't rely on human announcing themselves).*
 
 #### AC-FS2: New files are detected as drift events
 
@@ -310,33 +434,31 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 ### Variant: Write-Path Origin — `agent-on-behalf`
 
-#### AC-AB1: Sanctioned MCP tool exists for human-attributed writes
+#### AC-AB1: Sanctioned MCP tool exists for human-attributed writes — DEC-7, DEC-9
 
 - **Given** a user instructs the agent in chat: "hey claude, save this content to `<path>`"
 - **When** the agent decides to honor the instruction
-- **Then** the agent invokes a sanctioned MCP tool (working name: `haiku_human_write` or equivalent — design-stage decision) that writes the file with human attribution
+- **Then** the agent invokes the sanctioned MCP tool `haiku_human_write` that writes the file with human attribution
 - **And** the agent does NOT use its normal `Write` tool for this purpose
+- **And** the resulting file is attributed as `human-via-mcp`, distinct from `agent` (agent's normal writes) and `human-implicit` (inferred filesystem drop)
+- *Cites: DEC-7 (three write paths including agent-on-behalf), DEC-9 (trust+audit resolved).*
 
-#### AC-AB2: Agent-on-behalf writes are detected as drift on the next tick
+#### AC-AB2: Agent-on-behalf writes are detected as drift on the next tick — ARCHITECTURE.md §2.3
 
-- **Given** the agent invoked the sanctioned human-write tool successfully
+- **Given** the agent invoked `haiku_human_write` successfully
 - **When** the next `haiku_run_next` tick runs
-- **Then** the drift-detection gate observes the file as drifted (or new) identically to any other write-path origin
-- **And** the resulting `manual_change_assessment` action surfaces normally
-- **Note:** This means the agent's own classification step will fire on a write the agent itself performed. This is intentional — the classification step is what binds the human-attributed write into the lifecycle. The agent should classify these as `inline-fix` or `ignore` in the typical case; the classification record is the audit trail.
+- **Then** the drift-detection gate observes the file as drifted (or new) — identically to any other write-path origin — because `haiku_human_write` does NOT update `baseline.json` at write time
+- **And** the resulting `manual_change_assessment` action surfaces with `author_class: "human-via-mcp"`
+- **And** the agent classifies this finding as `inline-fix` or `ignore` in the typical case; the classification record is the audit trail that links the human instruction to the write
+- **Note:** The agent's own classification step fires on a write the agent itself performed. This is intentional — classification is what binds the human-attributed write into the lifecycle and produces the durable assessment record. See ARCHITECTURE.md §6.3 (third mechanism in trust+audit rationale).
+- *Cites: ARCHITECTURE.md §2.3 item 2, §6.3. MCP-TOOL-CONTRACT.md §6.3.*
 
 #### AC-AB3: Conversation surface acknowledges the human-attributed write
 
-- **Given** the agent has invoked the sanctioned human-write tool
+- **Given** the agent has invoked `haiku_human_write`
 - **When** the agent's response in chat completes
 - **Then** the chat surface includes an acknowledgment of the form "saved as a human-attributed file at `<path>` in stage `<stage>`"
 - **And** the user understands the write was tracked, not regenerated
-
-#### AC-AB4: Sanctioned tool path-integrity stance (deferred to design)
-
-- **Open in design (Decision 9 in inception):** The sanctioned human-write tool's invocation requirements (trust + audit vs. explicit human confirmation) are a design-stage choice. AC for this dimension will be added at design-refinement time after the stance is settled. The two candidate AC families are sketched below for design's reference, not committed:
-  - *Trust + audit family* — the tool fires without confirmation; attribution + assessment record are the audit trail.
-  - *Explicit confirmation family* — the tool blocks for an `ask_user_visual_question` (or equivalent) confirmation signal before completing.
 
 ---
 
@@ -344,18 +466,19 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 #### AC-SO1: Stage output replacement is detected and classifiable
 
-- **Given** a file in a stage's outputs directory (e.g., `stages/design/artifacts/layout.html`)
+- **Given** a file in a stage's artifacts directory (e.g., `stages/design/artifacts/layout.html`)
 - **When** the file is replaced by a human via any write-path origin
-- **Then** the drift-detection gate emits a drift event with `file class: stage-output` and `owning stage: design`
+- **Then** the drift-detection gate emits a drift event with `file_class: "stage-output"` and `stage_owner: "design"`
 - **And** the agent's classification is dispatched with that context
 
-#### AC-SO2: Stage output drift on a non-active (earlier) stage is classified, not auto-revisited
+#### AC-SO2: Stage output drift on a non-active (earlier) stage is classified, not auto-revisited — DEC-5
 
 - **Given** the active stage is `development` and the drifted file is owned by `design`
 - **When** the agent classifies the drift event
 - **Then** the harness does not automatically dispatch a revisit
 - **And** the agent's classification outcome (any of the four) is what determines whether revisit is triggered
 - **And** if the classification outcome is `trigger-revisit`, the revisit targets the stage that owns the file (`design`)
+- *Cites: DEC-5 (cross-stage drift classification agent-owned, no automatic revisit).*
 
 ---
 
@@ -363,9 +486,9 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 #### AC-KI1: Knowledge directory drops are detected as new-file drift events
 
-- **Given** a user drops a new file into a stage's knowledge directory (e.g., `stages/inception/knowledge/research-notes.md`)
+- **Given** a user drops a new file into a stage's knowledge directory (e.g., `stages/inception/knowledge/research-notes.md`) or the intent-level knowledge directory (`knowledge/`)
 - **When** the gate runs
-- **Then** the file is recorded as a drift event with `file class: knowledge-input`, `owning stage: inception`, and "new file" signal
+- **Then** the file is recorded as a drift event with `file_class: "knowledge-input"`, `stage_owner` set to the owning stage, and "new file" signal (no baseline SHA)
 - **And** the agent's classification is dispatched
 
 #### AC-KI2: Knowledge integration during elaborate-class phases biases toward `inline-fix`
@@ -383,7 +506,7 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 #### AC-UO1: Unit-output tracking boundary is design-stage decision
 
-- **Open in design (Open for Design / "Tracked-surface boundary"):** Whether files inside `units/{unit-slug}/` working directories are part of the tracked surface in v1 is a design-stage decision. AC for this class will be added at design-refinement time after the boundary is drawn.
+- **Open in design (TRACKED-SURFACE-BOUNDARY.md §2):** Whether files inside `units/{unit-slug}/` working directories are part of the tracked surface in v1 is a design-stage decision. The default tracked surface as defined in ARCHITECTURE.md §3.3 does not include unit working directories. AC for this class will be added at design-refinement time if the boundary is extended.
 
 ---
 
@@ -391,37 +514,39 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 #### AC-T1: Text-file diff is presented to the agent
 
-- **Given** a drifted file is text (mime detection or extension-based heuristic — design-stage decision)
+- **Given** a drifted file is text (mime detection or extension-based heuristic per TRACKED-SURFACE-BOUNDARY.md §5.1)
 - **When** `manual_change_assessment` is emitted
-- **Then** the action payload includes a unified diff between the prior baseline content and the observed content
+- **Then** the action payload includes a standard unified diff (three lines of context) between the prior baseline content and the observed content
 - **And** the diff is suitable for the agent to read and reason about
 
-#### AC-T2: Diff size has a reasonable cap
+#### AC-T2: Diff size has a reasonable cap — ARCHITECTURE.md §3.6
 
-- **Given** a drifted file's unified diff exceeds a configured size cap (design-stage decision; e.g., 200KB)
+- **Given** a drifted file's unified diff exceeds the configured size cap (ARCHITECTURE.md §3.6: first 200 lines)
 - **When** the action payload is constructed
-- **Then** the diff is truncated with a "[truncated — view full file]" marker
+- **Then** the diff is truncated with a trailing note indicating truncation
 - **And** the file's full path is included so the agent can inspect via `haiku_knowledge_read` or equivalent if classification requires it
 
 ---
 
 ### Variant: File Payload Type — `binary`
 
-#### AC-B1: Binary drift presents a degraded payload
+#### AC-B1: Binary drift presents a degraded payload — ARCHITECTURE.md §3.6, TRACKED-SURFACE-BOUNDARY.md §5.4
 
-- **Given** a drifted file is binary (e.g., `.png`, `.jpg`, `.figma`, `.pdf`)
+- **Given** a drifted file is binary (extension matches TRACKED-SURFACE-BOUNDARY.md §5.2 list, or byte content contains null bytes in first 8,192 bytes)
 - **When** `manual_change_assessment` is emitted
-- **Then** the action payload includes: file path, owning stage, file class, "binary" payload type, prior baseline SHA, observed SHA, prior file size, observed file size, mime hint
+- **Then** the action payload includes: file path, owning stage, file class, "binary" payload type, prior baseline SHA, observed SHA, `is_binary: true`, `diff_payload: null`
 - **And** no textual diff is included
 
-#### AC-B2: Default classification for binary drift is `inline-fix` unless context dictates otherwise
+#### AC-B2: Default classification for binary drift is `surface-as-feedback` absent stage context — ARCHITECTURE.md §4.5, TRACKED-SURFACE-BOUNDARY.md §5.5
 
-- **Given** a binary drift event
-- **When** the agent classifies the event with no contradicting context
-- **Then** the recommended classification is `inline-fix` (acknowledge the human's intent, update the baseline, fold into the current bolt)
-- **And** `trigger-revisit` is appropriate when the binary is owned by an earlier stage and the size delta or context strongly suggests a redesign rather than a tweak
-- **And** `ignore` is appropriate when the binary's content is known to be regenerable and the change is non-substantive (e.g., a re-export with metadata-only changes)
-- **Note:** Agent-judgment guideline.
+- **Given** a binary drift event with no contradicting stage context
+- **When** the agent classifies the event
+- **Then** the default classification is `surface-as-feedback` with rationale "Binary file changed; content diff unavailable. Surfacing for human review."
+- **When** the intent is in the `design` stage and the changed file is under `stages/design/artifacts/` and the active hat involves design artifact production
+- **Then** the agent MAY classify as `inline-fix` based on the unambiguous context (designer replacement)
+- **When** the file is under `knowledge/` and the event type is `added`
+- **Then** the agent SHOULD classify as `inline-fix` (fold the reference into the next elaboration bolt)
+- **Note:** Agent-judgment guidelines. Harness does not enforce specific outcomes for binary events.
 
 #### AC-B3: Vision tool invocation is permitted but not required
 
@@ -434,42 +559,46 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 ### Variant: Stage-of-Ownership — `current`
 
-#### AC-CO1: Current-stage drift never triggers revisit
+#### AC-CO1: Current-stage drift cannot trigger revisit
 
 - **Given** a drift event whose owning stage equals the active stage
 - **When** the agent classifies the event
-- **Then** the classification options are `ignore`, `inline-fix`, or `surface-as-feedback`
+- **Then** the valid classification options are `ignore`, `inline-fix`, or `surface-as-feedback`
 - **And** `trigger-revisit` is not a valid outcome for current-stage drift (revisit-of-self is a no-op)
+- **And** if the agent attempts to classify as `trigger-revisit` for a current-stage finding, the harness rejects it with a redirect to one of the three valid current-stage outcomes
 
 ---
 
 ### Variant: Stage-of-Ownership — `earlier`
 
-#### AC-EO1: Earlier-stage drift may classify to any of the four outcomes
+#### AC-EO1: Earlier-stage drift may classify to any of the four outcomes — DEC-5
 
 - **Given** a drift event whose owning stage is earlier than the active stage
 - **When** the agent classifies the event
 - **Then** all four classification outcomes are valid (`ignore`, `inline-fix`, `surface-as-feedback`, `trigger-revisit`)
 - **And** the rationale should reflect the cross-stage nature of the change
+- *Cites: DEC-5.*
 
-#### AC-EO2: `inline-fix` on earlier-stage drift does not advance or rewind the workflow
+#### AC-EO2: `inline-fix` on earlier-stage drift does not advance or rewind the workflow — DEC-5
 
 - **Given** an `inline-fix` classification on earlier-stage drift
 - **When** the classification is recorded
 - **Then** the baseline updates immediately
 - **And** the workflow stays on the active stage (no revisit, no re-run of the earlier stage's gate)
 - **And** the agent's notion of the earlier stage's outputs is updated for downstream reference but the workflow does not re-validate
+- *Cites: DEC-5.*
 
 ---
 
 ### Variant: Operating Mode — `interactive` / `pickup` / `autopilot`
 
-#### AC-OM1: Detection and classification behave identically across modes
+#### AC-OM1: Detection and classification behave identically across modes — DEC-6
 
 - **Given** any operating mode
 - **When** drift is detected and classified
 - **Then** the gate, the action emission, the four-outcome classification, and the baseline-update contract are identical
 - **And** the assessment record is durable across all modes (visible in SPA, persisted on disk)
+- *Cites: DEC-6 (all three change types covered by one mechanism; same action regardless of mode).*
 
 #### AC-OM2: v1 default in autopilot mode is silent classification
 
@@ -487,10 +616,12 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 - **Given** an `ignore` classification
 - **When** the classification is recorded
-- **Then** the baseline SHA updates to the observed SHA
+- **Then** the baseline SHA updates to the observed SHA immediately
 - **And** no feedback item is created
 - **And** no revisit is dispatched
+- **And** no pending-assessment marker is written
 - **And** the assessment record is the only durable artifact of the event
+- **And** on the next tick, the drift gate sees the new SHA as the expected state and emits no event for this file
 
 ---
 
@@ -500,57 +631,72 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 - **Given** an `inline-fix` classification on the active stage's current unit
 - **When** the classification is recorded
-- **Then** the baseline SHA updates to the observed SHA
+- **Then** the baseline SHA updates to the observed SHA immediately
 - **And** the agent's next action in the bolt treats the human's edit as the input baseline (e.g., "extend this" works against the post-edit content)
 - **And** no feedback item is created
 - **And** no revisit is dispatched
+- **And** no pending-assessment marker is written
 
 ---
 
 ### Variant: Classification Outcome — `surface-as-feedback`
 
-#### AC-SF1: `surface-as-feedback` creates a normal feedback item
+#### AC-SF1: `surface-as-feedback` creates a normal feedback item and does NOT update the baseline — ARCHITECTURE.md §4.4.3
 
 - **Given** a `surface-as-feedback` classification
 - **When** the classification is recorded
 - **Then** a feedback item is created via the existing feedback mechanism (`haiku_feedback`) on the owning stage
-- **And** the feedback's `origin` is set to a value that identifies it as drift-derived (working name: `manual-change-assessment` — design-stage decision)
+- **And** the feedback's `origin` is set to a value that identifies it as drift-derived (working name: `agent-detected`)
 - **And** the feedback's body cites the file path, the diff (truncated if necessary), and the agent's rationale
+- **And** the baseline SHA is **NOT** updated at this time — the baseline holds at the pre-edit SHA
+- **And** a pending-assessment marker is written linking the file path to the feedback item
+- *Cites: ARCHITECTURE.md §4.4.3: "What happens to the baseline: The baseline is not updated at classification time. Instead, a pending-assessment marker is written..."*
 
-#### AC-SF2: Pending-assessment marker is keyed to the feedback item
+#### AC-SF2: Pending-assessment marker is keyed to the feedback item and suppresses re-detection
 
-- **Given** a `surface-as-feedback` classification
-- **When** the assessment record and feedback item are written
-- **Then** a pending-assessment marker is recorded that links the file path to the feedback item ID
-- **And** the marker prevents re-detection of drift on this file while the feedback is open
-- **Note:** Pending-assessment marker storage is open in design.
+- **Given** a `surface-as-feedback` classification and pending-assessment marker written
+- **When** subsequent ticks run
+- **Then** the drift-detection gate reads the marker and suppresses drift events for this file
+- **And** if the file's SHA changes again while the marker is open (human made a second edit), the gate detects the SHA change against the marker's `baseline_sha_at_creation`, removes the stale marker, and emits a new drift event
+- *Cites: ARCHITECTURE.md §5.2 (marker storage), §5.3 (marker read behavior — double-edit case).*
 
-#### AC-SF3: Closing the feedback clears the marker and updates the baseline
+#### AC-SF3: Only `closed` and `rejected` feedback transitions clear the marker — ARCHITECTURE.md §5.3
 
 - **Given** an open pending-assessment marker linked to feedback item FB-NN
-- **When** FB-NN's status transitions to `addressed`, `closed`, or `rejected`
-- **Then** the marker clears
+- **When** FB-NN's status transitions to `closed`
+- **Then** the marker is cleared
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
-- **And** the next tick observes no drift on this file (assuming no further human edit since)
+- **When** FB-NN's status transitions to `rejected`
+- **Then** the marker is cleared
+- **And** the baseline SHA updates to the file's SHA at marker-clearing time
+- **When** FB-NN's status transitions to `addressed`
+- **Then** the marker is **NOT** cleared — `addressed` is not a terminal state for marker clearing
+- **And** the drift-detection gate continues to suppress re-emission for this file
+- **Rationale:** `addressed` FBs can be reopened; only truly terminal states (`closed`, `rejected`) provide the certainty needed to update the baseline and stop suppression. This is the conservative path. (ARCHITECTURE.md §5.3)
+- **And** the next tick after marker clearing observes no drift on this file (assuming no further human edit since marker-clearing time)
+- *Cites: ARCHITECTURE.md §5.3 (marker lifecycle — "when the feedback item transitions to a terminal state (closed or rejected)").*
 
 ---
 
 ### Variant: Classification Outcome — `trigger-revisit`
 
-#### AC-TR1: `trigger-revisit` invokes revisit on the owning stage
+#### AC-TR1: `trigger-revisit` invokes revisit on the owning stage and does NOT update the baseline — ARCHITECTURE.md §4.4.4
 
 - **Given** a `trigger-revisit` classification on a drift event whose owning stage is earlier than the active stage
 - **When** the classification is recorded
-- **Then** a revisit is dispatched targeting the owning stage (existing `haiku_revisit` mechanism or equivalent workflow path — design-stage decision on whether to use the existing revisit action or a new dispatch)
+- **Then** a revisit is dispatched targeting the owning stage (existing `haiku_revisit` mechanism)
 - **And** a pending-assessment marker is recorded linking the file path to the revisit dispatch
-- **And** the baseline SHA does not update at classification time
+- **And** the baseline SHA does **NOT** update at classification time
+- **And** the active stage transitions to `awaiting-revisit-resolution` (per AC-G5-A) for the duration of the pending marker
+- *Cites: ARCHITECTURE.md §4.4.4: "What happens to the baseline: Same as surface-as-feedback — the baseline is not updated at classification time."*
 
-#### AC-TR2: Revisit completion clears the marker and updates the baseline
+#### AC-TR2: Revisit completion clears the marker and updates the baseline — ARCHITECTURE.md §5.3
 
 - **Given** an open pending-assessment marker linked to a revisit dispatch
 - **When** the targeted stage re-passes its gate (revisit completes)
-- **Then** the marker clears
+- **Then** the marker is cleared
 - **And** the baseline SHA updates to the file's SHA at marker-clearing time
+- **And** the active stage exits `awaiting-revisit-resolution` and normal workflow resumes
 
 #### AC-TR3: Revisit on the same stage as a drifted file is not allowed for current-stage drift
 
@@ -573,10 +719,11 @@ The behavior of out-of-band detection and reaction varies along the following di
 
 #### AC-EE2: Tracked file deleted by human
 
-- **Given** a tracked file is deleted from the worktree (e.g., `rm` or SPA delete affordance — if any)
+- **Given** a tracked file is deleted from the worktree (e.g., `rm`)
 - **When** the gate runs
-- **Then** a drift event is recorded with payload type `deleted` and observed SHA `null`
-- **And** the agent's classification covers deletions (the four outcomes apply, with semantics: `ignore` = the deletion stands and baseline drops; `inline-fix` = the agent re-creates the file; `surface-as-feedback` = open feedback that the file was deleted; `trigger-revisit` = revisit the owning stage)
+- **Then** a drift event is recorded with `event_type: "deleted"` and `current_sha: null`
+- **And** the agent's classification covers deletions (the four outcomes apply, with semantics: `ignore` = the deletion stands and baseline drops; `inline-fix` = the agent re-creates the file from its last-known content; `surface-as-feedback` = open feedback that the file was deleted unexpectedly; `trigger-revisit` = revisit the owning stage because the deleted file was foundational)
+- **And** the agent does NOT automatically restore the deleted file — restoration is a classification outcome the agent may choose to implement as `inline-fix`
 
 #### AC-EE3: Tracked-surface boundary violation — file written outside watched paths
 
@@ -585,41 +732,42 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **Then** the gate does not detect the file
 - **And** no drift event is emitted
 - **And** the framework's behavior is unchanged from pre-feature behavior for that file
-- **Note:** This is an accepted v1 limitation. Out-of-band writes outside the tracked surface are invisible to detection.
+- **Note:** This is an accepted v1 limitation. Out-of-band writes outside the tracked surface are invisible to detection (DISCOVERY.md § "Implicit detection misses non-tracked files").
 
-#### AC-EE4: Baseline file storage corrupted or missing
+#### AC-EE4: Baseline file storage corrupted or missing — ARCHITECTURE.md §8.2, §8.1
 
-- **Given** the per-stage baseline storage is corrupted (parse error) or missing on a tick
+- **Given** the per-stage `baseline.json` is corrupted (parse error or invalid structure)
 - **When** the gate attempts to read it
-- **Then** the gate logs a recoverable error
-- **And** the gate falls back to the first-tick-after-upgrade behavior (re-establish baselines, no `manual_change_assessment` emitted on this tick)
-- **And** subsequent ticks resume normal operation
+- **Then** the gate emits a `baseline_corrupt` signal; the tick does not advance to per-state dispatch
+- **And** the workflow engine surfaces an error to the agent: "Baseline file for stage `{stage}` is corrupt. Run `haiku_repair` to re-establish the baseline."
+- **Given** the per-stage `baseline.json` is absent on a non-first-tick scenario (e.g., after a git operation that removed it)
+- **When** the gate runs
+- **Then** the gate falls back to establish mode (re-enumerates tracked surface, writes new baseline, emits zero drift events for this tick)
 
 #### AC-EE5: Agent classification times out or fails
 
 - **Given** the agent receives a `manual_change_assessment` action and fails to produce a classification (timeout, error)
 - **When** the next tick runs
-- **Then** the drift event is re-presented to the agent (the unresolved drift is still observable on the gate)
+- **Then** the drift event is re-presented to the agent (the unresolved drift is still observable on the gate because the baseline was not updated and no marker was written)
 - **And** the assessment record marks the prior attempt as failed for audit purposes
 - **And** no baseline update occurs from the failed attempt
 
-#### AC-EE6: Same file drifts a second time while a pending-assessment marker is open
+#### AC-EE6: Same file drifts a second time while a pending-assessment marker is open — ARCHITECTURE.md §5.3
 
 - **Given** an open pending-assessment marker on file F (from a `surface-as-feedback` outcome)
-- **And** the file F is edited again before the marker clears
+- **And** the file F is edited again before the marker clears, such that F's current SHA now differs from the marker's `baseline_sha_at_creation`
 - **When** the gate runs
-- **Then** the gate skips F (per AC-G4, AC-SF2)
-- **And** no second drift event is emitted for F
-- **And** when the underlying feedback closes, the baseline updates to F's then-current SHA (capturing the second edit silently)
-- **Note:** This is an accepted simplification for v1. The second edit is bundled into the resolution of the first finding. A future enhancement may surface "marker re-trigger" events.
+- **Then** the gate detects the SHA mismatch against `baseline_sha_at_creation`, treats the marker as stale, removes it, and emits a new drift event for F
+- **And** the new drift event is presented to the agent for fresh classification
+- **Note:** This ensures double-edits are not silently suppressed. The second edit is treated as a new finding, not bundled into the original.
 
 #### AC-EE7: User overrides classification via SPA (US-06)
 
 - **Given** an assessment record with classification outcome `ignore`
 - **When** the user opens the assessment in the SPA and selects an override (e.g., "elevate to trigger-revisit") with a reason
-- **Then** the assessment record is updated with `override.outcome` and `override.reason` and `override.author` (human user)
+- **Then** the assessment record is updated with `override.outcome`, `override.reason`, and `override.author` (human user)
 - **And** the corresponding side effects fire (revisit dispatched in this case, baseline rolled back if the original classification had updated it, pending-assessment marker recorded if applicable)
-- **Note:** Override mechanics are P1 (US-06). v1 may ship without override and rely on the user creating manual feedback to correct misclassifications.
+- **Note:** Override mechanics are P1 (US-06). v1 may ship without override and rely on the user creating manual feedback to correct misclassifications. AC-EE7 is specified here even at P1 priority so the data model is correct from the start.
 
 ---
 
@@ -628,34 +776,63 @@ The behavior of out-of-band detection and reaction varies along the following di
 ### P0 (must-have for completion)
 
 - US-01, US-02, US-03, US-04, US-05, US-07, US-08, US-09, US-11, US-12
-- All General Rules AC-G1 through AC-G12
-- All Variant ACs except: AC-SU1/AC-SU2/AC-SU3 (SPA upload — P1), AC-AB4 (deferred to design), AC-UO1 (deferred to design), AC-EE7 (override — P1)
-- Edge cases AC-EE1 through AC-EE6
+- All General Rules AC-G1 through AC-G13
+- All Trust+Audit ACs: AC-TA1, AC-TA2, AC-TA3, AC-TA4
+- All Alias Canonicalization ACs: AC-ALIAS1, AC-ALIAS2, AC-ALIAS3
+- AC-FS1, AC-FS2, AC-FS3 (filesystem-drop variant)
+- AC-AB1, AC-AB2, AC-AB3 (agent-on-behalf variant — AC-AB4 is replaced by AC-TA1 through AC-TA4)
+- AC-SO1, AC-SO2 (stage-output variant)
+- AC-KI1, AC-KI2 (knowledge-input variant)
+- AC-T1, AC-T2 (text payload variant)
+- AC-B1, AC-B2, AC-B3 (binary payload variant)
+- AC-CO1 (current stage-of-ownership)
+- AC-EO1, AC-EO2 (earlier stage-of-ownership)
+- AC-OM1, AC-OM2 (operating mode variant)
+- AC-CI1, AC-IF1, AC-SF1, AC-SF2, AC-SF3, AC-TR1, AC-TR2, AC-TR3 (classification outcome variants)
+- AC-EE1 through AC-EE6 (edge cases)
 
 ### P1 (follow-up)
 
 - US-06 (SPA override of classification)
 - US-10 (SPA upload affordance per stage — filesystem drop covers base case)
 - AC-SU1, AC-SU2, AC-SU3 (SPA upload variant ACs)
-- AC-EE7 (SPA classification override)
+- AC-EE7 (SPA classification override — specified at P1 for data-model completeness)
 
-### Open / Deferred to Design
+### Open / Deferred
 
-- AC-AB4 (Human-write-path integrity stance — Decision 9 in inception)
-- AC-UO1 (Tracked-surface boundary on `units/` — Open for Design)
-- AC-T2 size cap value (e.g., 200KB) — design-stage tunable
-- AC-FS3 specific temp-file pattern set — design-stage decision
-- Pending-assessment marker storage location — design-stage decision (named in inception's Open for Design)
-- Baseline storage location — design-stage decision (named in inception's Open for Design)
+- AC-UO1 (Tracked-surface boundary on `units/` — design-stage decision, not resolved in v1 default)
+- AC-T2 size cap value — ARCHITECTURE.md §3.6 specifies first 200 lines; exact KB threshold is development-stage tunable
+- AC-FS3 specific temp-file pattern set — TRACKED-SURFACE-BOUNDARY.md defers exact list to development
+
+---
+
+## Internal Consistency Notes
+
+This document is internally consistent with the following design-stage artifacts:
+
+| AC or section | Consistent with |
+|---|---|
+| AC-G4 (baseline NOT updated on surface-as-feedback) | ARCHITECTURE.md §4.4.3, §5.4 (the baseline-update contract table) |
+| AC-G5 (closed/rejected clear; addressed does not) | ARCHITECTURE.md §5.3 ("when the feedback item transitions to a terminal state (closed or rejected)") |
+| AC-G5-A (awaiting-revisit-resolution state) | ARCHITECTURE.md §5.5 |
+| AC-G8 (establish, don't fire) | ROLLOUT-AND-BASELINE-ESTABLISHMENT.md §3.1, ARCHITECTURE.md §3.4 |
+| AC-G10 (unified detection path for all three write origins) | ARCHITECTURE.md §10 (Decision 1 traceability row) |
+| AC-TA1 (no interrupt confirmation in v1) | ARCHITECTURE.md §6.3, MCP-TOOL-CONTRACT.md §10 |
+| AC-TA2/TA3 (audit log append-only, human-readable) | MCP-TOOL-CONTRACT.md §8.3 |
+| AC-ALIAS1/ALIAS2/ALIAS3 (artifacts/ canonical) | TRACKED-SURFACE-BOUNDARY.md §0, §6 |
+| AC-SF3 (`addressed` does NOT clear marker) | ARCHITECTURE.md §5.3 (terminal states for marker clearing) |
+| AC-TR1 (baseline not updated at trigger-revisit time) | ARCHITECTURE.md §4.4.4, §5.4 |
+
+No AC in this document contradicts ARCHITECTURE.md gate ordering, MCP-TOOL-CONTRACT.md tool semantics, or TRACKED-SURFACE-BOUNDARY.md path rules. Every structural claim references the authoritative design artifact where the detail originates.
 
 ---
 
 ## Context Boundaries (Cross-Cutting Notes)
 
-These are observations that surfaced while researching acceptance criteria but whose substance belongs in sibling product-stage artifacts. They are noted here so they are not lost at integration time, but the substance is left for the sibling agent to author.
+These are observations that surfaced while drafting acceptance criteria but whose substance belongs in sibling product-stage artifacts.
 
-- **Behavioral spec dependency** — The `manual_change_assessment` action's exact payload shape, ordering relative to existing pre-tick gates (feedback-triage), and lifecycle inside the workflow engine are behavioral-spec territory. AC-G2 references the action and its payload at the user-observable level; the wire-level spec belongs in BEHAVIORAL-SPEC.
-- **Data contracts dependency** — The on-disk shape of the baseline record, the pending-assessment marker, and the assessment record (frontmatter fields, file naming, directory layout) are data-contract territory. AC-G4 / AC-G5 / AC-G11 reference these at the user-observable level (durability, survival across operations); the schema belongs in DATA-CONTRACTS.
-- **Coverage mapping dependency** — Mapping each AC above to specific test layers (unit, integration, e2e) and identifying which existing test surfaces (the orchestrator harness, the SPA's playwright suite, etc.) cover which AC is COVERAGE-MAPPING territory.
-- **Security boundary (not in this stage)** — The "Hook bypass becomes a liability" risk in inception names a security concern that may produce a separate inception/design pass on the human-write-path integrity (Decision 9). This is referenced in AC-AB4 as deferred; the substance lives wherever Decision 9 is finally settled, not in this artifact.
-- **Migration / upgrade story** — AC-G8 covers the user-facing first-tick-after-upgrade behavior; the operations and rollout story (feature flag, staged rollout, telemetry on the first-tick storm) lives in the operations stage, not here.
+- **Behavioral spec dependency** — The `manual_change_assessment` action's exact payload shape, ordering relative to existing pre-tick gates, and lifecycle inside the workflow engine are behavioral-spec territory. AC-G2 and AC-G13 reference these at the user-observable level; the wire-level spec belongs in BEHAVIORAL-SPEC.md and in `.feature` files.
+- **Data contracts dependency** — The on-disk shape of `baseline.json`, `drift-markers.json`, `write-audit.jsonl`, and the assessment record (DA-NN.json) are data-contract territory. AC-G4, AC-G5, AC-G11 reference these at the user-observable level (durability, survival across operations); the schema belongs in DATA-CONTRACTS.md.
+- **Coverage mapping dependency** — Mapping each AC above to specific test layers (unit, integration, e2e) is COVERAGE-MAPPING.md territory.
+- **Security boundary** — AC-TA1 through AC-TA4 close DEC-9. The broader hook-bypass-as-liability risk (DISCOVERY.md §Risks) that might produce v2 harness-level enforcement lives outside this artifact.
+- **Migration / upgrade story** — AC-G8 covers the user-facing first-tick-after-upgrade behavior; the operations and rollout story (feature flag, staged rollout, telemetry on the first-tick storm) is ROLLOUT-AND-BASELINE-ESTABLISHMENT.md territory.

@@ -1,7 +1,7 @@
 {
   "stage": "product",
   "status": "active",
-  "phase": "elaborate",
+  "phase": "gate",
   "started_at": "2026-04-28T23:51:01Z",
   "completed_at": null,
   "gate_entered_at": null,
@@ -25,7 +25,7 @@
       "feedback_signature": "sig:cd4390ca"
     }
   ],
-  "elaboration_turns": 9,
+  "elaboration_turns": 12,
   "decision_log": [
     {
       "decision": "Behavioral test framework",

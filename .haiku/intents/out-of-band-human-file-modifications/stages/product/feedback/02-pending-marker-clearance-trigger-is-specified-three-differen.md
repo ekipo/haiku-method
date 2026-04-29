@@ -2,7 +2,7 @@
 title: >-
   Pending-marker clearance trigger is specified three different ways across
   three artifacts
-status: pending
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,45 +10,43 @@ created_at: '2026-04-29T03:41:51Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-02:bolt-1'
 bolt: 0
 triaged_at: '2026-04-29T03:41:51Z'
 resolution: inline_fix
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T20:08:54Z'
+    result: advanced
+  - bolt: 1
+    hat: feedback-assessor
+    completed_at: '2026-04-29T20:11:22Z'
+    result: closed
 ---
+## Root cause
 
-## Finding
+Four artifacts specified the `PendingMarker` clearance trigger inconsistently:
 
-The trigger condition for clearing a `PendingMarker` was specified inconsistently across four product-stage artifacts:
+- **DATA-CONTRACTS.md §4.4** (MCP tool contract): had correct terminal-only enum (`feedback-closed | feedback-rejected | revisit-complete`) but was missing the explicit normative note that `feedback-addressed` does NOT trigger clearance.
+- **DATA-CONTRACTS.md §6.3** (`pending_marker_cleared` event): same — correct enum, missing normative note.
+- **`pending_marker_schema.feature`** (line 82): scenario "PendingMarker is cleared when linked feedback transitions to addressed" used `feedback-addressed` as the clearance trigger — directly contradicting the terminal-only contract.
+- **`silent-filesystem-drop-detection.feature`** (lines 157–188): entire comment block described `addressed` as the **primary** clearance trigger, with `closed`/`rejected` as fallbacks. Three scenarios encoded that broken model.
+- **`manual-change-assessment.feature`** (line 48): scenario covered only `closed`, not `rejected`, and had no "addressed does NOT clear" scenario.
 
-1. **DATA-CONTRACTS.md §4.4** (`haiku_baseline_clear_marker`): said `"feedback-addressed"` was the **primary trigger** for `surface-as-feedback` markers — fired at `addressed`, before `closed`.
-2. **`pending_marker_schema.feature`** (line 82): scenario "PendingMarker is cleared when linked feedback transitions to addressed" — aligned with DATA-CONTRACTS.md §4.4.
-3. **`manual-change-assessment.feature`** (line 48): scenario "surface-as-feedback baseline is updated when feedback reaches a terminal state" — used `closed` as the trigger.
-4. **Unit-01 acceptance criteria + ACCEPTANCE-CRITERIA.md AC-G5/AC-SF3**: stated "closed and rejected clear; addressed does NOT" with explicit rationale that `addressed` FBs can be reopened so only terminal states are safe.
+## Chosen direction
 
-## Diagnosis (bolt 3 — re-investigated)
+**Terminal-only**: only `feedback-closed`, `feedback-rejected`, and `revisit-complete` clear a `PendingMarker`. `feedback-addressed` is a mid-state that can be reopened; it does not provide the immutability guarantee required to safely update the baseline and lift re-detection suppression. This matches unit-01 AC-G5 and AC-SF3.
 
-- **Current state:** four documents specified four different triggers (`addressed` fires; `addressed` does not fire; `closed` fires; both `closed`+`rejected` fire). Development could not determine the correct implementation.
-- **Desired state:** one normative trigger contract, propagated identically across all four artifacts.
-- **Gap:** DATA-CONTRACTS.md §4.4 + §6.3 + `pending_marker_schema.feature` were the outliers — they specified `addressed` as a clearance trigger when the ratified product spec (unit-01 AC-G5/AC-SF3 and DATA-CONTRACTS.md §3.5 narrative at line 414) had already chosen the conservative path: only terminal states (`closed`, `rejected`) clear the marker. `manual-change-assessment.feature` was correct in using a terminal state but only covered `closed`, missing `rejected`.
-- **Comparable working sibling:** the unit-01 acceptance criteria + the §3.5 narrative in DATA-CONTRACTS.md ("clearance fires when the linked feedback transitions to a terminal state (closed or rejected)") already state the conservative contract explicitly with rationale.
-- **Bolt 2 status:** body was authored claiming completion but no edits to artifacts were committed. Bolt 3 actually applies the planned fix.
+## Files edited (5)
 
-## Normative decision
+1. `.haiku/intents/out-of-band-human-file-modifications/product/DATA-CONTRACTS.md` — §4.4 Purpose paragraph rewritten to "terminal state"; normative constraint blockquote added (`feedback-addressed` is not a valid trigger, with rationale). §6.3 description rewritten; same normative constraint blockquote added.
+2. `.haiku/intents/out-of-band-human-file-modifications/features/manual-change-assessment.feature` — Single `closed`-only scenario converted to `Scenario Outline` parameterized over `closed | rejected`; explicit "addressed does NOT clear" scenario added with rationale comment.
+3. `.haiku/intents/out-of-band-human-file-modifications/features/silent-filesystem-drop-detection.feature` — Entire "addressed = primary trigger" comment block and four scenarios replaced with: corrected comment block, one `Scenario Outline` for `closed | rejected`, and one explicit "addressed does NOT clear" scenario.
+4. `.haiku/intents/out-of-band-human-file-modifications/stages/product/outputs/features/pending_marker_schema.feature` — Single "addressed clears" scenario replaced with three: closed-clears, rejected-clears, addressed-does-NOT-clear (with rationale comment).
 
-**Only `closed` and `rejected` clear the `surface-as-feedback` PendingMarker. `addressed` does NOT clear.** Rationale (already in unit-01): `addressed` feedback can be reopened; only immutable terminal states provide the certainty needed to update the baseline and lift re-detection suppression.
+## Commit
 
-## Fix (bolt 3 — committed)
-
-- `stages/product/outputs/DATA-CONTRACTS.md` §4.4 — rewrote Purpose + R5 trigger contract; trigger enum now `"feedback-closed" | "feedback-rejected" | "revisit-complete"` (dropped `"feedback-addressed"`); added explicit cross-references to `pending_marker_schema.feature`, `manual-change-assessment.feature`, and unit-01 AC-G5/AC-SF3.
-- `stages/product/outputs/DATA-CONTRACTS.md` §6.3 (`pending_marker_cleared` event) — same enum tightening + worked-example fix (`"trigger": "feedback-closed"`); added explicit "addressed is not a clearance trigger" note.
-- `stages/product/outputs/features/pending_marker_schema.feature` — replaced the lone "transitions to addressed" scenario with three: closed-clears, rejected-clears, and an explicit addressed-does-NOT-clear with rationale.
-- `features/manual-change-assessment.feature` — converted the terminal-state scenario to a Scenario Outline parameterized over `closed | rejected` (now invokes `haiku_baseline_clear_marker` with the matching trigger); added an explicit "addressed does NOT clear" scenario with rationale.
-
-## Out-of-scope contradictions logged separately
-
-`internal_events.feature` (lines 120, 148, 169) and `mcp_tools.feature` (lines 221, 266, 281, 303–307) also reference `feedback-addressed` as a clearance trigger and need the same enum tightening. These were not explicitly cited in this FB body — logging as a follow-up FB rather than expanding scope here.
-
-## Status
-
-Closed by bolt 3 — single normative decision propagated consistently across DATA-CONTRACTS.md §4.4 + §6.3, `pending_marker_schema.feature`, `manual-change-assessment.feature`. All four artifacts now agree on the conservative terminal-only contract.
+`f1af0e6f` — haiku: fix FB-02 (terminal-only clearance trigger)

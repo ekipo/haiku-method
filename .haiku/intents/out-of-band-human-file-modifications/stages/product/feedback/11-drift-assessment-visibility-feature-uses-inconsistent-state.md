@@ -2,7 +2,7 @@
 title: >-
   drift-assessment-visibility.feature uses inconsistent state names not grounded
   in Assessment schema
-status: pending
+status: closed
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -10,32 +10,37 @@ created_at: '2026-04-29T03:43:29Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-11:bolt-1'
 bolt: 0
 triaged_at: '2026-04-29T03:43:29Z'
 resolution: inline_fix
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T20:07:46Z'
+    result: advanced
+  - bolt: 1
+    hat: feedback-assessor
+    completed_at: '2026-04-29T20:11:48Z'
+    result: closed
 ---
+## Diagnosis
 
-## Finding
+**Root cause:** `drift-assessment-visibility.feature` used three inconsistent state names for the pending-revisit lifecycle:
+- `"revisit-triggered"` (line 49) — non-canonical identifier with no grounding in any schema
+- `"resolved"` (line 57) — undefined in the Assessment schema, no citation to PendingMarker fields
+- Transition chain `pending-revisit → revisit-triggered → resolved` — used non-canonical middle state
 
-`drift-assessment-visibility.feature` uses three state names for the pending-revisit lifecycle that are inconsistent with each other and with the `Assessment.revisit_invoked_at` field defined in DATA-CONTRACTS.md §2.3:
+**DATA-CONTRACTS.md §2.3** defines `Assessment.outcome === "trigger-revisit"` as the trigger condition. **§2.2** defines `PendingMarker.cleared_at` and `PendingMarker.resolved_sha` as the fields driving state transitions.
 
-- Line 44: `"pending-revisit"` — used for state before haiku_revisit is called (consistent with DATA-CONTRACTS.md)
-- Line 49: `"revisit-triggered"` — used for state after haiku_revisit is called on the next tick
-- Line 56: `"resolved"` — used for final state after the revisited stage re-passes its gate
+## Fix applied (commit 26827467)
 
-**DATA-CONTRACTS.md §2.3** (reconciliation requirement R7) defines exactly two states:
-- `pending-revisit`: `Assessment.outcome === "trigger-revisit"` AND `revisit_invoked_at IS NULL`
-- `revisit-invoked`: `revisit_invoked_at` is set to a non-null timestamp
+File: `.haiku/intents/out-of-band-human-file-modifications/features/drift-assessment-visibility.feature`
 
-The feature file's `"revisit-triggered"` (line 49) does not match the contract's `"revisit-invoked"`. These are different identifiers and the feature file does not define a mapping. A third state `"resolved"` (line 56) is also undefined in DATA-CONTRACTS.md — the contract shows only two states in the Assessment lifecycle.
-
-This is a completeness failure: the behavioral specification for the SPA's pending-revisit state transition does not use the canonical state names defined in the data contracts. The development stage cannot implement a consistent state machine from this spec.
-
-## Required fix
-
-`drift-assessment-visibility.feature` must use the canonical state names from DATA-CONTRACTS.md §2.3:
-- `"pending-revisit"` (before `haiku_revisit` is called — correct at line 44)
-- `"revisit-invoked"` (after `haiku_revisit` is called — replace `"revisit-triggered"` at line 49)
-- Define or cite what `"resolved"` means (line 56) — this state name is not in the Assessment schema and needs either a definition or a reference to a named status transition
+1. **Line ~49:** Replaced `"revisit-triggered"` with canonical `"revisit-invoked"` — matches the state name grounded in `Assessment.outcome === "trigger-revisit"` AND `haiku_revisit` having been called (§2.3).
+2. **SPA `pending-revisit` state pinned:** Added inline comment grounding it as `Assessment.outcome === "trigger-revisit"` AND `PendingMarker.cleared_at == null` (DATA-CONTRACTS.md §2.2).
+3. **SPA `resolved` state pinned:** Added inline comment grounding it as `PendingMarker.resolved_sha != null` — set atomically with `cleared_at` at marker clearance per §2.2.
+4. **Transition chain corrected:** `pending-revisit → revisit-invoked → resolved` — all three references to `"revisit-triggered"` replaced, chain now reads correctly in both scenario steps.
+5. **Badge text (Scenario Outline line ~119):** Updated `"Revisit triggered"` to `"Revisit invoked"` so badge matches state name. Added inline comment that badge text may diverge from enum if future design requires user-friendlier wording.

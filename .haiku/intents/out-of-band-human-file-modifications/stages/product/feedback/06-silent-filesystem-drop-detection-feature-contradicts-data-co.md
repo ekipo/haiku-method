@@ -2,7 +2,7 @@
 title: >-
   silent-filesystem-drop-detection.feature contradicts DATA-CONTRACTS.md on
   marker-clearing trigger
-status: pending
+status: fixing
 origin: adversarial-review
 author: completeness
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T03:42:33Z'
 resolution: null
 replies: []

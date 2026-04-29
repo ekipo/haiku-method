@@ -49,6 +49,7 @@ Feature: Manual change assessment classification by the agent
     And a pending-assessment marker is written for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
     And the PendingMarker and ManualChangeAssessment record are written in the same atomic transaction
     And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" is NOT updated at classification time
+    And the deferred baseline update will occur when the pending-assessment marker clears (via haiku_baseline_clear_marker)
     And the drift-detection gate suppresses re-detection of "stages/design/artifacts/dashboard-layout.html" while the marker is open
 
   # ---------------------------------------------------------------------------

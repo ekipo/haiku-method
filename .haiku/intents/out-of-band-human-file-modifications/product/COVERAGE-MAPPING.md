@@ -184,7 +184,7 @@ The following ACs exist in `ACCEPTANCE-CRITERIA.md` but were not directly cited 
 | AC-G3 | SC-2.2, SC-5.2 | Non-orphan |
 | AC-G4 | SC-2.3, SC-2.4, SC-2.5, SC-2.6 (baseline-update contract) | Non-orphan |
 | AC-G5 | SC-2.5 (pending-assessment marker lifecycle — `closed`/`rejected` clear; `addressed` does NOT) | Non-orphan — **Reconciliation requirement §11-RR7** |
-| AC-G5-A | Deferred open/design gap (ARCHITECTURE.md §5.5 not yet defined) | Non-orphan — documented open item |
+| AC-G5-A | SC-2.6 (active-stage workflow position is unchanged across the open `trigger-revisit` marker window — the marker is the sole suppression mechanism per ARCHITECTURE.md §5.1, §5.4) | Non-orphan |
 | AC-G6 | SC-6.6 (PreToolUse hook unchanged) | Non-orphan |
 | AC-G7 | SC-4.2, SC-6.6 (workflow-managed files excluded) | Non-orphan |
 | AC-G8 | SC-1.8, SC-4.7, SC-4.8 | Non-orphan |
@@ -351,7 +351,7 @@ Five additional `.feature` files in `stages/product/outputs/features/` cover sch
 | SC-4.11 | No scenario for all 5 telemetry events | No — deferred to development | DC §6 contracts 3 of the 5 events; development stage verifies emission |
 | SC-5.4 | No runtime scenario for token adherence | No — deferred to development | Lint check, not a behavioral scenario |
 | SC-5.5–5.12 | Responsive/ARIA/a11y scenarios absent | No — deferred to development | Development-stage UI tests |
-| AC-G5-A | Active-stage state during pending `trigger-revisit` marker undefined in ARCHITECTURE.md §5 | No — documented open/deferred | Design stage must add §5.5 or explicitly declare no special state |
+| AC-G5-A | None — AC-G5-A is now a concrete negative-space AC (no special active-stage state is introduced); covered by SC-2.6 trigger-revisit lifecycle scenarios in `drift-assessment-visibility.feature` and `manual-change-assessment.feature` which assert the marker — not a workflow-position transition — is the load-bearing artifact | No — covered | n/a — resolved per FB-27 resolution path #2 |
 
 **Hard blockers:** 0. The prior SC-1.7 / SC-2.10 / SC-4.10 kill-switch hard blockers are closed by AC-G1-KS in `ACCEPTANCE-CRITERIA.md` and the "Kill-switch disabled — drift-detection gate is a complete no-op" + "Kill-switch re-enabled — gate does not auto-re-establish baseline on toggle-on" scenarios in `silent-filesystem-drop-detection.feature`. All remaining gaps are deferred and non-blocking.
 
@@ -369,7 +369,7 @@ Items explicitly deferred to later stages. These SCs are intentionally NOT cover
 | SC-5.4 Token lint | Development | Lint / static analysis |
 | SC-5.5–5.11 Responsive/ARIA/a11y | Development | UI implementation; browser-test territory |
 | SC-5.12 Establish-mode chip | Development | Explicitly deferred per DESN-06 |
-| AC-G5-A Active-stage-during-revisit | Design (open) | ARCHITECTURE.md §5 does not yet name the state |
+| AC-G5-A Active-stage-during-revisit | n/a — covered in product stage | Resolved per FB-27 path #2: no special active-stage state is introduced; the pending-assessment marker (ARCHITECTURE.md §5.1, §5.4) is the sole suppression mechanism. AC-G5-A is now a concrete negative-space assertion. |
 | SC-6.7 Testability annotation | Validator | Validator hat cross-checks AC testability; AC items are already Given/When/Then |
 | SCREEP-1 through SCREEP-15 | Out of scope entirely | Per the discovery draft §8 (all 15 scope-creep candidates confirmed excluded; none appear in the on-disk artifacts) |
 
@@ -442,7 +442,7 @@ All four `outcome` values have SC coverage, AC assertion, ≥1 scenario per enum
 - Scenarios in `drift-assessment-visibility.feature`: "SPA shows pending-revisit state between trigger-revisit classification and actual revisit invocation", "SPA resolves pending-revisit state when the revisited stage re-passes its gate". ≥2 scenarios.
 - DATA-CONTRACTS.md §2.2 `PendingMarker` includes: `outcome: "trigger-revisit"`, `linked_revisit_target_stage`, `cleared_at` (null while open; set when resolved). The `Assessment.mode` field tracks the mode at classification time.
 
-**Note on `revisit_invoked_at` field:** DATA-CONTRACTS.md §2.3 `Assessment` does not include a field named `revisit_invoked_at` literally; the revisit invocation is tracked through `PendingMarker.linked_revisit_target_stage` + `cleared_at`. The semantic intent (knowing when the revisit was invoked and when it resolved) is satisfied by the `PendingMarker` pair fields. AC-G5-A explicitly acknowledges the pending-revisit active-stage state is open/deferred; the marker is the load-bearing suppression mechanism. **SATISFIED (with the open/deferred AC-G5-A note).**
+**Note on `revisit_invoked_at` field:** DATA-CONTRACTS.md §2.3 `Assessment` does not include a field named `revisit_invoked_at` literally; the revisit invocation is tracked through `PendingMarker.linked_revisit_target_stage` + `cleared_at`. The semantic intent (knowing when the revisit was invoked and when it resolved) is satisfied by the `PendingMarker` pair fields. AC-G5-A is a concrete negative-space AC ruling that no special active-stage state is introduced; the marker is the load-bearing suppression mechanism. **SATISFIED.**
 
 ### RR-6: Outputs/artifacts alias coverage
 
@@ -517,7 +517,7 @@ All 15 scope-creep candidates from the discovery draft §8 were checked against 
 - **Reconciliation requirement RR-2** (canonical enum cross-check: `change_kind`, `acknowledged_by`, `outcome`) — SATISFIED.
 - **Reconciliation requirement RR-3** (DEC-9 Trust+Audit coverage) — SATISFIED.
 - **Reconciliation requirement RR-4** (surface-as-feedback baseline contract) — SATISFIED.
-- **Reconciliation requirement RR-5** (pending-revisit transition coverage) — SATISFIED (with AC-G5-A open/deferred noted).
+- **Reconciliation requirement RR-5** (pending-revisit transition coverage) — SATISFIED. AC-G5-A is a concrete negative-space AC (no special active-stage state introduced; marker is the sole suppression mechanism).
 - **Reconciliation requirement RR-6** (outputs/artifacts alias coverage) — SATISFIED.
 - **Reconciliation requirement RR-7** (marker clearing on `addressed` not `closed`) — SATISFIED.
 - **AC-G* identifier scheme** throughout this document uses only real identifiers from `product/ACCEPTANCE-CRITERIA.md`. No invented citations.

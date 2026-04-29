@@ -17,12 +17,16 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/product/DATA-CONTRACTS.md
 status: active
 bolt: 1
-hat: product
+hat: specification
 started_at: '2026-04-29T03:12:16Z'
-hat_started_at: '2026-04-29T03:12:16Z'
+hat_started_at: '2026-04-29T03:17:46Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T03:12:16Z'
+    completed_at: '2026-04-29T03:17:46Z'
+    result: advance
+  - hat: specification
+    started_at: '2026-04-29T03:17:46Z'
     completed_at: null
     result: null
 ---

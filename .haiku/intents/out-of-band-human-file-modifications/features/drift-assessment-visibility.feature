@@ -37,6 +37,11 @@ Feature: Drift assessment visibility in the SPA and chat surface
   # Pending-revisit transition state (Reconciliation requirement 6)
   # ---------------------------------------------------------------------------
 
+  # SPA state: "pending-revisit" = Assessment.outcome === "trigger-revisit" AND PendingMarker.cleared_at == null
+  # (DATA-CONTRACTS.md §2.2 — cleared_at is null while the revisit has not yet been invoked)
+  # SPA state: "revisit-invoked" = haiku_revisit has been called; PendingMarker.cleared_at still null
+  # (DATA-CONTRACTS.md §2.3 — transition occurs when the next tick fires and haiku_revisit is invoked)
+  # Transition chain: pending-revisit → revisit-invoked → resolved
   Scenario: SPA shows pending-revisit state between trigger-revisit classification and actual revisit invocation
     Given the Agent classified "stages/inception/artifacts/DISCOVERY.md" as "trigger-revisit" targeting stage "inception"
     And the ManualChangeAssessment record has outcome "trigger-revisit" and a pending-assessment marker is written
@@ -46,15 +51,17 @@ Feature: Drift assessment visibility in the SPA and chat surface
     And the SPA does not show the assessment as complete or resolved
     And the artifact card for "stages/inception/artifacts/DISCOVERY.md" shows the drift-revisit state badge (pending)
     When the next tick fires and haiku_revisit is invoked targeting stage "inception"
-    Then the SPA transitions the assessment row from "pending-revisit" to "revisit-triggered"
+    Then the SPA transitions the assessment row from "pending-revisit" to "revisit-invoked"
     And the pending-assessment marker for "stages/inception/artifacts/DISCOVERY.md" remains open until the revisit completes
 
+  # SPA state: "resolved" = PendingMarker.resolved_sha != null (DATA-CONTRACTS.md §2.2 — set atomically
+  # with cleared_at at marker clearance time; never null after clearance)
   Scenario: SPA resolves pending-revisit state when the revisited stage re-passes its gate
     Given a pending-assessment marker exists for "stages/inception/artifacts/DISCOVERY.md" linked to a revisit of stage "inception"
     When the revisited stage "inception" re-passes its review gate (revisit completes)
     Then the pending-assessment marker for "stages/inception/artifacts/DISCOVERY.md" is cleared
     And the baseline SHA for "stages/inception/artifacts/DISCOVERY.md" updates to the file's current SHA at clearing time
-    And the SPA assessment row transitions from "pending-revisit" to "resolved"
+    And the SPA assessment row transitions from "revisit-invoked" to "resolved"
   # ---------------------------------------------------------------------------
   # Chat surface notifications in autopilot
   # ---------------------------------------------------------------------------
@@ -112,8 +119,10 @@ Feature: Drift assessment visibility in the SPA and chat surface
     Then the outcome badge text is "<badge_text>"
 
     Examples:
+      # Note: badge_text is UI copy and may diverge from the enum value if a future design decision
+      # requires user-friendlier wording — the state machine enum is the source of truth, not the label.
       | outcome             | badge_text        |
       | ignore              | Acknowledged      |
       | inline-fix          | Acknowledged      |
       | surface-as-feedback | Surfaced as FB-NN |
-      | trigger-revisit     | Revisit triggered |
+      | trigger-revisit     | Revisit invoked   |

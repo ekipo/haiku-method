@@ -25,9 +25,9 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/features/drift-assessment-visibility.feature
 status: active
 bolt: 1
-hat: specification
+hat: validator
 started_at: '2026-04-29T03:12:15Z'
-hat_started_at: '2026-04-29T03:17:13Z'
+hat_started_at: '2026-04-29T03:18:11Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T03:12:15Z'
@@ -35,6 +35,10 @@ iterations:
     result: advance
   - hat: specification
     started_at: '2026-04-29T03:17:13Z'
+    completed_at: '2026-04-29T03:18:11Z'
+    result: advance
+  - hat: validator
+    started_at: '2026-04-29T03:18:11Z'
     completed_at: null
     result: null
 ---

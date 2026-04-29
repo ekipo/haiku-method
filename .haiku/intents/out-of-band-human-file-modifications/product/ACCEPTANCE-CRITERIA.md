@@ -567,6 +567,16 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **And** `trigger-revisit` is not a valid outcome for current-stage drift (revisit-of-self is a no-op)
 - **And** if the agent attempts to classify as `trigger-revisit` for a current-stage finding, the harness rejects it with a redirect to one of the three valid current-stage outcomes
 
+#### AC-CO2: Current-stage drift assessment record carries `stage_owner: <active>` and surfaces in the active-stage SPA view
+
+- **Given** a drift event whose `stage_owner` equals the active stage
+- **When** the agent records its classification (any of the three valid outcomes per AC-CO1)
+- **Then** the persisted assessment record at `stages/{active-stage}/drift-assessments/DA-{NN}.json` carries `stage_owner` set to the active stage's name
+- **And** the assessment is visible in the active-stage drift assessment view in the SPA (US-05)
+- **And** the assessment is NOT cross-listed under any earlier stage's drift assessment view (the file lives only under the owning stage)
+- **And** the agent's rationale field references the active hat's working context where applicable (e.g., "current bolt's input file replaced by user — folding into next iteration") rather than cross-stage rationale
+- **Note:** This AC distinguishes the current-stage path from AC-EO1 (earlier-stage drift) by record location and rationale framing; the harness uses the same drift-assessment infrastructure for both.
+
 ---
 
 ### Variant: Stage-of-Ownership — `earlier`
@@ -623,6 +633,16 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **And** the assessment record is the only durable artifact of the event
 - **And** on the next tick, the drift gate sees the new SHA as the expected state and emits no event for this file
 
+#### AC-CI2: `ignore` semantics on a deletion preserve the deleted state — extends AC-EE2
+
+- **Given** a drift event with `event_type: "deleted"` (file removed from worktree, `current_sha: null`)
+- **When** the agent classifies the event as `ignore`
+- **Then** the baseline entry for that file is removed from `baseline.json` (the file is no longer tracked)
+- **And** no further drift events are emitted for that path on subsequent ticks (the file is "expected to be gone")
+- **And** if a new file is later created at the same path, the gate treats it as a new-file drift event per AC-FS2 (no baseline retained from the deletion)
+- **And** the assessment record captures the deletion + ignore decision for audit purposes
+- **Rationale:** `ignore` on a deletion means "the deletion stands"; the baseline must reflect that, otherwise the gate would re-emit a deletion event every tick. This contrasts with `ignore` on a content change, which simply updates the baseline SHA per AC-CI1.
+
 ---
 
 ### Variant: Classification Outcome — `inline-fix`
@@ -636,6 +656,16 @@ The behavior of out-of-band detection and reaction varies along the following di
 - **And** no feedback item is created
 - **And** no revisit is dispatched
 - **And** no pending-assessment marker is written
+
+#### AC-IF2: `inline-fix` assessment record captures the absorption rationale and downstream impact
+
+- **Given** an `inline-fix` classification recorded for any drift event (current-stage or earlier-stage per AC-EO2)
+- **When** the assessment record (`DA-{NN}.json`) is persisted
+- **Then** the record's `outcome` field is `inline-fix`
+- **And** the record's `rationale` field describes how the human's edit is being absorbed (e.g., "designer replaced hero.html with refined layout — folding into design-stage refinement bolt", "user added research note — integrating into elaboration phase")
+- **And** the record's `next_action` field names the immediate downstream effect (e.g., `bolt_continues_with_new_input`, `elaboration_re_runs_with_added_context`, `none`) so downstream tooling and the SPA can show the linkage
+- **And** the assessment record is queryable from the SPA drift assessment view (US-05) and is durable across branch switches per AC-G11
+- **Note:** The distinction from AC-EO2 is record-content-focused: AC-EO2 governs workflow position (no revisit, no rewind), AC-IF2 governs what the assessment record tells the human reviewer about the absorption.
 
 ---
 
@@ -785,10 +815,10 @@ The behavior of out-of-band detection and reaction varies along the following di
 - AC-KI1, AC-KI2 (knowledge-input variant)
 - AC-T1, AC-T2 (text payload variant)
 - AC-B1, AC-B2, AC-B3 (binary payload variant)
-- AC-CO1 (current stage-of-ownership)
+- AC-CO1, AC-CO2 (current stage-of-ownership)
 - AC-EO1, AC-EO2 (earlier stage-of-ownership)
 - AC-OM1, AC-OM2 (operating mode variant)
-- AC-CI1, AC-IF1, AC-SF1, AC-SF2, AC-SF3, AC-TR1, AC-TR2, AC-TR3 (classification outcome variants)
+- AC-CI1, AC-CI2, AC-IF1, AC-IF2, AC-SF1, AC-SF2, AC-SF3, AC-TR1, AC-TR2, AC-TR3 (classification outcome variants)
 - AC-EE1 through AC-EE6 (edge cases)
 
 ### P1 (follow-up)

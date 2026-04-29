@@ -1,7 +1,7 @@
 {
   "stage": "product",
   "status": "active",
-  "phase": "execute",
+  "phase": "gate",
   "started_at": "2026-04-28T23:51:01Z",
   "completed_at": null,
   "gate_entered_at": null,

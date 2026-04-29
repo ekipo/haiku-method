@@ -42,7 +42,7 @@ Feature: Manual change assessment classification by the agent
     And the Agent supplies linked_feedback_id referencing a newly created feedback item "FB-09"
     Then the ManualChangeAssessment record is persisted with outcome "surface-as-feedback" and linked_feedback_id "FB-09"
     And a pending-assessment marker is written for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
-    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" is NOT updated at classification time
+    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" IS updated atomically to the post-drift SHA at classification time
     And the drift-detection gate suppresses re-detection of "stages/design/artifacts/dashboard-layout.html" while the marker is open
 
   Scenario: surface-as-feedback baseline is updated when feedback reaches a terminal state

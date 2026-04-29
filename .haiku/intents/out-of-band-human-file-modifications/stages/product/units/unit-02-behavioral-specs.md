@@ -23,7 +23,16 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/features/manual-change-assessment.feature
   - >-
     .haiku/intents/out-of-band-human-file-modifications/features/drift-assessment-visibility.feature
-status: pending
+status: active
+bolt: 1
+hat: product
+started_at: '2026-04-29T03:12:15Z'
+hat_started_at: '2026-04-29T03:12:15Z'
+iterations:
+  - hat: product
+    started_at: '2026-04-29T03:12:15Z'
+    completed_at: null
+    result: null
 ---
 # Behavioral specifications (Gherkin features)
 

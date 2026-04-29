@@ -2,7 +2,7 @@
 title: >-
   agent-writes-on-behalf-of-human.feature lines 38 and 46 also use non-existent
   acknowledged_by field
-status: fixing
+status: closed
 origin: agent
 author: agent
 author_type: agent
@@ -10,7 +10,7 @@ created_at: '2026-04-29T03:52:57Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-13:bolt-3'
 bolt: 3
 triaged_at: '2026-04-29T03:52:57Z'
 resolution: null

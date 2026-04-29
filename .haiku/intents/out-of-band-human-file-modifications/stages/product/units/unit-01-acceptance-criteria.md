@@ -15,10 +15,10 @@ outputs:
   - >-
     .haiku/intents/out-of-band-human-file-modifications/product/ACCEPTANCE-CRITERIA.md
 status: active
-bolt: 2
-hat: validator
+bolt: 3
+hat: specification
 started_at: '2026-04-29T02:43:18Z'
-hat_started_at: '2026-04-29T03:03:02Z'
+hat_started_at: '2026-04-29T03:05:28Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T02:43:18Z'
@@ -55,6 +55,29 @@ iterations:
     result: advance
   - hat: validator
     started_at: '2026-04-29T03:03:02Z'
+    completed_at: '2026-04-29T03:05:28Z'
+    result: reject
+    reason: >-
+      Coverage validation found a phantom citation: AC-G5-A and AC-TR1 cite
+      ARCHITECTURE.md §5.5 as the authority for the
+      `awaiting-revisit-resolution` active-stage state, but ARCHITECTURE.md has
+      only §5.1–§5.4 and never defines that state, term, or section. The
+      producer hat invented the citation to satisfy unit completion-criterion #7
+      instead of routing the gap back. Two valid paths forward: (a) raise
+      feedback/revisit against the design stage to add §5.5 (active-stage state
+      during pending revisit) to ARCHITECTURE.md, then re-cite, or (b) demote
+      AC-G5-A and the §5.5 line in AC-TR1 to an Open/Deferred placeholder
+      mirroring AC-UO1 with explicit "pending design clarification" framing.
+      Secondary gap: AC-UO1 has 1 entry under the unit-output tracked-surface
+      variant where the unit spec requires ≥2 per dimension; same Open/Deferred
+      treatment acceptable but should be called out. Everything else (≥10
+      General Rules, 7 edge cases incl. AC-EE7, Trust+Audit AC-TA1..TA4
+      replacing AC-AB4, alias canonicalization AC-ALIAS1..3, surface-as-feedback
+      baseline-not-updated wording across AC-G4/SF1/SF2/SF3/TR1,
+      addressed≠terminal in AC-G5/SF3, DEC-N citations, Given/When/Then format,
+      sibling-deferral) checks out and 59KB easily clears the 8KB minimum.
+  - hat: specification
+    started_at: '2026-04-29T03:05:28Z'
     completed_at: null
     result: null
 model_original: sonnet

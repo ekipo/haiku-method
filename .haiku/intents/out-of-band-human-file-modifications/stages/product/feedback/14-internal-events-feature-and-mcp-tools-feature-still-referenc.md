@@ -2,7 +2,7 @@
 title: >-
   internal_events.feature and mcp_tools.feature still reference
   feedback-addressed clearance trigger
-status: fixing
+status: closed
 origin: agent
 author: agent
 author_type: agent
@@ -10,8 +10,8 @@ created_at: '2026-04-29T04:01:22Z'
 iteration: 1
 visit: 1
 source_ref: null
-closed_by: null
-bolt: 1
+closed_by: 'fix-loop:FB-14:bolt-2'
+bolt: 2
 triaged_at: '2026-04-29T04:01:22Z'
 resolution: null
 replies: []

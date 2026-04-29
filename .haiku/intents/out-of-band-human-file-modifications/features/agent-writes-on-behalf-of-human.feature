@@ -35,7 +35,7 @@ Feature: Agent writes a file on behalf of a human via haiku_human_write
     When the agent completes the requested extension via its normal Write tool
     Then the agent's write is attributed to author_class "agent"
     And the User's prior edit lines are preserved in the extended file
-    And the new combined SHA becomes the next baseline entry with acknowledged_by "agent"
+    And the new combined SHA becomes the next baseline entry with author_class "agent"
   # ---------------------------------------------------------------------------
   # Authorship integrity
   # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ Feature: Agent writes a file on behalf of a human via haiku_human_write
   Scenario: Agent uses normal Write tool for its own work (not haiku_human_write)
     When the Agent writes a unit-output file as part of its execute phase
     Then the Agent uses the normal Write tool (not "haiku_human_write")
-    And the resulting baseline entry has acknowledged_by "agent" and acknowledged_via "agent-write"
+    And the resulting baseline entry has author_class "agent" and acknowledged_via "agent-write"
     And no "manual_change_assessment" action fires for this file on the next tick
 
   Scenario: Agent invokes haiku_human_write without explicit user instruction context

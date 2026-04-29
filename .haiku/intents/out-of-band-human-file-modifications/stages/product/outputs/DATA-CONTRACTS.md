@@ -210,7 +210,7 @@ Append-only. The durable record of what changed, what the agent decided, and why
 | `initiated_by` | string | yes | — | **Required per reconciliation requirement R8 (DEC-9 audit fields).** Agent identity string — the agent or session that submitted the classification. |
 | `triggering_request` | string | yes | — | **Required per R8.** Verbatim chat snippet (first 200 chars) or session ID that triggered this assessment dispatch. Provides post-hoc auditability of why the assessment fired. |
 | `target_path` | string | yes | — | **Required per R8.** The primary file path targeted by this assessment. For multi-finding assessments, this is the first finding's path; the full list is in `findings`. |
-| `resulting_sha` | string | yes | — | **Required per R8.** The SHA of the file after the assessment resolved. For terminal outcomes (`ignore`, `inline-fix`), this is the on-disk SHA at classification time. For non-terminal outcomes, updated at marker-clearance time. |
+| `resulting_sha` | string \| null | yes | — | **Required per R8 (the field is required; the value is nullable).** The on-disk SHA of `target_path` at the moment the `Assessment` record was written. For terminal outcomes (`ignore`, `inline-fix`), this is the post-classification SHA — the value the `Baseline` was simultaneously updated to in step 5 of §4.3, so the two records agree. For non-terminal outcomes (`surface-as-feedback`, `trigger-revisit`), this is `null`: the file's resolved SHA is not known at write time, the `Baseline` update is deferred to marker clearance (§4.4), and the `Assessment` record is append-only and never modified after writing (per the §2.3 storage reference). The resolved end-state SHA for non-terminal assessments is recovered by joining `Assessment.id` → `PendingMarker.created_by_assessment_id` → (after clearance) `Baseline.sha256` for `target_path`; do not infer it from the `Assessment` record alone. |
 | `recorded_at` | string (RFC 3339) | yes | — | **Required per R8.** UTC timestamp when the assessment record was committed to disk. May differ from `created_at` by network or I/O latency. |
 | `mode` | `"interactive" \| "pickup" \| "autopilot" \| "hybrid"` | yes | — | The invocation mode captured at assessment time. Enables the SPA to render mode-aware context. |
 | `confirmed_by_user` | boolean | yes | `false` | True only when the user explicitly confirmed the agent's classification in interactive mode. False in autopilot. False when the user has not acted on a surfaced classification. |
@@ -239,7 +239,7 @@ field from the `DriftFinding` so the SPA can display correct stage attribution.
   "initiated_by": "haiku-agent-session-abc123",
   "triggering_request": "User uploaded a new hero layout via SPA Replace dialog",
   "target_path": "stages/design/artifacts/hero-layout.html",
-  "resulting_sha": "ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890ab12cd34ef567890",
+  "resulting_sha": null,
   "recorded_at": "2026-04-28T14:35:14Z",
   "findings": [
     {
@@ -419,7 +419,7 @@ engine acknowledges the resolved end-state, not an intermediate snapshot.
 
 Cross-references that must agree with this contract:
 - §0.3 outcome table — `surface-as-feedback` says "baseline deferred"
-- §2.3 `Assessment.resulting_sha` — for non-terminal outcomes, updated at marker-clearance time
+- §2.3 `Assessment.resulting_sha` — written at classification time only; nullable for non-terminal outcomes. The post-resolution SHA is read from `Baseline.sha256` after `haiku_baseline_clear_marker` runs (§4.4); the `Assessment` record itself is immutable and is never patched at marker-clearance time
 - §4.3 atomic side-effect ordering, step 6 — pending marker only, no baseline write
 - §4.4 `haiku_baseline_clear_marker` — the tool that performs the deferred baseline update
 - ARCHITECTURE.md §4.4.3 (design stage upstream) — the originating spec
@@ -693,9 +693,14 @@ for already-baselined files.
 1. Write feedback files (from `feedback_creates`, if any).
 2. Resolve `linked_feedback_id` for any classifications that omitted it.
 3. Validate every classification against `legal_outcomes` for the dispatched tick.
-4. Write the `Assessment` record (§2.3) including all DEC-9 audit fields.
+4. Write the `Assessment` record (§2.3) including all DEC-9 audit fields. Populate `resulting_sha`
+   with the on-disk SHA of `target_path` only when every classification in this dispatch has a
+   terminal outcome (`ignore` or `inline-fix`); otherwise write `resulting_sha: null`. The record
+   is append-only — no later step in this list, and no later tool call, ever rewrites
+   `resulting_sha` after step 4.
 5. For terminal outcomes (`ignore`, `inline-fix`): update `Baseline` to current on-disk SHA
    with `author_class` carried from the finding; set `acknowledged_via: "classification-terminal"`.
+   The `Baseline.sha256` written here equals the `Assessment.resulting_sha` written in step 4.
 6. For `surface-as-feedback`: write a `PendingMarker` (§2.2) atomically with the `Assessment`
    record. The `Baseline` is **not** updated at classification time per R6 contract (§3.5);
    the deferred baseline update happens on marker clearance via `haiku_baseline_clear_marker`

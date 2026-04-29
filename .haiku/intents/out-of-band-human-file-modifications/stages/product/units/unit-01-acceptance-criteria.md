@@ -1,6 +1,6 @@
 ---
 title: Acceptance criteria
-model: sonnet
+model: opus
 inputs:
   - intent.md
   - knowledge/DISCOVERY.md
@@ -15,10 +15,10 @@ outputs:
   - >-
     .haiku/intents/out-of-band-human-file-modifications/product/ACCEPTANCE-CRITERIA.md
 status: active
-bolt: 1
-hat: validator
+bolt: 2
+hat: specification
 started_at: '2026-04-29T02:43:18Z'
-hat_started_at: '2026-04-29T02:58:47Z'
+hat_started_at: '2026-04-29T03:00:26Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T02:43:18Z'
@@ -30,8 +30,30 @@ iterations:
     result: advance
   - hat: validator
     started_at: '2026-04-29T02:58:47Z'
+    completed_at: '2026-04-29T03:00:26Z'
+    result: reject
+    reason: >-
+      Three variant dimensions have only 1 AC entry each; unit completion
+      criterion requires ≥2 per dimension. Gaps: (1) stage-of-ownership:current
+      — AC-CO1 is the only entry; needs a second AC (e.g. positive assertion on
+      what ignore/inline-fix look like for current-stage drift, or assessment
+      record contents); (2) classification-outcome:ignore — AC-CI1 is the only
+      entry; needs a second AC (e.g. next-tick behavior showing no re-drift, or
+      behavior on deleted-file ignore); (3) classification-outcome:inline-fix —
+      AC-IF1 is the only entry; needs a second AC (e.g. what inline-fix produces
+      in the assessment record, or inline-fix behavior on earlier-stage drift
+      that is distinct from AC-EO2 which lives in the stage-of-ownership
+      section). All other criteria pass: DEC-9 closure correct,
+      surface-as-feedback baseline contract correct, awaiting-revisit-resolution
+      state present, outputs/artifacts alias covered, addressed-vs-closed
+      terminal state correct, ≥13 general rules, ≥7 edge cases including AC-EE7
+      at P1, all ACs are Given/When/Then-expressible, design decisions cited, no
+      contradictions with upstream artifacts.
+  - hat: specification
+    started_at: '2026-04-29T03:00:26Z'
     completed_at: null
     result: null
+model_original: sonnet
 ---
 # Acceptance criteria
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.106.0] - 2026-04-29
+
+### Added
+- Design-system-anchor discovery for anchoring design decisions during inception planning
+
+### Changed
+- Design stage integrated into inception phase scope
+- Design artifacts now reviewed to ensure they are properly grounded in inception planning decisions
+
 ## [1.105.25] - 2026-04-28
 
 ### Fixed

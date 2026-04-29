@@ -2,7 +2,7 @@
 title: >-
   SPA pending-revisit state definition references a non-existent PendingMarker
   field
-status: fixing
+status: closed
 origin: adversarial-review
 author: feasibility
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-04-29T20:33:39Z'
 iteration: 2
 visit: 2
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-21:bolt-1'
 bolt: 1
 triaged_at: '2026-04-29T20:33:39Z'
 resolution: null
 replies: []
+hat: feedback-assessor
+iterations:
+  - bolt: 1
+    hat: product
+    completed_at: '2026-04-29T20:39:02Z'
+    result: advanced
+  - bolt: 1
+    hat: feedback-assessor
+    completed_at: '2026-04-29T20:41:29Z'
+    result: closed
 ---
-
 **Mandate lens:** Data contracts must be compatible with existing schemas; the SPA's state machine must be derivable from the defined fields.
 
 **Finding:**

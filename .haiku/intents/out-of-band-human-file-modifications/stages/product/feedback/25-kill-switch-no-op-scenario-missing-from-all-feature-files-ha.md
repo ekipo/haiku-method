@@ -11,7 +11,7 @@ iteration: 2
 visit: 2
 source_ref: null
 closed_by: null
-bolt: 1
+bolt: 2
 triaged_at: '2026-04-29T20:35:32Z'
 resolution: null
 replies: []

@@ -100,7 +100,7 @@ Feature: Explicit SPA upload of out-of-band human files
   Scenario: Upload is attempted while the worktree is locked by another process
     Given the active worktree is locked by a concurrent operation
     When the User confirms an upload
-    Then the SPA endpoint returns HTTP 423 with error code "intent_locked"
+    Then the SPA endpoint returns HTTP 409 with error code "intent_locked"
     And the SPA shows "Worktree is busy; try again"
     And no partial file is left on disk
   # ---------------------------------------------------------------------------

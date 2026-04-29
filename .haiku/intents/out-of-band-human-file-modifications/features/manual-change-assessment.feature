@@ -153,16 +153,23 @@ Feature: Manual change assessment classification by the agent
     And the Agent's default classification outcome for binary files without stage context is "surface-as-feedback"
     And the Agent's rationale notes that no textual diff is available
   # ---------------------------------------------------------------------------
-  # Pagination cap
+  # Same-tick atomic batch (AC-G12)
   # ---------------------------------------------------------------------------
+  # Per AC-G12 and DATA-CONTRACTS.md §3.2/§4.3, all drift findings observed in a
+  # single tick are dispatched in one `manual_change_assessment` action payload
+  # and classified in one atomic `haiku_classify_drift` call (all-or-rollback).
+  # No multi-tick pagination cursor or batch-session protocol is defined at the
+  # product stage — payload size limits and any future windowing protocol are a
+  # development/architecture concern (see DATA-CONTRACTS.md §8 boundary notes).
 
-  Scenario: Large drift batch is paginated to cap the action payload size
+  Scenario: Large drift batch is dispatched in a single atomic action payload
     Given drift is detected on 60 tracked files in a single tick
     When the workflow emits "manual_change_assessment"
-    Then the action payload findings array contains the first 50 DriftFindings
-    And the action payload includes a flag indicating more findings are pending
-    And the Agent classifies the first 50 findings
-    And on the next tick the workflow emits a second "manual_change_assessment" with the remaining 10 findings
+    Then the action payload findings array contains all 60 DriftFindings
+    And the action payload exposes no pagination cursor, batch_id, page, or has_more field
+    And the Agent submits one haiku_classify_drift call with 60 parallel-indexed classifications
+    And all 60 classifications are committed atomically (all-or-rollback) per DATA-CONTRACTS.md §4.3
+    And no second "manual_change_assessment" is emitted for any subset of the same tick's findings
   # ---------------------------------------------------------------------------
   # Assessment record durability
   # ---------------------------------------------------------------------------

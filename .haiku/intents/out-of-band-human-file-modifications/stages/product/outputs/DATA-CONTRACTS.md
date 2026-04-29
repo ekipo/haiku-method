@@ -84,6 +84,7 @@ HTTP API, and events. The table below is the single authoritative naming referen
 | An agent-authored classification of a drift finding | `assessment` | `Assessment` | `assessments` |
 | The four legal classification outcomes (§0.3) | `classification` (enum discriminant) | — | — |
 | An open, unresolved non-terminal classification record | `pending_marker` | `PendingMarker` | `pending-markers` |
+| A pending-write origin record bridging a sanctioned-channel write to the next drift gate | `pending_origin_stamp` | `PendingOriginStamp` | `pending-origin-stamps` |
 
 **Cross-surface naming audit:** See §7 for the proof table that every entity uses the same name
 across all five surfaces.
@@ -107,7 +108,7 @@ The baseline is a map from tracked-file-path to a record with the following fiel
 | `bytes` | integer | yes | — | File size in bytes at acknowledgment. Used as a pre-check skip hint before re-hashing; `sha256` is authoritative. |
 | `mtime_ns` | integer | yes | — | File mtime in nanoseconds since epoch at acknowledgment. Hashing skip-hint only; `sha256` is authoritative. |
 | `is_binary` | boolean | yes | `false` | True when the file fails the text heuristic (null bytes in first 8 KiB or extension in the binary list). Drives diff-payload behavior. |
-| `author_class` | `"agent" \| "human-via-mcp" \| "human-implicit"` | yes | — | **Required enum field per reconciliation requirement R2.** The enum from §0.2. Records who/what last caused the workflow engine to acknowledge this baseline entry. |
+| `author_class` | `"agent" \| "human-via-mcp" \| "human-implicit"` | yes | — | **Required enum field per reconciliation requirement R2.** The enum from §0.2. Records who/what last caused the workflow engine to acknowledge this baseline entry. Sourced from the upstream `DriftFinding.author_class` (§3.1) when an assessment-driven baseline update happens, or from `acknowledged_via` for direct baseline writes (`baseline-init`, `classification-terminal`). The §3.1.1 algorithm — `PendingOriginStamp` (§2.4) lookup with a fallback to `"human-implicit"` — is the single resolution path; the baseline never holds a value the gate could not have produced. |
 | `acknowledged_at` | string (RFC 3339) | yes | — | UTC ISO-8601 timestamp with `Z` suffix. Example: `"2026-04-28T14:32:00Z"`. |
 | `acknowledged_via` | `"agent-write" \| "human-write-tool" \| "spa-upload" \| "classification-terminal" \| "baseline-init"` | yes | — | The channel through which the baseline was last written. Distinct from `author_class`: `author_class` records *who* authored; `acknowledged_via` records *how* the write reached the workflow engine. |
 | `stage` | string \| null | yes | — | Owning stage slug (e.g. `"product"`, `"design"`). `null` for intent-scope files. |
@@ -317,6 +318,86 @@ field from the `DriftFinding` so the SPA can display correct stage attribution.
 
 ---
 
+### 2.4 `PendingOriginStamp` — one record per pending sanctioned-channel write
+
+The bridge record that lets the next-tick drift-detection gate populate
+`DriftFinding.author_class` with `"human-via-mcp"` instead of falling back to `"human-implicit"`.
+Without this record, the gate sees only on-disk SHA divergence and cannot tell which channel
+authored the file. The `write-audit.jsonl` log (§4.1) is append-only and outside the gate's read
+scope (matched by the `**/write-audit.jsonl` deny entry in §4.1.2 and not part of the gate's
+defined data inputs); the `PendingOriginStamp` is the gate's authoritative origin signal.
+
+**Producers:**
+- `haiku_human_write` writes one stamp per successful invocation (atomically with the file write).
+- The SPA upload endpoints (`POST /api/intents/{slug}/uploads/stage-output` and
+  `POST /api/intents/{slug}/uploads/knowledge`) write one stamp per successful upload (atomically
+  with the file write).
+
+**Consumer:** The pre-tick drift-detection gate. For every divergent file, the gate looks up an
+open stamp by `(intent_slug, path)`; on a hit, it sets `DriftFinding.author_class` to the stamp's
+`author_class` and atomically clears the stamp. On a miss, the gate emits the finding with
+`author_class: "human-implicit"`.
+
+| Field | Type | Required | Default | Constraints |
+|---|---|---|---|---|
+| `path` | string | yes | — | Same shape as `Baseline.path`. The canonical (post-§4.1.1-normalization) intent-relative POSIX path. Logical key together with `intent_slug`. |
+| `author_class` | `"human-via-mcp"` | yes | — | The §0.2 enum, restricted to `"human-via-mcp"` for stamps. (Agent writes do not produce stamps; the gate's default for an unstamped, unbaselined divergence is `"human-implicit"`.) Future channels that want first-class attribution must also write a stamp; this field reserves room for that without changing the gate. |
+| `expected_sha256` | string | yes | — | Lowercase hex SHA-256 of the file content as written by the producer. The gate matches this against the on-disk SHA when consuming the stamp; a mismatch (the file was overwritten between write and tick) downgrades the finding to `"human-implicit"` and the stamp is still cleared. Exactly 64 characters. |
+| `created_at` | string (RFC 3339) | yes | — | UTC timestamp. Stamps older than the kill-switch sweep window (a development-stage decision) are GC'd as stale by the gate even if no matching divergence is found. |
+| `created_by` | `"haiku_human_write" \| "spa-upload-stage-output" \| "spa-upload-knowledge"` | yes | — | Which producer wrote the stamp. Used in telemetry; does NOT change `author_class` (all three are `"human-via-mcp"`). |
+| `human_author_id` | string \| null | yes | — | Mirrors the `human_author_id` recorded in the audit log (§4.1). `null` if not supplied by the producer. Carried so the `Assessment` record can attribute without re-reading `write-audit.jsonl`. |
+| `audit_log_entry_id` | string | yes | — | The `entry_id` of the matching `write-audit.jsonl` record (§4.1). Lets auditors join the stamp to its append-only audit-log row without granting the gate read access to the JSONL file itself. |
+
+**Constraints:**
+- `(intent_slug, path)` is **not** unique across the lifetime of the file: a stamp is written, consumed,
+  and a new stamp may be written later. At any moment there must be at most one open stamp per
+  `(intent_slug, path)` — a producer that finds an existing open stamp for the same path overwrites
+  it (last-write-wins; the audit log retains the prior entry).
+- The stamp is consumed (deleted) atomically with the gate's `DriftFinding` emission. A crash
+  between emission and deletion is recovered by the gate's idempotent re-scan: a divergence with
+  no remaining stamp is `"human-implicit"`. This is acceptable because the audit log preserves
+  the original attribution if a forensic join is needed.
+- Stale stamps (older than the GC window AND no matching divergence on disk) are deleted on the
+  next tick without emitting a `DriftFinding`.
+
+**Storage reference:** Intent-scoped sidecar at `.haiku/intents/{slug}/pending-origin-stamps.json`.
+Not stage-scoped, because writes via `haiku_human_write` and SPA uploads target paths under any
+stage (and intent-scope `knowledge/` paths). The exact on-disk format (single JSON file vs. one
+file per stamp) is a development-stage decision; the field-level shape is normative.
+
+**Deny-list entry:** `**/pending-origin-stamps.json` is added to §4.1.2 — workflow-engine-only,
+mutated exclusively by `haiku_human_write`, the SPA upload endpoints, and the drift-detection
+gate.
+
+**Worked example:**
+
+```json
+{
+  "path": "knowledge/brand-guide.md",
+  "author_class": "human-via-mcp",
+  "expected_sha256": "a3f7c82e1d4b9f0517e6c2a84b3d5e9f1c7a2b4d6e8f0a2c4e6b8d0f2a4c6e8f",
+  "created_at": "2026-04-28T15:42:07Z",
+  "created_by": "haiku_human_write",
+  "human_author_id": "jwaldrip@gigsmart.com",
+  "audit_log_entry_id": "HWM-42-01"
+}
+```
+
+**Cross-references that must agree with this schema:**
+- §2.1 `Baseline.author_class` — populated from `DriftFinding.author_class` when the gate-emitted
+  finding is acknowledged into the baseline; the stamp is the upstream origin of `"human-via-mcp"`.
+- §3.1 `DriftFinding.author_class` — sourced from the matching `PendingOriginStamp` if present;
+  otherwise `"human-implicit"`.
+- §4.1 `haiku_human_write` — writes the stamp atomically with the file write (request envelope
+  is unchanged; the stamp is an internal side-effect).
+- §4.1.2 deny-list — adds `**/pending-origin-stamps.json`.
+- §5.1 / §5.2 SPA upload endpoints — write the stamp atomically with the file write (same
+  contract as `haiku_human_write`).
+- §6.1 `drift_detected` — `author_class` field is populated from the stamp (or `"human-implicit"`
+  fallback).
+
+---
+
 ## 3. Workflow-Action Payload Schemas
 
 ### 3.1 `DriftFinding` — emitted by the pre-tick drift-detection gate
@@ -337,6 +418,7 @@ This is the per-file payload the gate produces. It is embedded in the
 | `tracking_class` | `"stage-output" \| "knowledge" \| "unit-output" \| "intent-meta"` | yes | — | Mirrors `Baseline.tracking_class`. |
 | `stage` | string \| null | yes | — | Mirrors `Baseline.stage`. |
 | `context_unit` | string \| null | yes | — | Unit slug if the file lives under `units/{unit-slug}/`; `null` otherwise. Provides classification context. |
+| `author_class` | `"agent" \| "human-via-mcp" \| "human-implicit"` | yes | — | **Canonical enum from §0.2.** Populated by the gate using the algorithm in §3.1.1 (stamp lookup against `PendingOriginStamp` §2.4, falling back to `"human-implicit"`). Carries through to `Baseline.author_class` (§2.1) and `drift_detected.author_class` (§6.1). |
 
 **Cross-field invariants (enforced by the gate before dispatch):**
 
@@ -344,6 +426,26 @@ This is the per-file payload the gate produces. It is embedded in the
 2. `change_kind === "deleted"` ⇒ `after_sha256 === null && after_bytes === null && diff_unified === null`.
 3. `change_kind === "modified"` ⇒ all four SHA/byte fields non-null AND `before_sha256 !== after_sha256`.
 4. `is_binary === true` ⇒ `diff_unified === null`.
+5. `author_class === "human-via-mcp"` ⇒ a `PendingOriginStamp` (§2.4) was matched and consumed for `(intent_slug, path)` in this same gate pass. The gate MUST NOT emit `"human-via-mcp"` without a matching stamp.
+6. `author_class === "human-implicit"` ⇒ no matching `PendingOriginStamp` was found (or the stamp's `expected_sha256` did not match `after_sha256`). This is the default for unsanctioned filesystem drops.
+7. `author_class === "agent"` ⇒ the gate observed an agent-tool write (recorded in the workflow engine's tool-call log) for this path since the last baseline acknowledgment. Out of scope for the human-write flow but listed for completeness; the gate's stamp lookup is bypassed when an agent-tool write is recorded.
+
+#### 3.1.1 `author_class` resolution algorithm (normative)
+
+For every divergent file the gate finds, it sets `DriftFinding.author_class` exactly once, before
+dispatching the `manual_change_assessment` action, using this algorithm:
+
+1. If the workflow engine's tool-call log recorded an agent-tool write to `path` since the last
+   baseline acknowledgment, set `author_class = "agent"`. Skip steps 2–4.
+2. Otherwise, look up an open `PendingOriginStamp` (§2.4) by `(intent_slug, path)`.
+3. If a stamp is found AND `stamp.expected_sha256 === after_sha256`, set
+   `author_class = stamp.author_class` (currently always `"human-via-mcp"`). Atomically delete
+   the stamp.
+4. If no stamp is found, OR the stamp's `expected_sha256` does not match the on-disk SHA, set
+   `author_class = "human-implicit"`. If a non-matching stamp existed, delete it (it is stale).
+
+The deletion in steps 3 and 4 happens in the same atomic batch as the gate's `DriftFinding`
+emission and `drift_detected` event publication. Crash recovery is described in §2.4.
 
 **Worked example:**
 
@@ -359,7 +461,8 @@ This is the per-file payload the gate produces. It is embedded in the
   "after_bytes": 5104,
   "tracking_class": "stage-output",
   "stage": "design",
-  "context_unit": null
+  "context_unit": null,
+  "author_class": "human-via-mcp"
 }
 ```
 
@@ -488,12 +591,28 @@ instead of `Write`. The write is attributed as `author_class: "human-via-mcp"` i
 The baseline is **not** updated directly — the next tick's drift gate observes the SHA divergence,
 emits a `DriftFinding` with `author_class: "human-via-mcp"`, and dispatches
 `manual_change_assessment` to classify the write. This unified path applies to all three write
-channels: filesystem drop, SPA upload, and `haiku_human_write`.
+channels: filesystem drop, SPA upload, and `haiku_human_write`. The two sanctioned channels
+(`haiku_human_write` and SPA upload) are distinguished from filesystem drops at tick time by the
+`PendingOriginStamp` record (§2.4), which the producer writes atomically with the file and the
+gate consumes. A filesystem drop produces no stamp, so the gate's default is
+`author_class: "human-implicit"` — preserving the attribution chain promised in §2.1, §3.1,
+and §6.1.
 
-**Note:** The tool writes an audit log entry to `write-audit.jsonl` (append-only JSONL, one record
-per invocation) recording: `timestamp`, `entry_id`, `path`, `sha256`, `author_class: "human-via-mcp"`,
-`human_author_id`, `rationale`, `user_instruction_excerpt` (first 200 chars), `tick_counter`,
-`session_id`, `overwrite`, `dirs_created`.
+**Side-effects (all atomic with the file write — either all succeed or none do):**
+
+1. The destination file is written to disk at the canonical path from §4.1.1.
+2. A `PendingOriginStamp` record (§2.4) is written to `pending-origin-stamps.json` with
+   `author_class: "human-via-mcp"`, `created_by: "haiku_human_write"`, `expected_sha256` set to
+   the freshly-computed SHA, and `audit_log_entry_id` set to the `entry_id` of step 3.
+3. An audit log entry is appended to `write-audit.jsonl` (append-only JSONL, one record
+   per invocation) recording: `timestamp`, `entry_id`, `path`, `sha256`,
+   `author_class: "human-via-mcp"`, `human_author_id`, `rationale`,
+   `user_instruction_excerpt` (first 200 chars), `tick_counter`, `session_id`, `overwrite`,
+   `dirs_created`.
+
+If any step fails, all completed steps are rolled back. The drift gate consults
+`pending-origin-stamps.json` (NOT `write-audit.jsonl`) at tick time, so the JSONL log can remain
+strictly append-only and outside the gate's read scope.
 
 **Request:**
 
@@ -587,6 +706,7 @@ pattern's name is returned in the error envelope's `deny_rule` field for diagnos
 | `feedback/` | Intent-scope feedback directory (studio-review findings). | Workflow-managed. |
 | `**/baseline.json` | The drift-detection baseline file at any depth (intent root or per-stage). | Workflow-engine-only; mutated exclusively by `haiku_baseline_init` and `haiku_baseline_clear_marker`. |
 | `**/drift-markers.json` | The pending-marker sidecar at any depth. | Workflow-engine-only; mutated exclusively by `haiku_classify_drift` and `haiku_baseline_clear_marker`. |
+| `**/pending-origin-stamps.json` | The pending-origin-stamp sidecar at any depth (§2.4). | Workflow-engine-only; mutated exclusively by `haiku_human_write`, the SPA upload endpoints, and the drift-detection gate. The `**/` prefix denies stage-scoped copies in addition to the intent-root canonical location. |
 | `**/write-audit.jsonl` | The human-write audit log at any depth. | Tool-managed; appended only by `haiku_human_write` itself. The `**/` prefix denies stage-scoped copies (`stages/{stage}/write-audit.jsonl`) in addition to the intent-root canonical location, matching the audit-log invariant that no agent or human path may write to it directly. |
 
 **Notes:**
@@ -608,6 +728,8 @@ pattern's name is returned in the error envelope's `deny_rule` field for diagnos
 | `baseline.json` | `**/baseline.json` | Denied. |
 | `stages/design/baseline.json` | `**/baseline.json` | Denied. |
 | `drift-markers.json` | `**/drift-markers.json` | Denied. |
+| `pending-origin-stamps.json` | `**/pending-origin-stamps.json` | Denied. |
+| `stages/product/pending-origin-stamps.json` | `**/pending-origin-stamps.json` | Denied. |
 | `write-audit.jsonl` | `**/write-audit.jsonl` | Denied. |
 | `stages/design/write-audit.jsonl` | `**/write-audit.jsonl` | Denied. |
 | `knowledge/brand-guide.md` | (none) | Allowed (subject to allow-list match). |
@@ -926,6 +1048,12 @@ Note: `baseline_updated: false` because SPA uploads do NOT update `baseline.json
 next tick's drift gate observes the SHA divergence and dispatches `manual_change_assessment`.
 `tick_will_observe: true` is the confirmation to the SPA that assessment will fire on the next tick.
 
+**Side-effects (atomic with the file write):** A `PendingOriginStamp` record (§2.4) is written
+with `author_class: "human-via-mcp"`, `created_by: "spa-upload-stage-output"`, and
+`expected_sha256` set to `sha256` from the response. This stamp is what the next tick's drift
+gate uses to set `DriftFinding.author_class` to `"human-via-mcp"` (per §3.1.1) instead of the
+`"human-implicit"` fallback. An audit log entry is also appended to `write-audit.jsonl`.
+
 **Error table:**
 
 | HTTP | `error` | When |
@@ -962,6 +1090,9 @@ Add a file to the intent's knowledge directory.
 | `attribute_to_user` | string | yes | Authenticated user's display name. |
 
 **Response:** Same shape as §5.1.
+
+**Side-effects (atomic with the file write):** Same as §5.1, with `created_by: "spa-upload-knowledge"`
+on the `PendingOriginStamp` record (§2.4) instead of `"spa-upload-stage-output"`.
 
 **Error table:** All errors from §5.1, plus:
 
@@ -1092,7 +1223,7 @@ diverging file per tick).
 | `tick_id` | string | yes | Same shape as `Assessment.tick_id`. |
 | `file_path` | string | yes | The specific file that drifted. Intent-relative POSIX path. |
 | `change_kind` | `"added" \| "modified" \| "deleted"` | yes | **Canonical enum from §0.1.** |
-| `author_class` | `"agent" \| "human-via-mcp" \| "human-implicit" \| null` | yes | The author class from the baseline entry. `null` for `"added"` events where no baseline entry exists. |
+| `author_class` | `"agent" \| "human-via-mcp" \| "human-implicit" \| null` | yes | Mirrors `DriftFinding.author_class` for this file (resolved by the algorithm in §3.1.1: stamp lookup against `PendingOriginStamp` §2.4, falling back to `"human-implicit"`). `null` only for `"added"` events when no baseline entry existed AND no stamp was matched (in which case `"human-implicit"` is also acceptable; emitters MUST pick one and be consistent — the canonical choice is `"human-implicit"` because the file was nonetheless authored by some channel). |
 | `is_binary` | boolean | yes | Binary-file signal. |
 
 **Note:** SHA values and diff payloads are NOT written to the event — those are in the assessment
@@ -1222,6 +1353,7 @@ reconciliation failure. The single intentional exception is documented with its 
 | Stage | `stage` (Baseline, Assessment) | `stage` (action payload) | — (implicit in `path`) | `stage` (form field + query param) | `stage` |
 | Tick identifier | `tick_id` (Assessment) | `tick_id` (action payload) | `tick_id` (request + assessment response) | — | `tick_id` |
 | Pending marker path | `path` (PendingMarker) | — | `path` (haiku_baseline_clear_marker request) | — | `path` (pending_marker_cleared) |
+| Pending-origin stamp | `path` + `author_class` (PendingOriginStamp §2.4) | `author_class` (DriftFinding §3.1, sourced from stamp) | `path` + `audit_log_entry_id` (haiku_human_write side-effect) / SPA upload side-effect | — (stamp is workflow-engine-only; never serialized to HTTP) | `author_class` (drift_detected §6.1, sourced from stamp) |
 
 **Intentional naming variance — `path` vs. `target_path` in HTTP upload requests:**
 

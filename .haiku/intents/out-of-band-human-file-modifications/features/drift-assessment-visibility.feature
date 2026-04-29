@@ -54,8 +54,8 @@ Feature: Drift assessment visibility in the SPA and chat surface
     Then the SPA transitions the assessment row from "pending-revisit" to "revisit-invoked"
     And the pending-assessment marker for "stages/inception/artifacts/DISCOVERY.md" remains open until the revisit completes
 
-  # SPA state: "resolved" = PendingMarker.resolved_sha != null (DATA-CONTRACTS.md §2.2 — set atomically
-  # with cleared_at at marker clearance time; never null after clearance)
+  # SPA state: "resolved" = PendingMarker.cleared_at != null (DATA-CONTRACTS.md §2.2 — once non-null
+  # the marker is logically resolved; set when the linked downstream action resolves)
   Scenario: SPA resolves pending-revisit state when the revisited stage re-passes its gate
     Given a pending-assessment marker exists for "stages/inception/artifacts/DISCOVERY.md" linked to a revisit of stage "inception"
     When the revisited stage "inception" re-passes its review gate (revisit completes)

@@ -36,13 +36,19 @@ Feature: Manual change assessment classification by the agent
     And no pending-assessment marker is written
 
   Scenario: Agent classifies an out-of-spec change as surface-as-feedback
+    # Per DATA-CONTRACTS.md §3.5 (R6 contract) and §0.3: surface-as-feedback defers
+    # the baseline update — the baseline is NOT changed at classification time. The
+    # PendingMarker is the sole re-detection suppression mechanism while the linked
+    # feedback is open; the baseline is updated only when the marker clears
+    # (haiku_baseline_clear_marker on terminal feedback status — closed or rejected).
     Given the DriftFinding has change_kind "modified" for "stages/design/artifacts/dashboard-layout.html"
     And the DriftFinding shows a designer replacing a layout that contradicts an active acceptance criterion
     When the Agent classifies the change with outcome "surface-as-feedback"
     And the Agent supplies linked_feedback_id referencing a newly created feedback item "FB-09"
     Then the ManualChangeAssessment record is persisted with outcome "surface-as-feedback" and linked_feedback_id "FB-09"
     And a pending-assessment marker is written for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
-    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" IS updated atomically to the post-drift SHA at classification time
+    And the PendingMarker and ManualChangeAssessment record are written in the same atomic transaction
+    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" is NOT updated at classification time
     And the drift-detection gate suppresses re-detection of "stages/design/artifacts/dashboard-layout.html" while the marker is open
 
   # ---------------------------------------------------------------------------

@@ -16,9 +16,9 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/product/ACCEPTANCE-CRITERIA.md
 status: active
 bolt: 2
-hat: specification
+hat: validator
 started_at: '2026-04-29T02:43:18Z'
-hat_started_at: '2026-04-29T03:00:26Z'
+hat_started_at: '2026-04-29T03:03:02Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T02:43:18Z'
@@ -51,6 +51,10 @@ iterations:
       contradictions with upstream artifacts.
   - hat: specification
     started_at: '2026-04-29T03:00:26Z'
+    completed_at: '2026-04-29T03:03:02Z'
+    result: advance
+  - hat: validator
+    started_at: '2026-04-29T03:03:02Z'
     completed_at: null
     result: null
 model_original: sonnet

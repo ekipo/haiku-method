@@ -23,7 +23,7 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/features/manual-change-assessment.feature
   - >-
     .haiku/intents/out-of-band-human-file-modifications/features/drift-assessment-visibility.feature
-status: active
+status: completed
 bolt: 1
 hat: validator
 started_at: '2026-04-29T03:12:15Z'
@@ -39,8 +39,9 @@ iterations:
     result: advance
   - hat: validator
     started_at: '2026-04-29T03:18:11Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-29T03:19:18Z'
+    result: advance
+completed_at: '2026-04-29T03:19:18Z'
 ---
 # Behavioral specifications (Gherkin features)
 

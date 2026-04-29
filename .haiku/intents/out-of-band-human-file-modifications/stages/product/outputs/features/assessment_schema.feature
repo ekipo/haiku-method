@@ -22,7 +22,7 @@ Feature: Assessment schema and audit fields
       | initiated_by       | string            | yes      |
       | triggering_request | string            | yes      |
       | target_path        | string            | yes      |
-      | resulting_sha      | string            | yes      |
+      | resulting_sha      | string or null    | yes      |
       | recorded_at        | RFC3339           | yes      |
       | mode               | enum              | yes      |
       | confirmed_by_user  | boolean           | yes      |
@@ -77,11 +77,19 @@ Feature: Assessment schema and audit fields
     When haiku_classify_drift commits the classification
     Then the Assessment's "resulting_sha" = "ab12cd34..."
 
-  Scenario: resulting_sha is updated at marker-clearance time for non-terminal outcomes
+  Scenario: resulting_sha is null at classification time for non-terminal outcomes
     Given the agent classifies a finding as "surface-as-feedback"
     And the on-disk SHA at classification time is "ab12cd34..."
-    When the linked feedback "FB-12" is resolved and haiku_baseline_clear_marker fires
-    Then the Assessment's "resulting_sha" is updated to the current on-disk SHA at that time
+    When haiku_classify_drift commits the classification
+    Then the Assessment's "resulting_sha" = null
+    And the Assessment record is written once and never modified again
+
+  Scenario: Assessment.resulting_sha remains null for non-terminal outcomes after marker clearance
+    Given an Assessment record with "resulting_sha" = null (a surface-as-feedback classification)
+    And the linked feedback "FB-12" is resolved and haiku_baseline_clear_marker fires
+    Then the Assessment's "resulting_sha" is still null
+    And the post-clearance SHA is on PendingMarker.resolved_sha
+    And the post-clearance SHA is in the "pending_marker_cleared" event payload's "resolved_sha" field
 
   # --- mode enum ---
 

@@ -216,12 +216,14 @@ Feature: MCP tool contracts
 
     Scenario: baseline is updated to current on-disk SHA when marker clears
       # Per §4.4 — the deferred baseline update happens at marker-clearance time, not at classification.
+      # The post-clearance SHA lands on PendingMarker.resolved_sha; Assessment.resulting_sha stays null.
       Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with outcome "surface-as-feedback"
       And the linked feedback "FB-12" transitions to "closed"
       When haiku_baseline_clear_marker fires with trigger "feedback-closed"
       Then the PendingMarker's "cleared_at" is set to the current UTC timestamp
-      And the Baseline entry for the file is updated to the current on-disk SHA
-      And the Assessment record's "resulting_sha" is updated to the same current on-disk SHA
+      And the PendingMarker's "resolved_sha" is set to the current on-disk SHA
+      And the Baseline entry for the file is updated to the same current on-disk SHA
+      And the Assessment record's "resulting_sha" remains null (Assessment is append-only and never modified)
 
     Scenario: trigger-revisit classification writes pending marker but does NOT update baseline
       Given the agent classifies the finding as "trigger-revisit" targeting stage "design"

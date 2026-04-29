@@ -13,14 +13,15 @@ Feature: PendingMarker schema and lifecycle
     Given the agent classifies the finding as "surface-as-feedback"
     When haiku_classify_drift submits the classification
     Then a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with fields:
-      | field                        | type    | present |
-      | path                         | string  | yes     |
-      | created_at                   | RFC3339 | yes     |
-      | created_by_assessment_id     | string  | yes     |
-      | outcome                      | enum    | yes     |
-      | linked_feedback_id           | string  | yes     |
-      | linked_revisit_target_stage  | string  | yes     |
-      | cleared_at                   | RFC3339 | yes     |
+      | field                        | type              | present |
+      | path                         | string            | yes     |
+      | created_at                   | RFC3339           | yes     |
+      | created_by_assessment_id     | string            | yes     |
+      | outcome                      | enum              | yes     |
+      | linked_feedback_id           | string or null    | yes     |
+      | linked_revisit_target_stage  | string or null    | yes     |
+      | cleared_at                   | RFC3339 or null   | yes     |
+      | resolved_sha                 | string or null    | yes     |
 
   # --- Outcome constraint ---
 
@@ -118,3 +119,30 @@ Feature: PendingMarker schema and lifecycle
       | ok             | true            |
       | marker_cleared | false           |
       | reason         | no_open_marker  |
+
+  # --- resolved_sha lifecycle ---
+
+  Scenario: PendingMarker.resolved_sha is null while the marker is open
+    Given a PendingMarker was just written for "stages/design/artifacts/hero-layout.html"
+    When the marker's current state is read
+    Then "resolved_sha" = null
+    And "cleared_at" = null
+
+  Scenario: PendingMarker.resolved_sha is populated atomically at clearance time
+    Given a PendingMarker exists for "stages/design/artifacts/hero-layout.html" with "resolved_sha" = null
+    And the current on-disk SHA of the file is "cd34ef56..."
+    When haiku_baseline_clear_marker fires with any valid trigger
+    Then "resolved_sha" = "cd34ef56..."
+    And "cleared_at" is set to the current UTC timestamp in the same atomic write
+    And the Baseline entry's SHA equals "cd34ef56..."
+
+  Scenario: PendingMarker.resolved_sha is never mutated after clearance
+    Given a PendingMarker has been cleared with "resolved_sha" = "cd34ef56..."
+    When any process attempts to update "resolved_sha" to a different value
+    Then the write is rejected or ignored (the record is logically frozen after clearance)
+
+  Scenario: PendingMarker.cleared_at and PendingMarker.resolved_sha are set together exactly once
+    Given a PendingMarker exists with "cleared_at" = null and "resolved_sha" = null
+    When haiku_baseline_clear_marker fires
+    Then exactly one write sets both "cleared_at" and "resolved_sha" in a single atomic operation
+    And no subsequent writes touch either field

@@ -254,6 +254,36 @@ This intent's drift-detection gate runs **after** the existing feedback-triage g
 
 The gate sequence is therefore: tamper-detection → feedback-triage → drift-detection → per-state dispatch. *This is a contract for the workflow-engine sibling artifact; mentioned here only because the action ordering surfaces in the `haiku_run_next` response shape.*
 
+### 3.6 `trigger-revisit` baseline-update timing
+
+When a finding is classified `trigger-revisit`, the baseline for that file is **not** updated at classification time — it is updated at revisit-completion time. This section is the self-contained contract for that timing; no design-stage artifact is required to implement it.
+
+**Atomic-ordering steps:**
+
+1. **Classification** — agent calls `haiku_classify_drift` with `outcome: "trigger-revisit"`. The tool writes a `PendingMarker` (§2.2) with `cleared_at: null` and `resolved_sha: null`. `Baseline` is NOT updated. `Assessment.revisit_invoked_at` is written as `null` (§2.3).
+2. **Revisit-invoked** — on the next tick the workflow engine calls `haiku_revisit` targeting `PendingMarker.linked_revisit_target_stage`. At this moment `Assessment.revisit_invoked_at` is stamped with the UTC time of invocation. The `PendingMarker` remains open (`cleared_at: null`).
+3. **Revisit-complete** — when the revisited stage's gate passes (stage re-advances after the revisit cycle), the workflow engine calls `haiku_baseline_clear_marker` with `trigger: "revisit-complete"`. In a single atomic write: (a) `PendingMarker.resolved_sha` is set to the on-disk `sha256` of the file at resolution time; (b) `Baseline` is updated with the resolved SHA, `bytes`, `mtime_ns`, `author_class: "agent"`, `acknowledged_via: "classification-terminal"`; (c) `PendingMarker.cleared_at` is stamped with the current UTC time.
+4. **Marker-clear** — the marker is logically frozen (`cleared_at` and `resolved_sha` both non-null). The drift gate's "skip if pending" predicate (`cleared_at IS NULL`) will no longer suppress this path on subsequent ticks.
+
+**`Assessment.revisit_invoked_at` semantics:**
+
+| State | Value |
+|---|---|
+| Written at classification time; `haiku_revisit` not yet called | `null` |
+| `haiku_revisit` has fired targeting this assessment's stage | UTC RFC 3339 timestamp, e.g. `"2026-04-29T10:00:00Z"` |
+
+Append-only: transitions from `null` → timestamp exactly once, never reset. An Assessment with non-null `revisit_invoked_at` and open `PendingMarker` rows means the revisit is in progress.
+
+**`PendingMarker.resolved_sha` semantics for `trigger-revisit`:**
+
+| State | Value |
+|---|---|
+| Marker open (pending or revisit in progress) | `null` |
+| Cleared via `revisit-complete` | On-disk SHA-256 at resolution time (64 hex chars) |
+| Cleared via `feedback-closed` or `feedback-rejected` | `null` (the feedback path updates Baseline directly; the marker carries no SHA) |
+
+This field records the exact SHA the Baseline was updated to, providing a post-clearance audit trail without requiring a second Baseline read.
+
 ---
 
 ## 4. MCP Tool Contracts (new tools introduced by this intent)
@@ -381,7 +411,7 @@ Purpose: the agent's response to a `manual_change_assessment` action.
 3. Validate every classification against `legal_outcomes` for the dispatched tick.
 4. Write the `Assessment` record. For terminal outcomes (`ignore`, `inline-fix`), `Assessment.resulting_sha` is set to the current on-disk SHA-256 of the file. For non-terminal outcomes (`surface-as-feedback`, `trigger-revisit`), `Assessment.resulting_sha` is `null`. The `Assessment` record is **never** modified after this write.
 5. For each terminal classification (`ignore`, `inline-fix`): update `Baseline` to the on-disk `(sha256, bytes, mtime_ns, is_binary)` with `author_class = "agent"`, `acknowledged_via = "classification-terminal"`.
-6. For each non-terminal classification (`surface-as-feedback`, `trigger-revisit`): write a `PendingMarker` with `resolved_sha = null` and `cleared_at = null`. **Do not** update `Baseline`. The post-clearance SHA for non-terminal outcomes will land on `PendingMarker.resolved_sha` at clearance time (see § 4.4).
+6. For each non-terminal classification (`surface-as-feedback`, `trigger-revisit`): write a `PendingMarker` with `resolved_sha = null` and `cleared_at = null`. **Do not** update `Baseline`. The full baseline-update timing contract is in §3.6; the clearance mechanism is in §4.4.
 7. Return.
 
 **Errors:**
@@ -415,6 +445,22 @@ Purpose: invoked by the workflow engine itself (not the agent) when a linked fee
 4. Emit a `pending_marker_cleared` event (§ 6.3) that includes `resolved_sha` in its payload.
 
 **The `Assessment` record is never modified by this tool.** `Assessment.resulting_sha` remains `null` for non-terminal outcomes; the post-clearance SHA is carried exclusively by `PendingMarker.resolved_sha` and the event payload.
+
+**`(outcome, trigger)` legality matrix** — which trigger values are valid for each `PendingMarker.outcome`:
+
+| `PendingMarker.outcome` | `"feedback-closed"` | `"feedback-rejected"` | `"revisit-complete"` |
+|---|---|---|---|
+| `surface-as-feedback` | OK | OK | rejected |
+| `trigger-revisit` | rejected | rejected | OK |
+
+A `trigger_outcome_mismatch` error is returned when the `trigger` value does not match the marker's `outcome` (e.g. calling with `trigger: "revisit-complete"` on a `surface-as-feedback` marker, or `trigger: "feedback-closed"` on a `trigger-revisit` marker). This prevents the baseline-update path from applying the wrong clearance semantics.
+
+**Errors:**
+
+| `code` | When |
+|---|---|
+| `no_open_marker` | No open `PendingMarker` exists for the given `path`. Returns `{ ok: true, marker_cleared: false }` rather than an error, since idempotent retry is safe. |
+| `trigger_outcome_mismatch` | `trigger` does not match the open marker's `outcome` per the legality matrix above. |
 
 Response: `{ ok: true, marker_cleared: true, baseline_updated: true, resolved_sha: "<sha>" }` or `{ ok: true, marker_cleared: false, reason: "no_open_marker" }`.
 

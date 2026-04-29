@@ -16,9 +16,9 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/product/ACCEPTANCE-CRITERIA.md
 status: active
 bolt: 3
-hat: specification
+hat: validator
 started_at: '2026-04-29T02:43:18Z'
-hat_started_at: '2026-04-29T03:05:28Z'
+hat_started_at: '2026-04-29T03:09:51Z'
 iterations:
   - hat: product
     started_at: '2026-04-29T02:43:18Z'
@@ -78,6 +78,10 @@ iterations:
       sibling-deferral) checks out and 59KB easily clears the 8KB minimum.
   - hat: specification
     started_at: '2026-04-29T03:05:28Z'
+    completed_at: '2026-04-29T03:09:51Z'
+    result: advance
+  - hat: validator
+    started_at: '2026-04-29T03:09:51Z'
     completed_at: null
     result: null
 model_original: sonnet

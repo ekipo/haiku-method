@@ -772,14 +772,20 @@ only paths that increment it.*
 ### 4.4 `haiku_baseline_clear_marker` — clear a pending marker when downstream action resolves
 
 **Purpose:** Invoked by the workflow engine (not the agent directly) when:
-- A feedback item linked to a `surface-as-feedback` marker transitions to `addressed` state, OR
+- A feedback item linked to a `surface-as-feedback` marker transitions to a terminal state
+  (`closed` or `rejected`), OR
 - A revisit linked to a `trigger-revisit` marker completes.
 
 **Reconciliation requirement R5 — trigger contract:**
-The tool fires when feedback transitions to `addressed` (a mid-lifecycle state, not just `closed`).
-A pending marker is cleared as soon as the human fix lands — not when the human formally closes
-the feedback. This ensures the drift gate does not continue suppressing re-detection for the same
-file while the fix is in place but the feedback is still formally "open."
+The tool fires only when the linked feedback transitions to a **terminal** state (`closed` or
+`rejected`) or the linked revisit completes. The mid-lifecycle `addressed` state is **not** a
+clearance trigger: `addressed` feedback can be reopened, so it does not provide the immutability
+guarantee required to safely update the baseline. While feedback is `addressed` but not yet
+terminal, the `PendingMarker` continues to suppress re-detection on the file (per §3.5 R6); any
+intermediate edits made while the feedback is open are folded into a single baseline acknowledgment
+at clearance time. This keeps the suppression window aligned with the immutability boundary
+(AC-G5/AC-SF3 in unit-01; `pending_marker_schema.feature` clearance scenarios; `mcp_tools.feature`
+R5-contract scenarios).
 
 **Reconciliation requirement R5 — scope:**
 This tool clears the `PendingMarker` for a **single tracked file path** per invocation. It is not
@@ -791,7 +797,7 @@ a batch-clear operation. Multiple markers (one per file) require multiple invoca
 |---|---|---|---|
 | `intent_slug` | string | yes | Active intent. |
 | `path` | string | yes | The `PendingMarker.path` to clear. Clears the newest open marker for this path (max `created_at` with `cleared_at IS NULL`). |
-| `trigger` | `"feedback-addressed" \| "feedback-closed" \| "feedback-rejected" \| "revisit-complete"` | yes | The event that caused the clearance. `"feedback-addressed"` is the primary trigger for `surface-as-feedback` markers (fires before `feedback-closed`). `"feedback-closed"` and `"feedback-rejected"` are fallback triggers if the marker was not cleared at `addressed` transition. |
+| `trigger` | `"feedback-closed" \| "feedback-rejected" \| "revisit-complete"` | yes | The event that caused the clearance. `"feedback-closed"` and `"feedback-rejected"` are the only valid triggers for `surface-as-feedback` markers; `"revisit-complete"` is the only valid trigger for `trigger-revisit` markers. The mid-lifecycle `addressed` state is **not** a valid trigger value — invocations with `"trigger" = "feedback-addressed"` return `error: "invalid_trigger"` (see error table below). |
 
 **Response (success):**
 
@@ -811,6 +817,7 @@ a batch-clear operation. Multiple markers (one per file) require multiple invoca
 |---|---|
 | `intent_not_found` | `intent_slug` unknown. |
 | `path_not_in_tracked_surface` | `path` is not a known tracked-surface path for this intent. |
+| `invalid_trigger` | `trigger` is not one of the three valid values. Notably, `"feedback-addressed"` is rejected here — the mid-lifecycle `addressed` state does not clear pending markers (R5). |
 
 ---
 
@@ -1115,7 +1122,7 @@ dispatch (one event per classification batch, not one per finding).
 | `intent_slug` | string | yes | Active intent. |
 | `path` | string | yes | The marker's `path` (same as `PendingMarker.path`). |
 | `assessment_id` | string | yes | The originating `Assessment.id`. |
-| `trigger` | `"feedback-addressed" \| "feedback-closed" \| "feedback-rejected" \| "revisit-complete"` | yes | The event that caused the clearance. Mirrors `haiku_baseline_clear_marker.trigger`. |
+| `trigger` | `"feedback-closed" \| "feedback-rejected" \| "revisit-complete"` | yes | The event that caused the clearance. Mirrors `haiku_baseline_clear_marker.trigger` (§4.4). `"feedback-addressed"` is intentionally not a valid value — see R5 in §4.4. |
 | `linked_feedback_id` | string \| null | yes | The `PendingMarker.linked_feedback_id`. |
 | `linked_revisit_target_stage` | string \| null | yes | The `PendingMarker.linked_revisit_target_stage`. |
 
@@ -1128,7 +1135,7 @@ dispatch (one event per classification batch, not one per finding).
   "intent_slug": "out-of-band-human-file-modifications",
   "path": "stages/design/artifacts/hero-layout.html",
   "assessment_id": "AS-07",
-  "trigger": "feedback-addressed",
+  "trigger": "feedback-closed",
   "linked_feedback_id": "FB-12",
   "linked_revisit_target_stage": null
 }

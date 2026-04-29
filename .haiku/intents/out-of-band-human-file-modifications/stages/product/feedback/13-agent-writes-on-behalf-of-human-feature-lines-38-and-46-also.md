@@ -2,7 +2,7 @@
 title: >-
   agent-writes-on-behalf-of-human.feature lines 38 and 46 also use non-existent
   acknowledged_by field
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T03:52:57Z'
 resolution: null
 replies: []

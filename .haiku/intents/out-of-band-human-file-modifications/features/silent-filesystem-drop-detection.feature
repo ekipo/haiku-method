@@ -5,116 +5,194 @@ Feature: Silent filesystem drop detection
 
   Background:
     Given an active intent "demo-intent" in stage "design" running in studio "software"
-    And per-stage SHA baselines have been established for stage "design"
-    And the tracked surface for stage "design" includes "stages/design/outputs/"
-    And no pending out-of-band assessments exist
+    And a tracked surface baseline exists for stage "design"
+    And the tracked surface for stage "design" includes "stages/design/artifacts/"
+    And the tracked surface for stage "design" also includes "stages/design/outputs/" as an alias for "stages/design/artifacts/"
+    And no pending-assessment markers exist for any tracked file
     And the next workflow operation is the agent calling haiku_run_next
-
   # ---------------------------------------------------------------------------
-  # Happy Path: implicit detection on next tick
+  # Motivating scenario 1: Designer replaces layout
   # ---------------------------------------------------------------------------
 
   Scenario: Designer replaces a stage output layout file
-    Given the file "stages/design/outputs/dashboard-layout.html" was last written by the agent with SHA "agent-sha-001"
-    When the Designer replaces "stages/design/outputs/dashboard-layout.html" via direct filesystem write with new content having SHA "human-sha-002"
+    Given the file "stages/design/artifacts/dashboard-layout.html" was last written by the agent with SHA "agent-sha-001"
+    When the Designer replaces "stages/design/artifacts/dashboard-layout.html" via direct filesystem write with new content having SHA "human-sha-002"
     And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects the SHA mismatch on "stages/design/outputs/dashboard-layout.html"
+    Then the pre-tick drift-detection gate detects the SHA mismatch on "stages/design/artifacts/dashboard-layout.html"
     And the workflow emits a "manual_change_assessment" action
-    And the action payload lists "stages/design/outputs/dashboard-layout.html" as a changed file
-    And the action payload includes the unified text diff for the file
+    And the action payload contains a DriftFinding with change_kind "modified" for "stages/design/artifacts/dashboard-layout.html"
+    And the DriftFinding includes a unified text diff between SHA "agent-sha-001" and SHA "human-sha-002"
     And the agent is instructed to classify the change before any normal stage handler runs
+  # ---------------------------------------------------------------------------
+  # Motivating scenario 2: PO edits deliverable and asks AI to extend
+  # ---------------------------------------------------------------------------
 
   Scenario: Product Owner edits an existing stage output deliverable
-    Given the file "stages/design/outputs/spec.md" was last written by the agent with SHA "agent-sha-010"
-    When the Product Owner hand-edits "stages/design/outputs/spec.md" outside any UI, producing SHA "human-sha-011"
+    Given the file "stages/design/artifacts/spec.md" was last written by the agent with SHA "agent-sha-010"
+    When the Product Owner hand-edits "stages/design/artifacts/spec.md" outside any UI producing SHA "human-sha-011"
     And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects the SHA mismatch
+    Then the pre-tick drift-detection gate detects the SHA mismatch on "stages/design/artifacts/spec.md"
     And the workflow emits a "manual_change_assessment" action
-    And the action payload's diff shows only the lines the Product Owner changed
+    And the DriftFinding for "stages/design/artifacts/spec.md" has change_kind "modified"
+    And the DriftFinding diff_unified field shows only the lines the Product Owner changed
+  # ---------------------------------------------------------------------------
+  # Motivating scenario 3: User uploads knowledge
+  # ---------------------------------------------------------------------------
 
   Scenario: User drops a brand-new knowledge file into the elaborate phase
-    Given the active intent is in stage "inception" at phase "elaborate"
+    Given a tracked surface baseline exists for stage "inception"
     And the tracked surface for stage "inception" includes "knowledge/"
-    And the file "knowledge/market-research.pdf" did not exist at the previous tick
+    And the file "knowledge/market-research.pdf" has no baseline entry (it is a new file)
     When the User drops "knowledge/market-research.pdf" into the worktree via direct filesystem write
     And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects an added file under the tracked surface
-    And the workflow emits a "manual_change_assessment" action with change_type "added"
-    And the action payload lists "knowledge/market-research.pdf" with size and content-type metadata
+    Then the pre-tick drift-detection gate detects an added file under the tracked surface
+    And the workflow emits a "manual_change_assessment" action
+    And the DriftFinding for "knowledge/market-research.pdf" has change_kind "added" with before_sha256 null
+    And the DriftFinding has is_binary true and diff_unified null (PDF is binary)
     And the agent is instructed to classify the addition before continuing elaborate
+  # ---------------------------------------------------------------------------
+  # Alias coverage: outputs/ and artifacts/ are the same tracked surface
+  # ---------------------------------------------------------------------------
 
+  Scenario: Gate tracks both artifacts/ and outputs/ alias as the same surface
+    Given the file "stages/design/artifacts/hero.html" was last written by the agent with SHA "agent-sha-020"
+    And the file "stages/design/outputs/hero.html" is a filesystem alias for "stages/design/artifacts/hero.html"
+    When the Designer replaces "stages/design/outputs/hero.html" via direct filesystem write with SHA "human-sha-021"
+    And the agent calls haiku_run_next
+    Then the pre-tick drift-detection gate detects the SHA mismatch
+    And the DriftFinding baseline key is "stages/design/artifacts/hero.html" (canonical artifacts/ form)
+    And the workflow emits a "manual_change_assessment" action with change_kind "modified"
   # ---------------------------------------------------------------------------
   # Edge cases: tick model boundaries
   # ---------------------------------------------------------------------------
 
   Scenario: Multiple files change between two ticks
-    Given files "stages/design/outputs/a.html", "stages/design/outputs/b.html", and "stages/design/outputs/c.html" were last written by the agent
+    Given files "stages/design/artifacts/a.html", "stages/design/artifacts/b.html", and "stages/design/artifacts/c.html" were last written by the agent
     When the Designer replaces all three files via filesystem writes
     And the agent calls haiku_run_next
     Then the workflow emits exactly one "manual_change_assessment" action
-    And the action payload lists all three files
-    And each file entry carries its own diff and change_type
+    And the action payload findings array contains exactly three DriftFindings
+    And each DriftFinding carries its own change_kind, diff_unified, before_sha256, and after_sha256
 
   Scenario: Zero changes since the last tick
-    Given no tracked file has changed since the last baseline
+    Given no tracked file has changed since the last baseline acknowledgment
     When the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects no SHA mismatches
+    Then the pre-tick drift-detection gate detects no SHA mismatches
     And no "manual_change_assessment" action is emitted
-    And the normal stage handler runs
+    And the normal stage handler runs unblocked
 
-  Scenario: Change is detected immediately on the next tick, not in real time
+  Scenario: Change is detected on next tick not during in-flight bolt
     Given the agent is mid-bolt processing a unit
-    When the Designer replaces "stages/design/outputs/layout.html" while the bolt is in flight
+    When the Designer replaces "stages/design/artifacts/layout.html" while the bolt is in flight
     Then no detection event fires during the in-flight bolt
-    And the agent's mid-bolt work continues against the pre-edit version of the file
-    When the agent calls haiku_run_next at the end of the bolt
-    Then the pre-tick out-of-band gate observes the drift
+    And the agent's mid-bolt work continues uninterrupted against the pre-edit version of the file
+    When the agent calls haiku_run_next after the bolt completes
+    Then the pre-tick drift-detection gate observes the SHA mismatch
+    And the workflow emits a "manual_change_assessment" action with change_kind "modified"
+  # ---------------------------------------------------------------------------
+  # Edge cases: baseline establishment (first tick after upgrade)
+  # ---------------------------------------------------------------------------
+
+  Scenario: First tick after feature ships establishes baselines without firing assessments
+    Given the intent "demo-intent" existed before the drift-detection feature shipped
+    And no "stages/design/baseline.json" exists for stage "design"
+    When the agent calls haiku_run_next for the first time after the feature ships
+    Then the drift-detection gate runs in baseline-establishment mode
+    And the gate enumerates all files in the tracked surface and writes their SHA-256 hashes to baseline.json
+    And each baseline entry has acknowledged_by "agent" as the conservative default
+    And zero "manual_change_assessment" actions are emitted on this first tick
+    And state.json records drift_baseline_established_at for stage "design"
+    And subsequent ticks run in drift-detection mode against the newly established baseline
+  # ---------------------------------------------------------------------------
+  # Edge cases: editor temp files
+  # ---------------------------------------------------------------------------
+
+  Scenario: Editor temp files do not produce false drift events
+    Given the tracked surface includes "stages/design/artifacts/"
+    When a human editor briefly creates "stages/design/artifacts/.spec.md.swp" during a vim save
+    And the temp file is removed before the next tick fires (final renamed file "spec.md" replaces prior)
+    And the agent calls haiku_run_next
+    Then the pre-tick drift-detection gate does not emit a drift event for "stages/design/artifacts/.spec.md.swp"
+    And the gate emits a drift event only for "stages/design/artifacts/spec.md" if its SHA changed
+    And no spurious DriftFinding appears for transient temp files matching common editor patterns
+  # ---------------------------------------------------------------------------
+  # Edge cases: deletions
+  # ---------------------------------------------------------------------------
+
+  Scenario: Tracked file is deleted from the worktree
+    Given the file "stages/design/artifacts/old-mock.html" exists with baseline SHA "agent-sha-030"
+    And the file's author_class in the baseline is "agent"
+    When the User deletes "stages/design/artifacts/old-mock.html" from the filesystem
+    And the agent calls haiku_run_next
+    Then the pre-tick drift-detection gate detects the deletion
     And the workflow emits a "manual_change_assessment" action
-
+    And the DriftFinding has change_kind "deleted" with after_sha256 null and before_sha256 "agent-sha-030"
+    And the diff_unified field is null for the deleted file
   # ---------------------------------------------------------------------------
-  # Edge cases: tracked-surface boundary
+  # Edge cases: binary / mime-only changes
   # ---------------------------------------------------------------------------
 
-  Scenario: Files outside the tracked surface are ignored
-    Given the tracked surface for stage "design" is "stages/design/outputs/" and "knowledge/"
-    When the User edits "README.md" at the repository root
+  Scenario: Binary file replacement is detected with SHA delta only (no textual diff)
+    Given the file "stages/design/artifacts/mockup.png" has baseline SHA "img-sha-001"
+    When the Designer replaces "stages/design/artifacts/mockup.png" with a new image file with SHA "img-sha-002"
     And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate ignores "README.md"
-    And no "manual_change_assessment" action is emitted
+    Then the drift-detection gate detects the SHA mismatch
+    And the DriftFinding has is_binary true
+    And the DriftFinding has diff_unified null (no content diff for binary files)
+    And the DriftFinding includes before_sha256 "img-sha-001" and after_sha256 "img-sha-002"
+    And the workflow emits a "manual_change_assessment" action for the agent to classify
+  # ---------------------------------------------------------------------------
+  # Edge cases: pending-assessment marker suppresses re-detection
+  # ---------------------------------------------------------------------------
 
-  Scenario: Editor temp files do not produce false drift
-    Given the tracked surface includes "stages/design/outputs/"
-    When a human editor briefly creates "stages/design/outputs/.spec.md.swp" during a save
-    And the temp file is removed before the next tick fires
-    And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate sees no net change
-    And no "manual_change_assessment" action is emitted
+  Scenario: File with open pending-assessment marker is suppressed on next tick
+    Given the file "stages/design/artifacts/layout.html" was classified as "surface-as-feedback" in a prior tick
+    And a pending-assessment marker exists for "stages/design/artifacts/layout.html" linked to "FB-05"
+    And the file's on-disk SHA matches the baseline_sha_at_creation in the marker
+    When the agent calls haiku_run_next
+    Then the drift-detection gate reads the open marker for "stages/design/artifacts/layout.html"
+    And the gate suppresses drift detection for "stages/design/artifacts/layout.html"
+    And no DriftFinding is emitted for "stages/design/artifacts/layout.html"
+  # ---------------------------------------------------------------------------
+  # Reconciliation requirement 8: marker clears on addressed (not only closed)
+  # ---------------------------------------------------------------------------
 
+  Scenario: Pending-assessment marker is NOT cleared when feedback transitions to addressed
+    Given a pending-assessment marker exists for "stages/design/artifacts/layout.html" linked to feedback "FB-05"
+    And "FB-05" has status "open"
+    When "FB-05" transitions to status "addressed"
+    Then the pending-assessment marker for "stages/design/artifacts/layout.html" is NOT cleared
+    And the drift-detection gate continues to suppress re-detection for "stages/design/artifacts/layout.html"
+    And the baseline SHA is NOT updated at this transition
+
+  Scenario: Pending-assessment marker is cleared when feedback transitions to closed
+    Given a pending-assessment marker exists for "stages/design/artifacts/spec.md" linked to feedback "FB-06"
+    And "FB-06" has status "addressed"
+    When "FB-06" transitions to status "closed"
+    Then the pending-assessment marker for "stages/design/artifacts/spec.md" is cleared
+    And the baseline SHA for "stages/design/artifacts/spec.md" updates to the file's current SHA at clearing time
+    And on the next tick the drift-detection gate treats "stages/design/artifacts/spec.md" as baseline-matched
+
+  Scenario: Pending-assessment marker is cleared when feedback transitions to rejected
+    Given a pending-assessment marker exists for "stages/design/artifacts/tokens.css" linked to feedback "FB-07"
+    And "FB-07" has status "open"
+    When "FB-07" transitions to status "rejected"
+    Then the pending-assessment marker for "stages/design/artifacts/tokens.css" is cleared
+    And the baseline SHA for "stages/design/artifacts/tokens.css" updates to the file's current SHA at clearing time
   # ---------------------------------------------------------------------------
   # Error scenarios
   # ---------------------------------------------------------------------------
 
-  Scenario: Tracked file is deleted from the worktree
-    Given the file "stages/design/outputs/old-mock.html" exists with a recorded baseline SHA
-    When the User deletes "stages/design/outputs/old-mock.html" from the filesystem
-    And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects the deletion
-    And the workflow emits a "manual_change_assessment" action with change_type "deleted"
-    And the action payload includes the path of the deleted file
-    And the diff payload is omitted with a flag "binary_or_missing"
-
-  Scenario: Baseline storage is unreadable on tick
-    Given the per-stage SHA baseline storage is corrupted or missing
+  Scenario: Baseline storage is corrupt on tick
+    Given the "stages/design/baseline.json" file contains invalid JSON
     When the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate logs a recoverable error naming the storage location
-    And the gate enters "recover-baseline" mode for this tick only
-    And the gate re-establishes baselines from current SHAs without firing assessment
-    And the normal stage handler runs
+    Then the drift-detection gate emits a "baseline_corrupt" signal and halts
+    And the tick does not advance to per-state dispatch
+    And the workflow engine surfaces the error "Baseline file for stage 'design' is corrupt. Run haiku_repair to re-establish the baseline."
 
-  Scenario: First tick after feature ships on a pre-existing intent
-    Given a previously running intent has no per-stage SHA baselines recorded
-    When the agent calls haiku_run_next for the first time after the feature ships
-    Then the pre-tick out-of-band gate enters "establish-baseline" mode
-    And current SHAs are recorded as the new baseline
-    And no "manual_change_assessment" action is emitted on this first tick
-    And subsequent ticks operate normally
+  Scenario: Files outside the tracked surface are not detected
+    Given the tracked surface for stage "design" is "stages/design/artifacts/" and "knowledge/"
+    When the User edits "README.md" at the repository root
+    And the agent calls haiku_run_next
+    Then the drift-detection gate does not emit a DriftFinding for "README.md"
+    And no "manual_change_assessment" action is emitted on account of that file

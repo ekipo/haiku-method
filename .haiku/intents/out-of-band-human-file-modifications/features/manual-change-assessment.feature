@@ -1,139 +1,180 @@
 Feature: Manual change assessment classification by the agent
-  As the workflow engine
-  I need the agent to classify each detected out-of-band change into one of four outcomes
+  As the Workflow Engine
+  I need the Agent to classify each detected out-of-band change into one of four canonical outcomes
   So that human edits are routed to the right downstream behavior without harness-driven heuristics
 
   Background:
     Given an active intent "demo-intent" with stage "design"
-    And the pre-tick out-of-band gate has detected drift on one or more tracked files
-    And the workflow has emitted a "manual_change_assessment" action with the diff payload
-    And the four valid classification outcomes are: ignore, inline-fix, surface-as-feedback, trigger-revisit
-
+    And a tracked surface baseline exists for stage "design"
+    And the drift-detection gate has detected drift on one or more tracked files
+    And the workflow has emitted a "manual_change_assessment" action with the drift findings payload
+    And the four valid classification outcomes are: "ignore", "inline-fix", "surface-as-feedback", "trigger-revisit"
   # ---------------------------------------------------------------------------
-  # Happy Path: each of the four outcomes
+  # Four canonical outcomes: one scenario each
   # ---------------------------------------------------------------------------
 
   Scenario: Agent classifies a typo correction as ignore
-    Given the diff shows a single-character change in a sentence in "stages/design/outputs/spec.md"
-    And the change is on a stage owned by the active stage
-    When the agent classifies the change with outcome "ignore"
-    Then the classification record is persisted with outcome "ignore" and a one-line rationale
-    And the new file state is recorded as the new SHA baseline
-    And no feedback file is created
-    And the workflow returns to its prior phase
-    And on the next tick no "manual_change_assessment" fires for this file
+    Given the DriftFinding has change_kind "modified" for "stages/design/artifacts/spec.md"
+    And the DriftFinding shows a single-character change in a sentence (punctuation only)
+    And the file is owned by the active stage "design"
+    When the Agent classifies the change with outcome "ignore" and a one-line rationale
+    Then the ManualChangeAssessment record is persisted with outcome "ignore"
+    And the baseline entry for "stages/design/artifacts/spec.md" is updated immediately to the current SHA
+    And no feedback item is created
+    And no pending-assessment marker is written
+    And on the next tick the drift-detection gate emits no DriftFinding for "stages/design/artifacts/spec.md"
 
-  Scenario: Agent classifies a small-but-meaningful edit as inline-fix
-    Given the diff shows a Product Owner adding two new acceptance criteria to "stages/design/outputs/spec.md"
-    And the User asked the agent to "extend this"
-    When the agent classifies the change with outcome "inline-fix"
-    Then the classification record is persisted with outcome "inline-fix" and rationale
-    And the agent continues the current bolt with the human's edit as the new starting state
-    And the agent's subsequent writes do not regress the human's added lines
-    And the new combined SHA becomes the next baseline
+  Scenario: Agent classifies a meaningful edit as inline-fix
+    Given the DriftFinding has change_kind "modified" for "stages/design/artifacts/spec.md"
+    And the DriftFinding shows a Product Owner adding two new acceptance criteria lines
+    And the User asked the Agent to "extend this"
+    When the Agent classifies the change with outcome "inline-fix" and a rationale naming the absorbed content
+    Then the ManualChangeAssessment record is persisted with outcome "inline-fix"
+    And the baseline entry for "stages/design/artifacts/spec.md" is updated immediately to the current SHA
+    And the Agent continues the current bolt with the human's edit as the new starting state
+    And no feedback item is created
+    And no pending-assessment marker is written
 
   Scenario: Agent classifies an out-of-spec change as surface-as-feedback
-    Given the diff shows a designer replacing "stages/design/outputs/dashboard-layout.html" with a layout that contradicts an active acceptance criterion
-    When the agent classifies the change with outcome "surface-as-feedback"
-    Then a feedback item is created at the appropriate scope (stage or intent)
-    And the feedback's body cites the specific conflicting acceptance criterion
-    And the feedback's origin is "out-of-band-change"
-    And the classification record references the new feedback id
-    And the SHA baseline is updated to the human's new state
-    And the next tick processes the feedback through the existing fix-loop
+    Given the DriftFinding has change_kind "modified" for "stages/design/artifacts/dashboard-layout.html"
+    And the DriftFinding shows a designer replacing a layout that contradicts an active acceptance criterion
+    When the Agent classifies the change with outcome "surface-as-feedback"
+    And the Agent supplies linked_feedback_id referencing a newly created feedback item "FB-09"
+    Then the ManualChangeAssessment record is persisted with outcome "surface-as-feedback" and linked_feedback_id "FB-09"
+    And a pending-assessment marker is written for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
+    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" is NOT updated at classification time
+    And the drift-detection gate suppresses re-detection of "stages/design/artifacts/dashboard-layout.html" while the marker is open
+
+  Scenario: surface-as-feedback baseline is updated when feedback reaches a terminal state
+    Given a pending-assessment marker exists for "stages/design/artifacts/dashboard-layout.html" linked to "FB-09"
+    And "FB-09" has status "open"
+    When "FB-09" transitions to status "closed"
+    Then the pending-assessment marker for "stages/design/artifacts/dashboard-layout.html" is cleared
+    And the baseline SHA for "stages/design/artifacts/dashboard-layout.html" updates to the file's current SHA at clearing time
+    And on the next tick the drift-detection gate does not emit a DriftFinding for "stages/design/artifacts/dashboard-layout.html"
 
   Scenario: Agent classifies a fundamental redirect as trigger-revisit
-    Given the diff shows the User replacing the entire problem statement in "stages/inception/outputs/intent.md"
-    And the active stage is "design" (downstream of inception)
-    When the agent classifies the change with outcome "trigger-revisit"
-    Then the classification record names the target stage "inception" and the rationale
-    And the workflow invokes haiku_revisit on stage "inception"
-    And the SHA baseline is updated to the human's new state
-    And subsequent stage handlers run from the revisited stage
-
+    Given the DriftFinding has change_kind "modified" for "stages/inception/artifacts/DISCOVERY.md"
+    And the DriftFinding shows the User replacing the entire problem statement
+    And the active stage is "design" (downstream of "inception")
+    When the Agent classifies the change with outcome "trigger-revisit" and linked_revisit_target_stage "inception"
+    Then the ManualChangeAssessment record is persisted with outcome "trigger-revisit" and linked_revisit_target_stage "inception"
+    And a pending-assessment marker is written for "stages/inception/artifacts/DISCOVERY.md" linked to revisit of stage "inception"
+    And the baseline SHA for "stages/inception/artifacts/DISCOVERY.md" is NOT updated at classification time
+    And the workflow invokes haiku_revisit targeting stage "inception"
   # ---------------------------------------------------------------------------
-  # Cross-stage drift cascade policy
+  # Outcome legality matrix: change_kind "deleted" cannot be inline-fix
   # ---------------------------------------------------------------------------
 
-  Scenario: Cross-stage drift does not auto-revisit; the agent decides
-    Given drift is detected on "stages/design/outputs/spec.md"
-    And the active stage is "development" (downstream of design)
+  Scenario Outline: Classification outcome legality varies by change_kind
+    Given the DriftFinding has change_kind "<change_kind>" for "stages/design/artifacts/output.html"
+    When the Agent attempts to classify the change with outcome "<outcome>"
+    Then the classification is "<result>"
+
+    Examples:
+      | change_kind | outcome             | result   |
+      | added       | ignore              | accepted |
+      | added       | inline-fix          | accepted |
+      | added       | surface-as-feedback | accepted |
+      | added       | trigger-revisit     | accepted |
+      | modified    | ignore              | accepted |
+      | modified    | inline-fix          | accepted |
+      | modified    | surface-as-feedback | accepted |
+      | modified    | trigger-revisit     | accepted |
+      | deleted     | ignore              | accepted |
+      | deleted     | inline-fix          | rejected |
+      | deleted     | surface-as-feedback | accepted |
+      | deleted     | trigger-revisit     | accepted |
+  # ---------------------------------------------------------------------------
+  # Cross-stage cascade decision
+  # ---------------------------------------------------------------------------
+
+  Scenario: Cross-stage drift does not auto-revisit — the Agent decides
+    Given a DriftFinding with change_kind "modified" for "stages/design/artifacts/spec.md"
+    And the DriftFinding has stage_owner "design"
+    And the active stage is "development" (downstream of "design")
     When the workflow emits "manual_change_assessment"
-    Then the harness does NOT automatically invoke haiku_revisit
-    And the action payload includes the file's owning stage as "design"
-    And the agent receives all four outcomes as valid choices
-    When the agent chooses outcome "trigger-revisit" with target stage "design"
-    Then haiku_revisit is invoked with target "design"
-    When the agent chooses outcome "surface-as-feedback" instead
-    Then a feedback item is created scoped to stage "design"
-    And no revisit is invoked
-
+    Then the Workflow Engine does NOT automatically invoke haiku_revisit
+    And the action payload's legal_outcomes for "stages/design/artifacts/spec.md" includes all four outcomes
+    When the Agent classifies with outcome "trigger-revisit" and linked_revisit_target_stage "design"
+    Then haiku_revisit is invoked targeting stage "design"
+    And no haiku_revisit call occurs when the Agent classifies with outcome "surface-as-feedback" instead
   # ---------------------------------------------------------------------------
-  # Visibility and audit
+  # Idempotency loop avoidance
   # ---------------------------------------------------------------------------
 
-  Scenario: Classification record is durable and human-readable
-    When the agent records any classification outcome
-    Then the record is persisted at intent scope under a deterministic path
-    And the record contains: timestamp, file paths, change_type, outcome, rationale
-    And the SPA's drift assessment view lists all classification records for the intent
-    And the records survive a session restart
-    And the records survive a worktree branch switch
+  Scenario: File classified as ignore does not re-fire on the next tick
+    Given a file "stages/design/artifacts/notes.md" was classified as "ignore" in the previous assessment
+    And the baseline was updated to the post-edit SHA at classification time
+    And the file has not changed since the classification
+    When the Agent calls haiku_run_next
+    Then the drift-detection gate sees "stages/design/artifacts/notes.md" matches the baseline
+    And no "manual_change_assessment" fires for "stages/design/artifacts/notes.md"
 
-  Scenario: Each detected file is classified individually within one assessment
-    Given drift is detected on three files in one tick
-    When the agent processes the "manual_change_assessment" action
-    Then the agent records one classification outcome per file
-    And the outcomes may differ (e.g., file A "ignore", file B "inline-fix", file C "surface-as-feedback")
-    And only one downstream effect fires per file (no double-counting)
+  Scenario: Re-edited file after ignore classification fires a fresh assessment
+    Given "stages/design/artifacts/notes.md" was classified as "ignore" and its baseline updated
+    When the User edits "stages/design/artifacts/notes.md" again with new content
+    And the Agent calls haiku_run_next
+    Then the drift-detection gate detects the new SHA mismatch
+    And the workflow emits a fresh "manual_change_assessment" action for "stages/design/artifacts/notes.md"
+  # ---------------------------------------------------------------------------
+  # Binary diff degraded mode
+  # ---------------------------------------------------------------------------
 
+  Scenario: Binary file drift is classified with degraded payload (no textual diff)
+    Given a DriftFinding with change_kind "modified" for "stages/design/artifacts/mockup.png"
+    And the DriftFinding has is_binary true and diff_unified null
+    And the DriftFinding includes before_sha256 and after_sha256
+    When the workflow emits "manual_change_assessment"
+    Then the action payload for "stages/design/artifacts/mockup.png" has diff_unified null
+    And the action payload includes is_binary true, before_sha256, after_sha256, before_bytes, and after_bytes
+    And the Agent's default classification outcome for binary files without stage context is "surface-as-feedback"
+    And the Agent's rationale notes that no textual diff is available
+  # ---------------------------------------------------------------------------
+  # Pagination cap
+  # ---------------------------------------------------------------------------
+
+  Scenario: Large drift batch is paginated to cap the action payload size
+    Given drift is detected on 60 tracked files in a single tick
+    When the workflow emits "manual_change_assessment"
+    Then the action payload findings array contains the first 50 DriftFindings
+    And the action payload includes a flag indicating more findings are pending
+    And the Agent classifies the first 50 findings
+    And on the next tick the workflow emits a second "manual_change_assessment" with the remaining 10 findings
+  # ---------------------------------------------------------------------------
+  # Assessment record durability
+  # ---------------------------------------------------------------------------
+
+  Scenario: ManualChangeAssessment record is durable and human-readable
+    When the Agent records any classification outcome
+    Then the ManualChangeAssessment record is persisted at "stages/design/drift-assessments/DA-NN.json"
+    And the record contains: id, created_at, tick_id, findings array, classifications array, agent_rationale, mode
+    And the record survives a session restart
+    And the record survives a worktree branch switch
+
+  Scenario: Each DriftFinding is classified individually within one assessment dispatch
+    Given three DriftFindings exist in one "manual_change_assessment" dispatch
+    When the Agent processes the action
+    Then the Agent records one Classification per DriftFinding (parallel-indexed)
+    And the outcomes may differ across findings (e.g., "ignore", "inline-fix", "surface-as-feedback")
+    And each outcome produces exactly its own downstream side effects with no cross-finding interference
   # ---------------------------------------------------------------------------
   # Error scenarios
   # ---------------------------------------------------------------------------
 
-  Scenario: Agent returns an invalid classification outcome
-    When the agent attempts to classify a change with outcome "delete"
-    Then the workflow rejects the outcome with error "Invalid classification: must be one of [ignore, inline-fix, surface-as-feedback, trigger-revisit]"
-    And no record is persisted
-    And the workflow remains in the assessment-pending state
+  Scenario: Agent attempts an invalid classification outcome alias
+    When the Agent attempts to classify a change with outcome "auto-fix"
+    Then the Workflow Engine rejects the classification with an error listing the four valid outcomes
+    And no ManualChangeAssessment record is persisted
+    And the workflow remains in assessment-pending state
     And the next tick re-emits the same "manual_change_assessment" action
 
-  Scenario: Agent omits the rationale on a non-ignore outcome
-    When the agent classifies a change as "trigger-revisit" with empty rationale
-    Then the workflow rejects the classification with error "Rationale required for non-ignore outcomes"
+  Scenario: Agent attempts an invalid classification outcome alias (escalate)
+    When the Agent attempts to classify a change with outcome "escalate"
+    Then the Workflow Engine rejects the classification with an error listing the four valid outcomes
+    And no ManualChangeAssessment record is persisted
+
+  Scenario: Agent omits rationale on a non-ignore outcome
+    When the Agent classifies a change as "trigger-revisit" with an empty rationale_excerpt
+    Then the Workflow Engine rejects the classification with an error requiring non-empty rationale
     And no revisit is invoked
-
-  Scenario: Binary file diff is uninformative
-    Given the changed file is "stages/design/outputs/mockup.png" (binary)
-    When the workflow emits "manual_change_assessment"
-    Then the action payload omits the textual diff
-    And the payload sets a flag "binary_or_missing: true"
-    And the payload includes file size delta and content-type
-    And the agent's default outcome (per design-stage decision) is applied
-    And the rationale notes "binary file, no textual diff available"
-
-  # ---------------------------------------------------------------------------
-  # Edge cases: idempotency and loops
-  # ---------------------------------------------------------------------------
-
-  Scenario: Classified-as-ignore file does not re-fire on the next tick
-    Given a file was classified as "ignore" in the previous tick
-    And the file has not changed since
-    When the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate sees the file matches the new baseline
-    And no "manual_change_assessment" fires for this file
-
-  Scenario: Re-edited after classification fires a new assessment
-    Given a file was classified as "ignore" with baseline updated
-    When the User edits the file again with new content
-    And the agent calls haiku_run_next
-    Then the pre-tick out-of-band gate detects the new SHA mismatch
-    And a fresh "manual_change_assessment" action fires for the same file
-
-  Scenario: Maximum number of classifications per tick is bounded
-    Given drift is detected on more than 50 files in a single tick
-    When the workflow emits "manual_change_assessment"
-    Then the action payload is paginated with the first 50 file entries
-    And the payload includes a flag "more_pending: true" and the remaining count
-    And the agent classifies the first batch
-    And the next tick emits a second "manual_change_assessment" with the remaining files

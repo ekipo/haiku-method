@@ -2,7 +2,7 @@
 title: >-
   internal_events.feature and mcp_tools.feature still reference
   feedback-addressed clearance trigger
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-04-29T04:01:22Z'
 resolution: null
 replies: []
@@ -51,4 +51,3 @@ These files were not explicitly cited in FB-02's body (which named DATA-CONTRACT
 - `pending_marker_schema.feature` (closed-clears / rejected-clears / addressed-does-NOT-clear)
 - `manual-change-assessment.feature` (Scenario Outline over closed | rejected, addressed-NOT scenario)
 - `unit-01-acceptance-criteria.md` AC-G5 / AC-SF3
-

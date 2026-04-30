@@ -1,123 +1,113 @@
-// orchestrator/workflow/write-audit.ts — Append-only audit log for
-// human-attributed write events.
+// orchestrator/workflow/write-audit.ts — Write-audit JSONL log +
+// shared types for human-attributed write events.
 //
 // Responsibilities:
-//   - `WriteAuditRecord` TypeScript type matching MCP-TOOL-CONTRACT.md §8.1.
-//   - `appendWriteAudit(intentDir, record)` — opens write-audit.jsonl in
-//     O_APPEND mode, writes JSON.stringify(record) + "\n" in a single
-//     write() call, and fsyncs before returning.
-//     Returns { ok: true } on success and { ok: false, reason } on failure.
-//     Failures do NOT throw — caller surfaces via audit_log_appended field.
-//   - `nextEntryId(tickCounter, sequenceNumber)` — formats as
-//     HWM-{tickCounter}-{NN} with zero-padded NN (≥ 2 digits).
-//   - `truncateInstruction(text, max?)` — truncates user-instruction excerpts
-//     to `max` chars (default 200), appending "..." when truncated.
+//   - `WriteAuditRecord`  — per-invocation record written to
+//     `.haiku/intents/{slug}/write-audit.jsonl`
+//     (MCP-TOOL-CONTRACT.md §8.1).
+//   - `ActionLogEntry`    — per-tick action-log entry (ARCHITECTURE.md §6.2).
+//   - `nextEntryId(tick, seq)` — format `HWM-{tick}-{NN}`.
+//   - `truncateInstruction(text, max)` — truncate to 200 chars with `...`.
+//   - `appendWriteAudit(intentDir, record)` — atomic O_APPEND + fsync.
 //
-// Concurrency: POSIX O_APPEND guarantees atomic appends ≤ PIPE_BUF (≥ 4 KiB).
-// v1 audit records are well under 4 KiB so concurrent writers are safe.
+// No new external dependencies: node:fs/promises only.
 
-import { constants, open } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdirSync } from "node:fs"
+import { open } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-/** One audit log record per successful haiku_human_write invocation.
- *  Matches MCP-TOOL-CONTRACT.md §8.1. */
+/** Per-invocation audit record appended to `write-audit.jsonl`
+ *  (MCP-TOOL-CONTRACT.md §8.1). Every field is present in stored records;
+ *  `audit_log_appended` is always `true` in the file itself. */
 export interface WriteAuditRecord {
-	/** ISO-8601 UTC timestamp of the write. */
 	timestamp: string
-	/** HWM-{tick}-{NN} identifier. */
 	entry_id: string
-	/** Intent-relative path written. */
 	path: string
-	/** SHA-256 hex digest of written content. */
 	sha: string
-	/** Always "human-via-mcp" in stored records. */
 	author_class: "human-via-mcp"
-	/** Caller-supplied human identifier; null if not provided. */
 	human_author_id: string | null
-	/** Caller-supplied rationale; null if not provided. */
 	rationale: string | null
-	/** First 200 chars of the user's instruction; null if not supplied.
-	 *  Truncated by the caller via truncateInstruction(). */
 	user_instruction_excerpt: string | null
-	/** Tick counter at time of write. */
 	tick_counter: number
-	/** MCP session ID; null if not accessible. */
 	session_id: string | null
-	/** Echo of the overwrite input field. */
 	overwrite: boolean
-	/** Intermediate directories created as a side effect. */
 	dirs_created: string[]
-	/** Always true in stored records. */
 	audit_log_appended: true
 }
 
-/** Success result from appendWriteAudit. */
-export interface WriteAuditOk {
-	ok: true
+/** Per-tick action-log entry (ARCHITECTURE.md §6.2).
+ *  Written by `haiku_human_write` and the SPA upload endpoint.
+ *  Read by the drift-detection gate to classify author_class. */
+export interface ActionLogEntry {
+	entry_type: "human_write" | "agent_write"
+	path: string
+	sha: string
+	author_class: "human-via-mcp" | "agent"
+	timestamp: string
+	human_author_id: string | null
+	entry_id: string
+	tick_counter: number
 }
 
-/** Failure result from appendWriteAudit. Never throws. */
-export interface WriteAuditFail {
-	ok: false
-	/** Human-readable description of the failure. */
-	reason: string
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Format a write entry identifier: `HWM-{tickCounter}-{NN}` where NN is
+ *  zero-padded to at least 2 digits (MCP-TOOL-CONTRACT.md §4.1). */
+export function nextEntryId(tickCounter: number, sequenceNumber: number): string {
+	const nn = String(sequenceNumber).padStart(2, "0")
+	return `HWM-${tickCounter}-${nn}`
 }
 
-export type WriteAuditResult = WriteAuditOk | WriteAuditFail
+/** Truncate `text` to `max` characters, appending `...` when truncated.
+ *  The result is at most `max + 3` chars when truncated, or ≤ max chars
+ *  when the input already fits.
+ *
+ *  Per MCP-TOOL-CONTRACT.md §8.2: "the first 200 characters of the user's
+ *  instruction … truncated to 200 chars." This helper truncates to `max`
+ *  and appends `...` so the output is `max + 3` = 203 chars maximum. */
+export function truncateInstruction(text: string, max = 200): string {
+	if (text.length <= max) return text
+	return text.slice(0, max) + "..."
+}
 
-// ── Audit log path ─────────────────────────────────────────────────────────
+// ── Audit-log path ─────────────────────────────────────────────────────────
 
-function auditLogPath(intentDir: string): string {
+/** Returns the absolute path of the audit log for an intent directory. */
+export function writeAuditPath(intentDir: string): string {
 	return join(intentDir, "write-audit.jsonl")
 }
 
-// ── appendWriteAudit ───────────────────────────────────────────────────────
+// ── Append helpers ─────────────────────────────────────────────────────────
 
-/** Append a single write-audit record to write-audit.jsonl.
+/** Append one line to a JSONL file using O_APPEND semantics and fsync.
+ *  The file is opened in append mode so each `write()` call is atomic
+ *  under POSIX for payloads ≤ PIPE_BUF (~4 KiB on most platforms).
+ *  An fsync follows to ensure durability before returning.
  *
- *  Opens the file with O_APPEND | O_CREAT | O_WRONLY so the OS guarantees
- *  atomic positioning to the end of the file before each write. For records
- *  well under PIPE_BUF (4 KiB on Linux/macOS), the single write() call is
- *  atomically delivered without interleaving.
+ *  Parent directories are created if they do not exist.
  *
- *  Fsyncs the fd before closing to ensure durability. The fsync is a
- *  best-effort durability guarantee; failure is reported via { ok: false }
- *  but the write may still have landed on disk (fsync failure typically
- *  indicates hardware-level issues).
- *
- *  NEVER throws. Returns { ok: false, reason } on any error so the caller
- *  can surface via the audit_log_appended response field without aborting
- *  the parent write (MCP-TOOL-CONTRACT.md §4.1). */
-export async function appendWriteAudit(
-	intentDir: string,
-	record: WriteAuditRecord,
-): Promise<WriteAuditResult> {
-	const filePath = auditLogPath(intentDir)
-	const line = `${JSON.stringify(record)}\n`
+ *  Returns `{ ok: true }` on success or `{ ok: false, reason: string }`
+ *  on failure — never throws. */
+async function appendJsonlLine(
+	filePath: string,
+	line: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+	try {
+		mkdirSync(dirname(filePath), { recursive: true })
+	} catch (err) {
+		return { ok: false, reason: String(err) }
+	}
 
 	let fd: Awaited<ReturnType<typeof open>> | null = null
 	try {
-		fd = await open(
-			filePath,
-			constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY,
-			0o644,
-		)
-		await fd.write(line)
-		await fd.datasync().catch(() => {
-			// datasync may not be available on all platforms; fall back to fsync.
-		})
-		try {
-			await fd.sync()
-		} catch {
-			// fsync failure is best-effort — the write likely landed, but we
-			// cannot guarantee durability. Proceed rather than error.
-		}
+		fd = await open(filePath, "a")
+		await fd.write(line + "\n")
+		await fd.sync()
 		return { ok: true }
-	} catch (err: unknown) {
-		const reason = err instanceof Error ? err.message : String(err)
-		return { ok: false, reason }
+	} catch (err) {
+		return { ok: false, reason: String(err) }
 	} finally {
 		if (fd !== null) {
 			await fd.close().catch(() => {})
@@ -125,24 +115,21 @@ export async function appendWriteAudit(
 	}
 }
 
-// ── nextEntryId ────────────────────────────────────────────────────────────
-
-/** Format an entry ID as HWM-{tickCounter}-{NN} where NN is zero-padded to
- *  at least 2 digits. Example: nextEntryId(42, 1) → "HWM-42-01". */
-export function nextEntryId(
-	tickCounter: number,
-	sequenceNumber: number,
-): string {
-	const nn = String(sequenceNumber).padStart(2, "0")
-	return `HWM-${tickCounter}-${nn}`
-}
-
-// ── truncateInstruction ────────────────────────────────────────────────────
-
-/** Truncate a user instruction excerpt to `max` characters (default 200).
- *  When the text exceeds `max`, the returned string is the first `max`
- *  characters followed by "..." (total length: max + 3). */
-export function truncateInstruction(text: string, max = 200): string {
-	if (text.length <= max) return text
-	return `${text.slice(0, max)}...`
+/** Append a `WriteAuditRecord` to `write-audit.jsonl` (MCP-TOOL-CONTRACT.md §8).
+ *
+ *  Uses O_APPEND + single write + fsync for atomicity and durability.
+ *  POSIX guarantees that write()s ≤ PIPE_BUF (4 KiB on most platforms)
+ *  to an O_APPEND file are atomic — no interleaved bytes from concurrent
+ *  writers. v1 audit records comfortably fit within that bound.
+ *
+ *  Failures do NOT throw — the caller surfaces them via the
+ *  `audit_log_appended` field on the tool response
+ *  (MCP-TOOL-CONTRACT.md §4.1). */
+export async function appendWriteAudit(
+	intentDir: string,
+	record: WriteAuditRecord,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+	const filePath = writeAuditPath(intentDir)
+	const line = JSON.stringify(record)
+	return appendJsonlLine(filePath, line)
 }

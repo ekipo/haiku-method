@@ -1,101 +1,84 @@
-// orchestrator/workflow/action-log.ts — Per-tick action log for the
-// drift-detection subsystem.
+// orchestrator/workflow/action-log.ts — Per-tick action log.
 //
 // Responsibilities:
-//   - `ActionLogEntry` TypeScript type (ARCHITECTURE.md §6.2).
-//   - `appendActionLogEntry(intentDir, tickCounter, entry)` — appends to
-//     .haiku/intents/{slug}/action-log.jsonl with atomic-append semantics.
-//   - `readActionLogForTick(intentDir, tickCounter)` — returns all entries
-//     for the given tick. The drift gate calls this to look up whether a
-//     write came through haiku_human_write.
-//   - `findActionLogEntryForPath(entries, pathRel)` — returns the most recent
-//     entry for a given file path, or null. Used by the gate when classifying
-//     author class.
+//   - `appendActionLogEntry(intentDir, tickCounter, entry)` — append an
+//     `ActionLogEntry` to the intent-scope action log.
+//   - `readActionLogForTick(intentDir, tickCounter)` — return entries for
+//     a given tick counter.
+//   - `findActionLogEntryForPath(entries, pathRel)` — return the most
+//     recent entry for a file path, or null.
 //
-// Storage: a single intent-scoped action-log.jsonl file at the intent root.
-// Entries carry their own tick_counter field so queries can filter by tick.
+// Storage: a single intent-scope JSONL file at
+//   `.haiku/intents/{slug}/action-log.jsonl`
+// Each line is a complete `ActionLogEntry` JSON object. The entry carries
+// its own `tick_counter` so the file is a unified append-only log that
+// can be filtered by tick. The drift-detection gate calls
+// `readActionLogForTick` to distinguish `human-via-mcp` from
+// `human-implicit` writes (ARCHITECTURE.md §6.2).
 //
-// Concurrency: same O_APPEND atomic-write approach as write-audit.ts.
+// No new external dependencies: node:fs/promises only.
 
-import { constants, open, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdirSync } from "node:fs"
+import { open, readFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import type { ActionLogEntry } from "./write-audit.js"
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// Re-export so callers can import the type from either module.
+export type { ActionLogEntry } from "./write-audit.js"
 
-/** An entry in the per-tick action log.
- *  Matches ARCHITECTURE.md §6.2. */
-export interface ActionLogEntry {
-	/** Type of the action logged. */
-	entry_type: "human_write" | "agent_write"
-	/** Intent-relative path written. */
-	path: string
-	/** SHA-256 hex digest of content written. */
-	sha: string
-	/** Author class at write time. */
-	author_class: "human-via-mcp" | "agent"
-	/** ISO-8601 UTC timestamp. */
-	timestamp: string
-	/** Human author identifier; null if not provided. */
-	human_author_id: string | null
-	/** HWM-{tick}-{NN} entry identifier cross-referencing the audit log. */
-	entry_id: string
-	/** Tick counter at time of write. */
-	tick_counter: number
-}
+// ── Path helper ────────────────────────────────────────────────────────────
 
-// ── Storage path ───────────────────────────────────────────────────────────
-
-function actionLogPath(intentDir: string): string {
+/** Returns the absolute path of the action log for an intent directory. */
+export function actionLogPath(intentDir: string): string {
 	return join(intentDir, "action-log.jsonl")
 }
 
-// ── appendActionLogEntry ───────────────────────────────────────────────────
+// ── Append ─────────────────────────────────────────────────────────────────
 
-/** Append a single action-log entry to action-log.jsonl.
+/** Append an `ActionLogEntry` to the intent-scope action log using O_APPEND
+ *  semantics and fsync (same atomicity contract as `appendWriteAudit`).
  *
- *  Uses O_APPEND semantics for atomic positioning. For entries well under
- *  PIPE_BUF (4 KiB on Linux/macOS), a single write() is delivered atomically
- *  without interleaving from concurrent writers.
+ *  The entry's `tick_counter` field is used for per-tick filtering by
+ *  `readActionLogForTick`. Parent directories are created if absent.
  *
- *  The tickCounter parameter is required so callers are explicit about which
- *  tick this entry belongs to. The entry itself also carries tick_counter so
- *  readers can filter by tick without needing separate files per tick.
- *
- *  Throws on disk error — unlike appendWriteAudit, action-log failures
- *  ARE surfaced to callers because missing action-log entries would cause
- *  the drift gate to misclassify human-via-mcp writes as human-implicit. */
+ *  Returns `{ ok: true }` on success or `{ ok: false, reason: string }`
+ *  on failure — never throws. */
 export async function appendActionLogEntry(
 	intentDir: string,
 	_tickCounter: number,
 	entry: ActionLogEntry,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
 	const filePath = actionLogPath(intentDir)
-	const line = `${JSON.stringify(entry)}\n`
 
-	const fd = await open(
-		filePath,
-		constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY,
-		0o644,
-	)
 	try {
+		mkdirSync(dirname(filePath), { recursive: true })
+	} catch (err) {
+		return { ok: false, reason: String(err) }
+	}
+
+	let fd: Awaited<ReturnType<typeof open>> | null = null
+	try {
+		fd = await open(filePath, "a")
+		const line = JSON.stringify(entry) + "\n"
 		await fd.write(line)
-		try {
-			await fd.sync()
-		} catch {
-			// fsync best-effort; proceed.
-		}
+		await fd.sync()
+		return { ok: true }
+	} catch (err) {
+		return { ok: false, reason: String(err) }
 	} finally {
-		await fd.close().catch(() => {})
+		if (fd !== null) {
+			await fd.close().catch(() => {})
+		}
 	}
 }
 
-// ── readActionLogForTick ───────────────────────────────────────────────────
+// ── Read ───────────────────────────────────────────────────────────────────
 
-/** Read all action-log entries for a given tick counter.
+/** Read all action-log entries for a given tick counter. Returns an empty
+ *  array if the file does not exist or has no entries for that tick.
  *
- *  Parses the full action-log.jsonl and returns only entries whose
- *  tick_counter matches the requested tick. Returns an empty array when the
- *  file does not exist or the tick has no entries. */
+ *  Lines that are not valid JSON or do not parse as `ActionLogEntry` are
+ *  silently skipped (graceful degradation). */
 export async function readActionLogForTick(
 	intentDir: string,
 	tickCounter: number,
@@ -106,52 +89,44 @@ export async function readActionLogForTick(
 	try {
 		raw = await readFile(filePath, "utf-8")
 	} catch {
+		// File may not exist yet — that's normal on the first tick.
 		return []
 	}
 
-	const entries: ActionLogEntry[] = []
+	const results: ActionLogEntry[] = []
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim()
 		if (!trimmed) continue
 		try {
-			const entry = JSON.parse(trimmed) as ActionLogEntry
-			if (entry.tick_counter === tickCounter) {
-				entries.push(entry)
+			const parsed = JSON.parse(trimmed) as ActionLogEntry
+			if (parsed.tick_counter === tickCounter) {
+				results.push(parsed)
 			}
 		} catch {
-			// Skip malformed lines.
+			// Malformed line — skip.
 		}
 	}
-
-	return entries
+	return results
 }
 
-// ── findActionLogEntryForPath ──────────────────────────────────────────────
+// ── Query ──────────────────────────────────────────────────────────────────
 
-/** Return the most recent action-log entry for the given file path, or null
- *  when no entry matches.
+/** Return the most recent `ActionLogEntry` for a given file path from a
+ *  pre-loaded entry list, or `null` if none exists.
  *
- *  "Most recent" is defined as the latest timestamp (ISO-8601 lexicographic
- *  sort is correct for UTC timestamps in this format). When multiple entries
- *  have the same timestamp the last one in array order wins (matching append
- *  order). */
+ *  "Most recent" is determined by array order: the last matching entry in
+ *  the list wins. Callers that need cross-tick ordering should sort entries
+ *  by timestamp before calling this function; within a single tick, array
+ *  order (insertion order from the append log) is sufficient. */
 export function findActionLogEntryForPath(
 	entries: ActionLogEntry[],
 	pathRel: string,
 ): ActionLogEntry | null {
-	let best: ActionLogEntry | null = null
-
+	let result: ActionLogEntry | null = null
 	for (const entry of entries) {
-		if (entry.path !== pathRel) continue
-		if (
-			best === null ||
-			entry.timestamp > best.timestamp ||
-			entry.timestamp === best.timestamp
-		) {
-			// Last-write-wins for equal timestamps (append order preserved).
-			best = entry
+		if (entry.path === pathRel) {
+			result = entry
 		}
 	}
-
-	return best
+	return result
 }

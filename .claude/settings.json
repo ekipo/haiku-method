@@ -7,8 +7,7 @@
   "enabledPlugins": {
     "haiku@haiku": true,
     "core@han": true,
-    "bushido@han": true,
-    "haiku@ai-dlc": true
+    "bushido@han": true
   },
   "extraKnownMarketplaces": {
     "haiku": {

@@ -7,6 +7,14 @@
 //   - revisitCurrentStage(slug, iDir, ...)      — re-elaborate the
 //     active stage in place. Public so the gate handler can route
 //     auto-revisit findings without re-opening the classify path.
+//   - onRevisitComplete(slug, stage)            — drift-detection
+//     lifecycle hook (unit-09). Called by the workflow side-effect
+//     `workflowCompleteStage` when a stage that previously held an
+//     open `trigger-revisit` drift-marker re-passes its gate. Walks
+//     drift-markers.json for any open marker with
+//     `linked_revisit_target_stage === stage` and `outcome ===
+//     "trigger-revisit"`, then clears each via the baseline-clear
+//     handler (DATA-CONTRACTS.md §3.6).
 //
 // Plus the support functions:
 //   - classifyPendingForRevisit  — bucket pending feedback by resolution
@@ -34,6 +42,7 @@ import {
 	parseFrontmatter,
 	readFeedbackFiles,
 	readJson,
+	intentDir as resolveIntentDir,
 	setFrontmatterField,
 	stageStatePath,
 	timestamp,
@@ -41,6 +50,7 @@ import {
 } from "../state-tools.js"
 import { emitTelemetry } from "../telemetry.js"
 import { resolveIntentStages } from "./studio.js"
+import { clearMarkersForRevisitSync } from "./workflow/baseline-clear-marker.js"
 
 function readFrontmatter(filePath: string): Record<string, unknown> {
 	if (!existsSync(filePath)) return {}
@@ -512,5 +522,43 @@ function revisitEarlierStage(
 		target_stage: targetStage,
 		reset_phase: "elaborate",
 		message: `Revisiting stage '${targetStage}' — state.json reset to elaborate; existing units preserved. Downstream stages' state.json reset; their units preserved too.`,
+	}
+}
+
+// ── Drift-detection lifecycle hook (unit-09) ───────────────────────────────
+
+/** Called by the workflow side-effect `workflowCompleteStage` whenever a
+ *  stage advances past its gate. Walks `drift-markers.json` for any open
+ *  marker with `linked_revisit_target_stage === stage` and `outcome ===
+ *  "trigger-revisit"`, then clears each via `clearMarkerForResolution(...,
+ *  "revisit-complete")`. Each clearance updates the owning baseline entry
+ *  and emits a `pending_marker_cleared` event.
+ *
+ *  This is the revisit half of the lifecycle integration unit-09 spec
+ *  describes (the feedback half lives in state-tools.ts):
+ *    - When a `trigger-revisit` classification fires, the FB is left alone
+ *      (no FB created), a marker is written, and revisit is dispatched.
+ *    - When the targeted stage re-passes its gate (i.e. revisit completes),
+ *      this function is invoked and the marker is cleared.
+ *
+ *  Idempotent: when no open marker references `stage`, this function is a
+ *  no-op. The integration in `workflowCompleteStage` calls it on every
+ *  stage advance — most calls find no markers and return immediately.
+ *
+ *  Best-effort: failures inside the clear path do not roll back the stage
+ *  advance. The marker store is a suppression optimisation (ARCHITECTURE.md
+ *  §8.4) so a missed clear at most produces one extra `manual_change_assessment`
+ *  on the next tick, which the agent can recognise via the existing FB. */
+export function onRevisitComplete(slug: string, stage: string): void {
+	try {
+		const iDir = resolveIntentDir(slug)
+		clearMarkersForRevisitSync(iDir, stage, { intentSlug: slug })
+	} catch (err) {
+		emitTelemetry("haiku.drift.clear_marker_failed", {
+			intent: slug,
+			revisit_target_stage: stage,
+			trigger: "revisit-complete",
+			error: String((err as Error)?.message ?? err),
+		})
 	}
 }

@@ -20,6 +20,7 @@ import { type DerivedState, deriveCurrentState } from "./derive-state.js"
 import { runDriftDetectionGate } from "./drift-detection-gate.js"
 import { preTickFeedbackGate } from "./feedback-triage-gate.js"
 import { dispatchHandler, WORKFLOW_STATES } from "./handlers/index.js"
+import { buildManualChangeAssessmentAction } from "./handlers/manual-change-assessment.js"
 import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 
@@ -181,11 +182,10 @@ export function runWorkflowTick(
 			return {
 				state: "manual_change_assessment",
 				context: derived.context,
-				action: {
-					action: "manual_change_assessment",
-					slug,
-					findings: driftResult.findings,
-				},
+				action: buildManualChangeAssessmentAction(
+					derived.context,
+					driftResult.findings,
+				),
 			}
 		}
 	}

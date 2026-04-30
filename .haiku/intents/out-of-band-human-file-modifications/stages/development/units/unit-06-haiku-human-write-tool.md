@@ -30,9 +30,9 @@ quality_gates:
       packages/haiku/src/tools/orchestrator/haiku_human_write.ts
 status: active
 bolt: 1
-hat: builder
+hat: reviewer
 started_at: '2026-04-30T17:06:05Z'
-hat_started_at: '2026-04-30T17:19:24Z'
+hat_started_at: '2026-04-30T17:26:52Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T17:06:05Z'
@@ -40,6 +40,10 @@ iterations:
     result: advance
   - hat: builder
     started_at: '2026-04-30T17:19:24Z'
+    completed_at: '2026-04-30T17:26:52Z'
+    result: advance
+  - hat: reviewer
+    started_at: '2026-04-30T17:26:52Z'
     completed_at: null
     result: null
 ---

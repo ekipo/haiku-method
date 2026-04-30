@@ -24,7 +24,7 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
-status: active
+status: completed
 bolt: 4
 hat: reviewer
 started_at: '2026-04-30T12:40:45Z'
@@ -69,9 +69,10 @@ iterations:
     result: advance
   - hat: reviewer
     started_at: '2026-04-30T13:21:56Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T16:31:22Z'
+    result: advance
 model_original: sonnet
+completed_at: '2026-04-30T16:31:22Z'
 ---
 # Baseline storage layer (drift-baseline.ts)
 

@@ -198,6 +198,24 @@ export async function writeBaseline(
 		await unlink(tmpPath).catch(() => {})
 		throw err
 	}
+
+	// Write content sidecars so diff generation can read "before" content
+	// without relying on git (which uses SHA-1, not SHA-256).
+	for (const [, entry] of baseline.entries) {
+		if (entry.is_binary) continue
+		const sidecarPath = baselineContentPath(intentDir, stage, entry.sha256)
+		if (existsSync(sidecarPath)) continue
+		try {
+			const filePath = join(intentDir, entry.path)
+			if (!existsSync(filePath)) continue
+			const buf = readFileSync(filePath)
+			const computedSha = createHash("sha256").update(buf).digest("hex")
+			if (computedSha !== entry.sha256) continue
+			writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+		} catch {
+			// Non-fatal: sidecar is best-effort.
+		}
+	}
 }
 
 // ── SHA-256 computation ────────────────────────────────────────────────────
@@ -493,6 +511,72 @@ export function writeBaselineSync(
 	}
 
 	writeFileSync(targetPath, `${JSON.stringify(diskObj, null, 2)}\n`, "utf-8")
+
+	// Write content sidecars so diff generation can read "before" content
+	// without relying on git (which uses SHA-1, not SHA-256).
+	for (const [, entry] of baseline.entries) {
+		if (entry.is_binary) continue
+		const sidecarPath = baselineContentPath(intentDir, stage, entry.sha256)
+		if (existsSync(sidecarPath)) continue
+		try {
+			const filePath = join(intentDir, entry.path)
+			if (!existsSync(filePath)) continue
+			const buf = readFileSync(filePath)
+			const computedSha = createHash("sha256").update(buf).digest("hex")
+			if (computedSha !== entry.sha256) continue
+			writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+		} catch {
+			// Non-fatal: sidecar is best-effort.
+		}
+	}
+}
+
+// ── Content sidecar helpers ────────────────────────────────────────────────
+
+/** Returns the absolute path to the content-sidecar directory for a stage.
+ *  Sidecars store the raw file content at baseline-write time, keyed by
+ *  SHA-256, so that `buildUnifiedDiff` can retrieve "before" content without
+ *  relying on git (which uses SHA-1 object addresses, not SHA-256). */
+export function baselineContentDir(intentDir: string, stage: string): string {
+	return join(intentDir, "stages", stage, "baseline-content")
+}
+
+/** Returns the absolute path for a specific sidecar file. */
+export function baselineContentPath(
+	intentDir: string,
+	stage: string,
+	sha256: string,
+): string {
+	return join(baselineContentDir(intentDir, stage), sha256)
+}
+
+/** Write a content sidecar. Non-fatal on error. */
+export function writeBaselineContentSync(
+	intentDir: string,
+	stage: string,
+	sha256: string,
+	content: Buffer,
+): void {
+	try {
+		const dir = baselineContentDir(intentDir, stage)
+		mkdirSync(dir, { recursive: true })
+		writeFileSync(baselineContentPath(intentDir, stage, sha256), content)
+	} catch {
+		// Non-fatal.
+	}
+}
+
+/** Read a content sidecar. Returns null when absent or unreadable. */
+export function readBaselineContent(
+	intentDir: string,
+	stage: string,
+	sha256: string,
+): Buffer | null {
+	try {
+		return readFileSync(baselineContentPath(intentDir, stage, sha256))
+	} catch {
+		return null
+	}
 }
 
 /** Read the action log for a specific tick synchronously.

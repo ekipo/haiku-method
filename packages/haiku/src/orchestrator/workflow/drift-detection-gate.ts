@@ -20,19 +20,21 @@
 // Spec references: unit-04-pre-tick-drift-gate.md, ARCHITECTURE.md §3, §8,
 // DATA-CONTRACTS.md §3.1, ACCEPTANCE-CRITERIA.md AC-G1 through AC-G13.
 
-import { execSync } from "node:child_process"
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import matter from "gray-matter"
 import {
 	type Baseline,
 	type BaselineEntry,
+	baselineContentPath,
 	computeFileSha256Sync,
 	enumerateTrackedSurface,
 	isBinarySync,
 	readActionLogSync,
 	readBaseline,
+	readBaselineContent,
 	type TrackingClass,
+	writeBaselineContentSync,
 	writeBaselineSync,
 } from "./drift-baseline.js"
 import {
@@ -105,21 +107,26 @@ export function isDriftDetectionDisabled(haikuRoot: string): boolean {
 const MAX_DIFF_LINES = 200
 const NEW_FILE_BINARY_THRESHOLD = 256 * 1024 // 256 KB
 
-/** Attempt to retrieve prior file content from git by SHA and produce a
- *  unified diff against the current file content. Returns null when git
- *  is unavailable, the SHA is not in the repo, or any error occurs. */
+/** Retrieve the "before" file content from the content sidecar and produce
+ *  a unified diff against the current file content. Returns null when the
+ *  sidecar is absent (not yet written) or any error occurs.
+ *
+ *  The sidecar lives at `stages/{stage}/baseline-content/{sha256}` and is
+ *  written by `writeBaselineSync` / `writeBaseline` at baseline-write time
+ *  and lazily during steady-state scans. This avoids relying on git's
+ *  SHA-1 object store (git cat-file blob requires a SHA-1 address, not a
+ *  SHA-256 digest). */
 function buildUnifiedDiff(
 	intentDir: string,
+	activeStage: string,
 	pathRel: string,
 	beforeSha256: string,
 	afterAbsPath: string,
 ): string | null {
 	try {
-		const beforeBuf = execSync(`git cat-file blob ${beforeSha256}`, {
-			cwd: intentDir,
-			timeout: 5000,
-			stdio: ["pipe", "pipe", "pipe"],
-		})
+		const beforeBuf = readBaselineContent(intentDir, activeStage, beforeSha256)
+		if (beforeBuf === null) return null
+
 		const afterBuf = readFileSync(afterAbsPath)
 
 		const before = beforeBuf.toString("utf-8").split("\n")
@@ -430,7 +437,23 @@ export function runDriftDetectionGate(
 		}
 
 		if (baselineEntry.sha256 === currentSha) {
-			// No change — happy path.
+			// No change — happy path. Lazily write the content sidecar so that
+			// "before" content is available the next time this file changes.
+			if (!currentBinary && !baselineEntry.is_binary) {
+				const sidecarPath = baselineContentPath(
+					intentDir,
+					activeStage,
+					currentSha,
+				)
+				if (!existsSync(sidecarPath)) {
+					try {
+						const buf = readFileSync(entry.absPath)
+						writeBaselineContentSync(intentDir, activeStage, currentSha, buf)
+					} catch {
+						// Non-fatal.
+					}
+				}
+			}
 			continue
 		}
 
@@ -456,11 +479,13 @@ export function runDriftDetectionGate(
 		// can populate the DriftFinding and Assessment records accurately.
 		const authorClass = logEntry ? "human-via-mcp" : baselineEntry.author_class
 
-		// Build diff for text files.
+		// Build diff for text files. Write a lazy sidecar for unchanged files
+		// so "before" content is available when the file eventually changes.
 		const bothText = !currentBinary && !baselineEntry.is_binary
 		const diffUnified = bothText
 			? buildUnifiedDiff(
 					intentDir,
+					activeStage,
 					entry.pathRel,
 					baselineEntry.sha256,
 					entry.absPath,

@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 // Tests for drift-detection-gate.ts — pre-tick drift-detection gate.
 //
-// Coverage (19 scenarios from silent-filesystem-drop-detection.feature):
+// Coverage (22 scenarios from silent-filesystem-drop-detection.feature):
 //  1.  Designer replaces a stage output — modified finding emitted.
-//  2.  PO edits a deliverable — modified finding, correct SHAs.
+//  2.  PO edits a deliverable — modified finding, correct SHAs, diff_unified non-null.
 //  3.  New knowledge file dropped — new-file-detected, binary PDF has no diff.
 //  4.  outputs/ alias: canonical pathRel is artifacts/, absPath points to outputs/ on disk.
 //  5.  Multiple files changed in one tick — one action, multiple findings (or OOM synthetic).
@@ -11,6 +11,7 @@
 //  7.  Mid-bolt isolation — change detected on NEXT tick, not during in-flight bolt.
 //  8.  First tick: baseline absent → establish mode, zero findings, state.json stamped.
 //  9.  Kill-switch off (drift_detection: false) — gate is a complete no-op.
+//  9a. Kill-switch I/O isolation — corrupt baseline is invisible when kill-switch active (AC-G1-KS).
 // 10.  Kill-switch re-enabled — prior baseline reused unchanged; no auto-re-establish.
 // 11.  Editor temp files (.swp, ~, .#) do not produce false findings.
 // 12.  Tracked file deleted — file-removed finding, after_sha256 null, diff null.
@@ -21,6 +22,7 @@
 // 17.  Baseline corrupt JSON → error: 'baseline_corrupt' returned, no dispatch.
 // 18.  Files outside tracked surface are not detected (README.md at intent root).
 // 19.  files inside units/ are ignored (not in tracked surface).
+// 20.  Full runWorkflowTick → drift-detection gate → manual_change_assessment short-circuit.
 
 import assert from "node:assert"
 import { createHash } from "node:crypto"
@@ -229,6 +231,21 @@ await test("modified finding includes correct SHAs for text files", async () => 
 	assert.strictEqual(finding.before_sha256, sha256(originalContent))
 	assert.strictEqual(finding.after_sha256, sha256(newContent))
 	assert.strictEqual(finding.is_binary, false)
+	// diff_unified must be non-null and contain the edited text (AC-T1).
+	// The sidecar written by writeBaseline enables diff generation without git.
+	assert.ok(
+		finding.diff_unified !== null,
+		`diff_unified must be non-null for a text file modification (AC-T1). ` +
+			`A null here means the content sidecar was not written or not read correctly.`,
+	)
+	assert.ok(
+		typeof finding.diff_unified === "string" && finding.diff_unified.includes("---"),
+		`diff_unified should contain unified diff header '---'`,
+	)
+	assert.ok(
+		finding.diff_unified.includes("Edited by PO"),
+		`diff_unified should include the new content 'Edited by PO'`,
+	)
 })
 
 console.log("\n=== Scenario 3: New knowledge file (binary PDF) ===")
@@ -434,6 +451,34 @@ await test("drift_detection: false → gate is a complete no-op", async () => {
 	assert.strictEqual(result.action, null, "kill-switch: no action")
 	assert.strictEqual(result.findings.length, 0, "kill-switch: no findings")
 	assert.strictEqual(result.baselineEstablished, false, "kill-switch: no establish either")
+})
+
+console.log("\n=== Scenario 9a: Kill-switch I/O isolation (behavioral proxy) ===")
+
+await test("kill-switch: gate returns null action even when corrupt baseline exists (AC-G1-KS)", async () => {
+	// Behavioral proxy for "zero reads": if the kill-switch truly bypasses all
+	// baseline I/O, a corrupt baseline.json on disk must NOT change the result.
+	// If the gate reads the file, it would return { error: "baseline_corrupt" }.
+	// If the kill-switch works, it returns { action: null } regardless.
+	const { intentDir, stage, artifactsDir, stageDir } = makeIntentDir("s09a")
+	const haikuRoot = makeHaikuRoot("s09a", { driftDetectionOff: true })
+
+	// Write a syntactically corrupt baseline.json in the stage directory.
+	mkdirSync(stageDir, { recursive: true })
+	writeFileSync(join(stageDir, "baseline.json"), "THIS IS NOT VALID JSON { [")
+
+	// Also put a file on disk (to ensure there would be something to scan).
+	writeFileSync(join(artifactsDir, "page.html"), "<html>content</html>")
+
+	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+
+	// Kill-switch must prevent baseline read entirely — corrupt JSON is invisible.
+	assert.strictEqual(result.action, null, "kill-switch: no action despite corrupt baseline")
+	assert.strictEqual(result.findings.length, 0, "kill-switch: no findings despite corrupt baseline")
+	assert.ok(
+		result.error === undefined,
+		`kill-switch: no error field — gate must not read baseline at all (AC-G1-KS). Got error: ${result.error}`,
+	)
 })
 
 console.log("\n=== Scenario 10: Kill-switch re-enabled — no auto-re-establish ===")
@@ -734,6 +779,104 @@ await test("files in units/ directory are not in the tracked surface", async () 
 	assert.ok(!unitFinding, "units/ files should not produce findings")
 	// No tracked files changed.
 	assert.strictEqual(result.action, null)
+})
+
+console.log("\n=== Scenario 20: runWorkflowTick → drift → manual_change_assessment ===")
+
+await test("runWorkflowTick emits manual_change_assessment action when drift detected (AC-G13)", async () => {
+	// Build a minimal .haiku fixture that runWorkflowTick can drive:
+	//   <haikuRoot>/
+	//     intents/
+	//       s20-drift-tick/
+	//         intent.md          (studio: software, active_stage: development)
+	//         stages/
+	//           inception/state.json   (status: completed)
+	//           design/state.json      (status: completed)
+	//           product/state.json     (status: completed)
+	//           development/
+	//             state.json           (phase: execute, status: active)
+	//             artifacts/
+	//               spec.md            (drifted on disk, baseline has original)
+	const haikuRoot = join(tmp, "s20-haiku")
+	const slug = "s20-drift-tick"
+	const iDir = join(haikuRoot, "intents", slug)
+	const activeStageName = "development"
+	const stageDir = join(iDir, "stages", activeStageName)
+	const artifactsDir = join(stageDir, "artifacts")
+
+	mkdirSync(artifactsDir, { recursive: true })
+
+	// intent.md frontmatter
+	const intentFm = [
+		"---",
+		`title: "Scenario 20 drift integration test"`,
+		`studio: software`,
+		`status: active`,
+		`active_stage: ${activeStageName}`,
+		"---",
+		"",
+		"Integration test intent for drift gate short-circuit.",
+	].join("\n")
+	writeFileSync(join(iDir, "intent.md"), intentFm)
+
+	// Mark all prior stages as completed so preTickConsistency is satisfied.
+	// Software studio stage order: inception, design, product, development, ...
+	for (const s of ["inception", "design", "product"]) {
+		const sd = join(iDir, "stages", s)
+		mkdirSync(sd, { recursive: true })
+		writeFileSync(
+			join(sd, "state.json"),
+			JSON.stringify({ phase: "gate", status: "completed" }, null, 2),
+		)
+	}
+
+	// Active stage state.json — execute phase, active status.
+	writeFileSync(
+		join(stageDir, "state.json"),
+		JSON.stringify({ phase: "execute", status: "active", iteration: 1 }, null, 2),
+	)
+
+	// Write the original file and establish a baseline.
+	const originalContent = "# API Spec\n\nOriginal design.\n"
+	const relPath = `stages/${activeStageName}/artifacts/spec.md`
+
+	// Add anchor to prevent OOM heuristic (1/2 = 50%, not > 50%).
+	const anchorContent = "<!-- anchor -->"
+	writeFileSync(join(artifactsDir, "anchor.md"), anchorContent)
+	const anchorRelPath = `stages/${activeStageName}/artifacts/anchor.md`
+
+	writeFileSync(join(artifactsDir, "spec.md"), originalContent)
+	await writeBaselineForStage(iDir, activeStageName, {
+		[relPath]: makeBaselineEntry(relPath, originalContent, { stage: activeStageName }),
+		[anchorRelPath]: makeBaselineEntry(anchorRelPath, anchorContent, { stage: activeStageName }),
+	})
+
+	// Now simulate a human modifying spec.md out-of-band.
+	const modifiedContent = "# API Spec\n\nHuman edited this without going through MCP.\n"
+	writeFileSync(join(artifactsDir, "spec.md"), modifiedContent)
+
+	// Run one full workflow tick via runWorkflowTick.
+	const { runWorkflowTick } = await import("../src/orchestrator/workflow/run-tick.ts")
+	const result = runWorkflowTick(slug, haikuRoot)
+
+	assert.ok(result !== null, "runWorkflowTick must return a result for a valid intent")
+	assert.strictEqual(
+		result.action?.action,
+		"manual_change_assessment",
+		`Expected manual_change_assessment action but got '${result.action?.action}'. ` +
+			`State was: '${result.state}'.`,
+	)
+	assert.ok(
+		Array.isArray(result.action.findings),
+		"findings must be an array",
+	)
+	assert.ok(
+		result.action.findings.length > 0,
+		"findings must be non-empty",
+	)
+	const specFinding = result.action.findings.find(f => f.path === relPath)
+	assert.ok(specFinding, `finding for ${relPath} should be present`)
+	assert.strictEqual(specFinding.change_kind, "modified")
 })
 
 // ── Cleanup + summary ──────────────────────────────────────────────────────

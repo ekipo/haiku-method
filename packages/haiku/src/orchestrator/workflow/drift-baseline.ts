@@ -20,11 +20,16 @@
 
 import { createHash, randomBytes } from "node:crypto"
 import {
+	closeSync,
 	createReadStream,
 	existsSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
+	readSync,
+	statSync,
+	writeFileSync,
 } from "node:fs"
 import { open, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
@@ -421,4 +426,104 @@ export function updateBaselineEntry(
 	const newEntries = new Map(baseline.entries)
 	newEntries.set(entry.path, entry)
 	return { entries: newEntries }
+}
+
+// ── Sync helpers for use in synchronous gate context ──────────────────────
+
+/** Synchronous SHA-256 computation. Reads the full file into a buffer.
+ *  Only used by the drift-detection gate which runs in a synchronous
+ *  tick context. For async callers prefer `computeFileSha256`. */
+export function computeFileSha256Sync(absolutePath: string): string {
+	const buf = readFileSync(absolutePath)
+	return createHash("sha256").update(buf).digest("hex")
+}
+
+/** Synchronous binary-detection heuristic. Mirror of the async `isBinary`
+ *  but uses sync I/O. Same algorithm: null byte in first 8192 bytes OR
+ *  UTF-8 decode failure. */
+export function isBinarySync(absolutePath: string): boolean {
+	try {
+		const st = statSync(absolutePath)
+		const bytesToRead = Math.min(st.size, BINARY_CHECK_BYTES)
+		if (bytesToRead === 0) return false
+
+		const buf = Buffer.alloc(bytesToRead)
+		const fd = openSync(absolutePath, "r")
+		let bytesRead = 0
+		try {
+			bytesRead = readSync(fd, buf, 0, bytesToRead, 0)
+		} finally {
+			closeSync(fd)
+		}
+		const slice = buf.subarray(0, bytesRead)
+
+		for (let i = 0; i < slice.length; i++) {
+			if (slice[i] === 0) return true
+		}
+		try {
+			new TextDecoder("utf-8", { fatal: true }).decode(slice)
+		} catch {
+			return true
+		}
+		return false
+	} catch {
+		return false
+	}
+}
+
+/** Synchronous baseline write. Uses a direct `writeFileSync` rather than
+ *  the atomic-rename pattern in `writeBaseline`. Acceptable for the
+ *  establish-mode first write (no concurrent reader exists for a file that
+ *  did not exist a moment ago). Callers in update-mode should prefer
+ *  `writeBaseline` for atomicity. */
+export function writeBaselineSync(
+	intentDir: string,
+	stage: string,
+	baseline: Baseline,
+): void {
+	const targetPath = baselinePath(intentDir, stage)
+	const targetDir = dirname(targetPath)
+	mkdirSync(targetDir, { recursive: true })
+
+	const sortedKeys = Array.from(baseline.entries.keys()).sort()
+	const diskObj: Record<string, BaselineEntry> = {}
+	for (const key of sortedKeys) {
+		const entry = baseline.entries.get(key)
+		if (entry !== undefined) diskObj[key] = entry
+	}
+
+	writeFileSync(targetPath, `${JSON.stringify(diskObj, null, 2)}\n`, "utf-8")
+}
+
+/** Read the action log for a specific tick synchronously.
+ *  Returns an empty array when the file doesn't exist.
+ *  Silently skips malformed lines. */
+export function readActionLogSync(
+	intentDir: string,
+	tickCounter: number,
+): Array<{ entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }> {
+	const filePath = join(intentDir, "action-log.jsonl")
+	if (!existsSync(filePath)) return []
+
+	let raw: string
+	try {
+		raw = readFileSync(filePath, "utf-8")
+	} catch {
+		return []
+	}
+
+	const results: Array<{ entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }> = []
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		try {
+			const parsed = JSON.parse(trimmed) as { entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }
+			if (parsed.tick_counter === tickCounter) {
+				results.push(parsed)
+			}
+		} catch {
+			// Malformed line — skip.
+		}
+	}
+	return results
 }

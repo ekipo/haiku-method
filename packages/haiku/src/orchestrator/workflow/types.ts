@@ -75,6 +75,8 @@ export type StateName =
 	| "unit_inputs_missing"
 	| "unresolved_dependencies"
 	| "unit_naming_invalid"
+	// drift-detection
+	| "manual_change_assessment"
 	// ops
 	| "commit_wip"
 	// terminal / special

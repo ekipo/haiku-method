@@ -17,11 +17,13 @@ import fastifyWebsocket from "@fastify/websocket"
 import Fastify, { type FastifyInstance } from "fastify"
 import { DEFAULT_BODY_MAX_BYTES } from "haiku-api"
 import { review } from "./config.js"
+import { registerAssessmentsRoutes } from "./http/assessments-routes.js"
 import { registerDefaultRoutes } from "./http/default-routes.js"
 import { e2eOnSend, extractSessionIdFromPath } from "./http/e2e.js"
 import { registerFeedbackRoutes } from "./http/feedback-api.js"
 import { registerFileServeRoutes } from "./http/file-serve.js"
 import { registerSessionRoutes } from "./http/session-routes.js"
+import { registerUploadRoutes } from "./http/upload-routes.js"
 import {
 	closeSessionConnection,
 	MAX_WS_SESSIONS,
@@ -259,6 +261,17 @@ async function buildApp(): Promise<FastifyInstance> {
 		}
 	})
 
+	// ── Health, SPA shell, 404 catch-all, error envelope ──────────────
+	// IMPORTANT: registerDefaultRoutes calls instance.setErrorHandler().
+	// In Fastify 5.x, the error handler is captured into route contexts
+	// at the point each route's after() callback fires. Async plugins
+	// (like the @fastify/multipart scope in registerUploadRoutes) can
+	// shift when those after() callbacks fire relative to setErrorHandler.
+	// Registering the error handler FIRST guarantees all subsequent route
+	// contexts inherit the correct custom error handler, regardless of
+	// whether async plugin wrappers affect callback ordering.
+	registerDefaultRoutes(instance, isReady)
+
 	// ── Session-scoped routes (SPA shells, mutations, session API,
 	//      revisit, asset serves) ───────────────────────────────────────
 	registerSessionRoutes(instance)
@@ -267,8 +280,11 @@ async function buildApp(): Promise<FastifyInstance> {
 	// ── Feedback CRUD + reply + intent-scope + attachments ────────────
 	registerFeedbackRoutes(instance)
 
-	// ── Health, SPA shell, 404 catch-all, error envelope ──────────────
-	registerDefaultRoutes(instance, isReady)
+	// ── SPA upload endpoints (stage-output + knowledge) ───────────────
+	await registerUploadRoutes(instance)
+
+	// ── Drift-assessment read endpoints ───────────────────────────────
+	registerAssessmentsRoutes(instance)
 
 	// ── WebSocket upgrade ──────────────────────────────────────────────
 	registerWsUpgrade(instance)

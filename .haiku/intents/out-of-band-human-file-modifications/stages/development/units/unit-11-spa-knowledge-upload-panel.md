@@ -42,7 +42,8 @@ quality_gates:
       packages/haiku-ui/src/atoms/KnowledgeDropZone.tsx
       packages/haiku-ui/src/atoms/StagedFileRow.tsx
       packages/haiku-ui/src/atoms/DestinationSelect.tsx
-status: pending
+status: completed
+completed_at: '2026-04-30T21:41:58Z'
 ---
 # SPA Knowledge Upload Panel (left sidebar)
 

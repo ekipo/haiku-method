@@ -38,7 +38,8 @@ quality_gates:
       packages/haiku-ui/src/molecules/OutputCardMenu.tsx
       packages/haiku-ui/src/organisms/ReplaceOutputDialog.tsx
       packages/haiku-ui/src/atoms/OutputThumbnail.tsx
-status: pending
+status: completed
+completed_at: '2026-04-30T22:01:55Z'
 ---
 # SPA Stage Output Replacement card + dialog
 

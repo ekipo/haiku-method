@@ -29,7 +29,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/handlers/manual-change-assessment.ts
-status: pending
+status: active
+bolt: 1
+hat: ''
+started_at: '2026-04-30T20:38:18Z'
+hat_started_at: '2026-04-30T20:38:18Z'
+iterations:
+  - hat: ''
+    started_at: '2026-04-30T20:38:18Z'
+    completed_at: null
+    result: null
 ---
 # manual_change_assessment action handler + action union
 

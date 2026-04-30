@@ -40,18 +40,16 @@
 
 import { createHash } from "node:crypto"
 import {
-	createReadStream,
 	createWriteStream,
 	existsSync,
 	mkdirSync,
 	readFileSync,
-	statSync,
 	unlinkSync,
 } from "node:fs"
 import { rename, unlink } from "node:fs/promises"
-import { extname, join, resolve } from "node:path"
-import fastifyMultipart from "@fastify/multipart"
+import { join, resolve } from "node:path"
 import type { MultipartFile } from "@fastify/multipart"
+import fastifyMultipart from "@fastify/multipart"
 import type { FastifyInstance } from "fastify"
 import { appendActionLogEntry } from "../orchestrator/workflow/action-log.js"
 import { canonicalisePath } from "../orchestrator/workflow/drift-baseline.js"
@@ -78,7 +76,7 @@ function getUploadMaxBytes(): number {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** Compute SHA-256 of a file by reading it from disk. */
-function computeSha256FromPath(absPath: string): string {
+function _computeSha256FromPath(absPath: string): string {
 	const hash = createHash("sha256")
 	const data = readFileSync(absPath)
 	hash.update(data)
@@ -128,7 +126,9 @@ function isIntentArchived(intentSlug: string): boolean {
 		const intentFile = join(stateDir, "intent.md")
 		if (!existsSync(intentFile)) return false
 		const raw = readFileSync(intentFile, "utf-8")
-		return raw.includes("status: archived") || raw.includes('status: "archived"')
+		return (
+			raw.includes("status: archived") || raw.includes('status: "archived"')
+		)
 	} catch {
 		return false
 	}
@@ -167,7 +167,11 @@ async function streamToTempfile(
 				// Stop the stream and signal overflow.
 				part.file.destroy()
 				ws.destroy()
-				rej(Object.assign(new Error("payload_too_large"), { code: "PAYLOAD_TOO_LARGE" }))
+				rej(
+					Object.assign(new Error("payload_too_large"), {
+						code: "PAYLOAD_TOO_LARGE",
+					}),
+				)
 				return
 			}
 			hash.update(chunk)
@@ -223,419 +227,507 @@ export async function registerUploadRoutes(
 			},
 		})
 
-	// ── POST /api/intents/:intent/uploads/stage-output ─────────────────────
+		// ── POST /api/intents/:intent/uploads/stage-output ─────────────────────
 
-	scope.post<{ Params: { intent: string } }>(
-		"/api/intents/:intent/uploads/stage-output",
-		async (req, reply) => {
-			if (!requireTunnelAuth(req, reply, null)) return
+		scope.post<{ Params: { intent: string } }>(
+			"/api/intents/:intent/uploads/stage-output",
+			async (req, reply) => {
+				if (!requireTunnelAuth(req, reply, null)) return
 
-			const { intent } = req.params
-			if (!isValidSlug(intent)) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param" })
-				return
-			}
-
-			// Intent existence check.
-			if (!validateIntent(intent)) {
-				reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
-				return
-			}
-
-			// Archived intent check.
-			if (isIntentArchived(intent)) {
-				reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
-				return
-			}
-
-			// Worktree locked check.
-			if (isIntentWorktreeLocked(intent)) {
-				reply.status(423).send({ error: "intent_locked", code: "intent_locked" })
-				return
-			}
-
-			const maxBytes = getUploadMaxBytes()
-
-			// Parse multipart fields.
-			let stage: string | undefined
-			let targetPath: string | undefined
-			let mode: string | undefined
-			let attributeToUser: string | undefined
-			let filePart: MultipartFile | undefined
-
-			try {
-				const parts = req.parts()
-				for await (const part of parts) {
-					if (part.type === "file") {
-						filePart = part as MultipartFile
-					} else {
-						const val = (part as { value: string }).value
-						if (part.fieldname === "stage") stage = val
-						else if (part.fieldname === "target_path") targetPath = val
-						else if (part.fieldname === "mode") mode = val
-						else if (part.fieldname === "attribute_to_user") attributeToUser = val
-					}
-				}
-			} catch (err) {
-				// If we hit a size cap from @fastify/multipart's own limits:
-				const code = (err as { code?: string }).code
-				if (code === "FST_FILES_LIMIT" || code === "LIMIT_FILE_SIZE" || code === "PAYLOAD_TOO_LARGE") {
-					reply.status(413).send({ error: "payload_too_large", code: "payload_too_large" })
+				const { intent } = req.params
+				if (!isValidSlug(intent)) {
+					reply.status(400).send({ error: "bad_param", code: "bad_param" })
 					return
 				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
 
-			// Field validation.
-			if (!stage || !targetPath || !mode || !attributeToUser || !filePart) {
-				reply
-					.status(400)
-					.send({ error: "bad_param", code: "bad_param", message: "Missing required fields: stage, target_path, mode, attribute_to_user, file" })
-				return
-			}
+				// Intent existence check.
+				if (!validateIntent(intent)) {
+					reply
+						.status(404)
+						.send({ error: "intent_not_found", code: "intent_not_found" })
+					return
+				}
 
-			if (!["replace", "create", "upsert"].includes(mode)) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param", message: "mode must be replace, create, or upsert" })
-				return
-			}
+				// Archived intent check.
+				if (isIntentArchived(intent)) {
+					reply
+						.status(404)
+						.send({ error: "intent_not_found", code: "intent_not_found" })
+					return
+				}
 
-			if (!isValidSlug(stage)) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param" })
-				return
-			}
+				// Worktree locked check.
+				if (isIntentWorktreeLocked(intent)) {
+					reply
+						.status(423)
+						.send({ error: "intent_locked", code: "intent_locked" })
+					return
+				}
 
-			if (!validateStage(intent, stage)) {
-				reply.status(403).send({ error: "stage_not_writable", code: "stage_not_writable" })
-				return
-			}
+				const maxBytes = getUploadMaxBytes()
 
-			// Stage sealed check.
-			if (isStageSealed(intent, stage)) {
-				reply.status(403).send({ error: "stage_not_writable", code: "stage_not_writable" })
-				return
-			}
+				// Parse multipart fields.
+				let stage: string | undefined
+				let targetPath: string | undefined
+				let mode: string | undefined
+				let attributeToUser: string | undefined
+				let filePart: MultipartFile | undefined
 
-			// Path-safety: validate target_path.
-			// Must canonicalise to stages/{stage}/artifacts/**
-			// The alias outputs/ → artifacts/ is applied per AC-ALIAS3.
-			// Reject anything with path separators or traversal.
-			const targetPathDecoded = (() => {
 				try {
-					return decodeURIComponent(targetPath)
-				} catch {
-					return targetPath
-				}
-			})()
-
-			// Reject obvious traversal patterns before any filesystem check.
-			if (
-				targetPathDecoded.includes("..") ||
-				targetPathDecoded.includes("\x00") ||
-				targetPathDecoded.includes("\\")
-			) {
-				reply.status(400).send({ error: "bad_target_path", code: "bad_target_path" })
-				return
-			}
-
-			// Normalise the path: strip leading slash, apply alias.
-			const targetPathNorm = targetPathDecoded.replace(/^\/+/, "")
-			const targetPathCanonical = canonicalisePath(
-				`stages/${stage}/${targetPathNorm}`,
-			)
-
-			// Must land under stages/{stage}/artifacts/.
-			const allowedPrefix = `stages/${stage}/artifacts/`
-			if (!targetPathCanonical.startsWith(allowedPrefix)) {
-				reply.status(400).send({ error: "bad_target_path", code: "bad_target_path" })
-				return
-			}
-
-			const iDir = intentDir(intent)
-			const destAbsPath = join(iDir, targetPathCanonical)
-			const destDir = destAbsPath.substring(0, destAbsPath.lastIndexOf("/"))
-			// Final traversal check: resolved path must stay inside intentDir/stages/{stage}/artifacts/
-			const resolvedDest = resolve(destAbsPath)
-			const resolvedAllowed = resolve(join(iDir, allowedPrefix))
-			if (!resolvedDest.startsWith(resolvedAllowed)) {
-				reply.status(400).send({ error: "bad_target_path", code: "bad_target_path" })
-				return
-			}
-
-			// Mode enforcement.
-			const targetExists = existsSync(destAbsPath)
-			if (mode === "replace" && !targetExists) {
-				reply.status(400).send({ error: "mode_violation", code: "mode_violation", message: "mode=replace but target does not exist" })
-				return
-			}
-			if (mode === "create" && targetExists) {
-				reply.status(409).send({ error: "filename_collision", code: "filename_collision" })
-				return
-			}
-
-			// Stream to tempfile with size check.
-			let tmpPath: string | null = null
-			let sha256: string
-			let bytes: number
-
-			try {
-				const result = await streamToTempfile(filePart, destDir, maxBytes)
-				tmpPath = result.tmpPath
-				sha256 = result.sha256
-				bytes = result.bytes
-			} catch (err) {
-				const code = (err as { code?: string }).code
-				if (code === "PAYLOAD_TOO_LARGE") {
-					reply.status(413).send({ error: "payload_too_large", code: "payload_too_large" })
-					return
-				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
-
-			// Atomic rename.
-			try {
-				mkdirSync(destDir, { recursive: true })
-				await rename(tmpPath, destAbsPath)
-				tmpPath = null // rename succeeded; tempfile is now the dest
-			} catch {
-				if (tmpPath) {
-					try { await unlink(tmpPath) } catch { /* best-effort */ }
-				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
-
-			// Stamp action-log entry (author_class: "human-via-mcp").
-			const entryId = nextEntryId(0, 1)
-			const now = new Date().toISOString()
-			const actionEntry = {
-				entry_type: "human_write" as const,
-				path: targetPathCanonical,
-				sha: sha256,
-				author_class: "human-via-mcp" as const,
-				timestamp: now,
-				human_author_id: attributeToUser,
-				entry_id: entryId,
-				tick_counter: 0,
-			}
-			await appendActionLogEntry(iDir, 0, actionEntry)
-
-			// Append audit-log entry (AC-TA2 / write-audit.jsonl).
-			await appendWriteAudit(iDir, {
-				timestamp: now,
-				entry_id: entryId,
-				path: targetPathCanonical,
-				sha: sha256,
-				author_class: "human-via-mcp",
-				human_author_id: attributeToUser,
-				rationale: null,
-				user_instruction_excerpt: null, // SPA uploads have no chat instruction (spec §1)
-				tick_counter: 0,
-				session_id: null,
-				overwrite: targetExists,
-				dirs_created: [],
-				audit_log_appended: true,
-			})
-
-			reply.send({
-				ok: true,
-				path: targetPathCanonical,
-				sha256,
-				bytes,
-				baseline_updated: false,
-				tick_will_observe: true,
-			})
-		},
-	)
-
-	// ── POST /api/intents/:intent/uploads/knowledge ────────────────────────
-
-	scope.post<{ Params: { intent: string } }>(
-		"/api/intents/:intent/uploads/knowledge",
-		async (req, reply) => {
-			if (!requireTunnelAuth(req, reply, null)) return
-
-			const { intent } = req.params
-			if (!isValidSlug(intent)) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param" })
-				return
-			}
-
-			if (!validateIntent(intent)) {
-				reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
-				return
-			}
-
-			if (isIntentArchived(intent)) {
-				reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
-				return
-			}
-
-			if (isIntentWorktreeLocked(intent)) {
-				reply.status(423).send({ error: "intent_locked", code: "intent_locked" })
-				return
-			}
-
-			const maxBytes = getUploadMaxBytes()
-
-			// Parse multipart fields.
-			let targetFilename: string | undefined
-			let stage: string | null = null
-			let attributeToUser: string | undefined
-			let filePart: MultipartFile | undefined
-
-			try {
-				const parts = req.parts()
-				for await (const part of parts) {
-					if (part.type === "file") {
-						filePart = part as MultipartFile
-					} else {
-						const val = (part as { value: string }).value
-						if (part.fieldname === "target_filename") targetFilename = val
-						else if (part.fieldname === "stage") stage = val || null
-						else if (part.fieldname === "attribute_to_user") attributeToUser = val
-						// description is optional — accepted but not stored on disk here
+					const parts = req.parts()
+					for await (const part of parts) {
+						if (part.type === "file") {
+							filePart = part as MultipartFile
+						} else {
+							const val = (part as { value: string }).value
+							if (part.fieldname === "stage") stage = val
+							else if (part.fieldname === "target_path") targetPath = val
+							else if (part.fieldname === "mode") mode = val
+							else if (part.fieldname === "attribute_to_user")
+								attributeToUser = val
+						}
 					}
-				}
-			} catch (err) {
-				const code = (err as { code?: string }).code
-				if (code === "FST_FILES_LIMIT" || code === "LIMIT_FILE_SIZE" || code === "PAYLOAD_TOO_LARGE") {
-					reply.status(413).send({ error: "payload_too_large", code: "payload_too_large" })
+				} catch (err) {
+					// If we hit a size cap from @fastify/multipart's own limits:
+					const code = (err as { code?: string }).code
+					if (
+						code === "FST_FILES_LIMIT" ||
+						code === "LIMIT_FILE_SIZE" ||
+						code === "PAYLOAD_TOO_LARGE"
+					) {
+						reply
+							.status(413)
+							.send({ error: "payload_too_large", code: "payload_too_large" })
+						return
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
 					return
 				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
 
-			if (!targetFilename || !attributeToUser || !filePart) {
-				reply.status(400).send({
-					error: "bad_param",
-					code: "bad_param",
-					message: "Missing required fields: target_filename, attribute_to_user, file",
-				})
-				return
-			}
+				// Field validation.
+				if (!stage || !targetPath || !mode || !attributeToUser || !filePart) {
+					reply.status(400).send({
+						error: "bad_param",
+						code: "bad_param",
+						message:
+							"Missing required fields: stage, target_path, mode, attribute_to_user, file",
+					})
+					return
+				}
 
-			// target_filename must be a basename — no path segments.
-			const filenameDecoded = (() => {
-				try { return decodeURIComponent(targetFilename) } catch { return targetFilename }
-			})()
-			if (
-				filenameDecoded.includes("/") ||
-				filenameDecoded.includes("\\") ||
-				filenameDecoded.includes("..") ||
-				filenameDecoded.includes("\x00")
-			) {
-				reply.status(400).send({ error: "bad_target_path", code: "bad_target_path", message: "target_filename must be a basename with no path segments" })
-				return
-			}
+				if (!["replace", "create", "upsert"].includes(mode)) {
+					reply.status(400).send({
+						error: "bad_param",
+						code: "bad_param",
+						message: "mode must be replace, create, or upsert",
+					})
+					return
+				}
 
-			// Validate stage if provided.
-			if (stage !== null) {
 				if (!isValidSlug(stage)) {
 					reply.status(400).send({ error: "bad_param", code: "bad_param" })
 					return
 				}
+
 				if (!validateStage(intent, stage)) {
-					reply.status(403).send({ error: "stage_not_writable", code: "stage_not_writable" })
+					reply
+						.status(403)
+						.send({ error: "stage_not_writable", code: "stage_not_writable" })
 					return
 				}
+
+				// Stage sealed check.
 				if (isStageSealed(intent, stage)) {
-					reply.status(403).send({ error: "stage_not_writable", code: "stage_not_writable" })
+					reply
+						.status(403)
+						.send({ error: "stage_not_writable", code: "stage_not_writable" })
 					return
 				}
-			}
 
-			const iDir = intentDir(intent)
-			const destRelPath =
-				stage !== null
-					? `stages/${stage}/knowledge/${filenameDecoded}`
-					: `knowledge/${filenameDecoded}`
-			const destAbsPath = join(iDir, destRelPath)
-			const destDir = destAbsPath.substring(0, destAbsPath.lastIndexOf("/"))
+				// Path-safety: validate target_path.
+				// Must canonicalise to stages/{stage}/artifacts/**
+				// The alias outputs/ → artifacts/ is applied per AC-ALIAS3.
+				// Reject anything with path separators or traversal.
+				const targetPathDecoded = (() => {
+					try {
+						return decodeURIComponent(targetPath)
+					} catch {
+						return targetPath
+					}
+				})()
 
-			// filename_collision check (implicit-create semantics).
-			const targetExists = existsSync(destAbsPath)
-			if (targetExists) {
-				reply.status(409).send({ error: "filename_collision", code: "filename_collision" })
-				return
-			}
-
-			// Stream to tempfile with size check.
-			let tmpPath: string | null = null
-			let sha256: string
-			let bytes: number
-
-			try {
-				const result = await streamToTempfile(filePart, destDir, maxBytes)
-				tmpPath = result.tmpPath
-				sha256 = result.sha256
-				bytes = result.bytes
-			} catch (err) {
-				const code = (err as { code?: string }).code
-				if (code === "PAYLOAD_TOO_LARGE") {
-					reply.status(413).send({ error: "payload_too_large", code: "payload_too_large" })
+				// Reject obvious traversal patterns before any filesystem check.
+				if (
+					targetPathDecoded.includes("..") ||
+					targetPathDecoded.includes("\x00") ||
+					targetPathDecoded.includes("\\")
+				) {
+					reply
+						.status(400)
+						.send({ error: "bad_target_path", code: "bad_target_path" })
 					return
 				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
 
-			// Atomic rename.
-			try {
-				mkdirSync(destDir, { recursive: true })
-				await rename(tmpPath, destAbsPath)
-				tmpPath = null
-			} catch {
-				if (tmpPath) {
-					try { await unlink(tmpPath) } catch { /* best-effort */ }
+				// Normalise the path: strip leading slash, apply alias.
+				const targetPathNorm = targetPathDecoded.replace(/^\/+/, "")
+				const targetPathCanonical = canonicalisePath(
+					`stages/${stage}/${targetPathNorm}`,
+				)
+
+				// Must land under stages/{stage}/artifacts/.
+				const allowedPrefix = `stages/${stage}/artifacts/`
+				if (!targetPathCanonical.startsWith(allowedPrefix)) {
+					reply
+						.status(400)
+						.send({ error: "bad_target_path", code: "bad_target_path" })
+					return
 				}
-				reply.status(500).send({ error: "write_failed", code: "write_failed" })
-				return
-			}
 
-			// Stamp action-log entry.
-			const entryId = nextEntryId(0, 1)
-			const now = new Date().toISOString()
-			const actionEntry = {
-				entry_type: "human_write" as const,
-				path: destRelPath,
-				sha: sha256,
-				author_class: "human-via-mcp" as const,
-				timestamp: now,
-				human_author_id: attributeToUser,
-				entry_id: entryId,
-				tick_counter: 0,
-			}
-			await appendActionLogEntry(iDir, 0, actionEntry)
+				const iDir = intentDir(intent)
+				const destAbsPath = join(iDir, targetPathCanonical)
+				const destDir = destAbsPath.substring(0, destAbsPath.lastIndexOf("/"))
+				// Final traversal check: resolved path must stay inside intentDir/stages/{stage}/artifacts/
+				const resolvedDest = resolve(destAbsPath)
+				const resolvedAllowed = resolve(join(iDir, allowedPrefix))
+				if (!resolvedDest.startsWith(resolvedAllowed)) {
+					reply
+						.status(400)
+						.send({ error: "bad_target_path", code: "bad_target_path" })
+					return
+				}
 
-			// Append audit-log entry.
-			await appendWriteAudit(iDir, {
-				timestamp: now,
-				entry_id: entryId,
-				path: destRelPath,
-				sha: sha256,
-				author_class: "human-via-mcp",
-				human_author_id: attributeToUser,
-				rationale: null,
-				user_instruction_excerpt: null,
-				tick_counter: 0,
-				session_id: null,
-				overwrite: false,
-				dirs_created: [],
-				audit_log_appended: true,
-			})
+				// Mode enforcement.
+				const targetExists = existsSync(destAbsPath)
+				if (mode === "replace" && !targetExists) {
+					reply.status(400).send({
+						error: "mode_violation",
+						code: "mode_violation",
+						message: "mode=replace but target does not exist",
+					})
+					return
+				}
+				if (mode === "create" && targetExists) {
+					reply
+						.status(409)
+						.send({ error: "filename_collision", code: "filename_collision" })
+					return
+				}
 
-			reply.send({
-				ok: true,
-				path: destRelPath,
-				sha256,
-				bytes,
-				baseline_updated: false,
-				tick_will_observe: true,
-			})
-		},
-	)
+				// Stream to tempfile with size check.
+				let tmpPath: string | null = null
+				let sha256: string
+				let bytes: number
+
+				try {
+					const result = await streamToTempfile(filePart, destDir, maxBytes)
+					tmpPath = result.tmpPath
+					sha256 = result.sha256
+					bytes = result.bytes
+				} catch (err) {
+					const code = (err as { code?: string }).code
+					if (code === "PAYLOAD_TOO_LARGE") {
+						reply
+							.status(413)
+							.send({ error: "payload_too_large", code: "payload_too_large" })
+						return
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
+					return
+				}
+
+				// Atomic rename.
+				try {
+					mkdirSync(destDir, { recursive: true })
+					await rename(tmpPath, destAbsPath)
+					tmpPath = null // rename succeeded; tempfile is now the dest
+				} catch {
+					if (tmpPath) {
+						try {
+							await unlink(tmpPath)
+						} catch {
+							/* best-effort */
+						}
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
+					return
+				}
+
+				// Stamp action-log entry (author_class: "human-via-mcp").
+				const entryId = nextEntryId(0, 1)
+				const now = new Date().toISOString()
+				const actionEntry = {
+					entry_type: "human_write" as const,
+					path: targetPathCanonical,
+					sha: sha256,
+					author_class: "human-via-mcp" as const,
+					timestamp: now,
+					human_author_id: attributeToUser,
+					entry_id: entryId,
+					tick_counter: 0,
+				}
+				await appendActionLogEntry(iDir, 0, actionEntry)
+
+				// Append audit-log entry (AC-TA2 / write-audit.jsonl).
+				await appendWriteAudit(iDir, {
+					timestamp: now,
+					entry_id: entryId,
+					path: targetPathCanonical,
+					sha: sha256,
+					author_class: "human-via-mcp",
+					human_author_id: attributeToUser,
+					rationale: null,
+					user_instruction_excerpt: null, // SPA uploads have no chat instruction (spec §1)
+					tick_counter: 0,
+					session_id: null,
+					overwrite: targetExists,
+					dirs_created: [],
+					audit_log_appended: true,
+				})
+
+				reply.send({
+					ok: true,
+					path: targetPathCanonical,
+					sha256,
+					bytes,
+					baseline_updated: false,
+					tick_will_observe: true,
+				})
+			},
+		)
+
+		// ── POST /api/intents/:intent/uploads/knowledge ────────────────────────
+
+		scope.post<{ Params: { intent: string } }>(
+			"/api/intents/:intent/uploads/knowledge",
+			async (req, reply) => {
+				if (!requireTunnelAuth(req, reply, null)) return
+
+				const { intent } = req.params
+				if (!isValidSlug(intent)) {
+					reply.status(400).send({ error: "bad_param", code: "bad_param" })
+					return
+				}
+
+				if (!validateIntent(intent)) {
+					reply
+						.status(404)
+						.send({ error: "intent_not_found", code: "intent_not_found" })
+					return
+				}
+
+				if (isIntentArchived(intent)) {
+					reply
+						.status(404)
+						.send({ error: "intent_not_found", code: "intent_not_found" })
+					return
+				}
+
+				if (isIntentWorktreeLocked(intent)) {
+					reply
+						.status(423)
+						.send({ error: "intent_locked", code: "intent_locked" })
+					return
+				}
+
+				const maxBytes = getUploadMaxBytes()
+
+				// Parse multipart fields.
+				let targetFilename: string | undefined
+				let stage: string | null = null
+				let attributeToUser: string | undefined
+				let filePart: MultipartFile | undefined
+
+				try {
+					const parts = req.parts()
+					for await (const part of parts) {
+						if (part.type === "file") {
+							filePart = part as MultipartFile
+						} else {
+							const val = (part as { value: string }).value
+							if (part.fieldname === "target_filename") targetFilename = val
+							else if (part.fieldname === "stage") stage = val || null
+							else if (part.fieldname === "attribute_to_user")
+								attributeToUser = val
+							// description is optional — accepted but not stored on disk here
+						}
+					}
+				} catch (err) {
+					const code = (err as { code?: string }).code
+					if (
+						code === "FST_FILES_LIMIT" ||
+						code === "LIMIT_FILE_SIZE" ||
+						code === "PAYLOAD_TOO_LARGE"
+					) {
+						reply
+							.status(413)
+							.send({ error: "payload_too_large", code: "payload_too_large" })
+						return
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
+					return
+				}
+
+				if (!targetFilename || !attributeToUser || !filePart) {
+					reply.status(400).send({
+						error: "bad_param",
+						code: "bad_param",
+						message:
+							"Missing required fields: target_filename, attribute_to_user, file",
+					})
+					return
+				}
+
+				// target_filename must be a basename — no path segments.
+				const filenameDecoded = (() => {
+					try {
+						return decodeURIComponent(targetFilename)
+					} catch {
+						return targetFilename
+					}
+				})()
+				if (
+					filenameDecoded.includes("/") ||
+					filenameDecoded.includes("\\") ||
+					filenameDecoded.includes("..") ||
+					filenameDecoded.includes("\x00")
+				) {
+					reply.status(400).send({
+						error: "bad_target_path",
+						code: "bad_target_path",
+						message: "target_filename must be a basename with no path segments",
+					})
+					return
+				}
+
+				// Validate stage if provided.
+				if (stage !== null) {
+					if (!isValidSlug(stage)) {
+						reply.status(400).send({ error: "bad_param", code: "bad_param" })
+						return
+					}
+					if (!validateStage(intent, stage)) {
+						reply
+							.status(403)
+							.send({ error: "stage_not_writable", code: "stage_not_writable" })
+						return
+					}
+					if (isStageSealed(intent, stage)) {
+						reply
+							.status(403)
+							.send({ error: "stage_not_writable", code: "stage_not_writable" })
+						return
+					}
+				}
+
+				const iDir = intentDir(intent)
+				const destRelPath =
+					stage !== null
+						? `stages/${stage}/knowledge/${filenameDecoded}`
+						: `knowledge/${filenameDecoded}`
+				const destAbsPath = join(iDir, destRelPath)
+				const destDir = destAbsPath.substring(0, destAbsPath.lastIndexOf("/"))
+
+				// filename_collision check (implicit-create semantics).
+				const targetExists = existsSync(destAbsPath)
+				if (targetExists) {
+					reply
+						.status(409)
+						.send({ error: "filename_collision", code: "filename_collision" })
+					return
+				}
+
+				// Stream to tempfile with size check.
+				let tmpPath: string | null = null
+				let sha256: string
+				let bytes: number
+
+				try {
+					const result = await streamToTempfile(filePart, destDir, maxBytes)
+					tmpPath = result.tmpPath
+					sha256 = result.sha256
+					bytes = result.bytes
+				} catch (err) {
+					const code = (err as { code?: string }).code
+					if (code === "PAYLOAD_TOO_LARGE") {
+						reply
+							.status(413)
+							.send({ error: "payload_too_large", code: "payload_too_large" })
+						return
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
+					return
+				}
+
+				// Atomic rename.
+				try {
+					mkdirSync(destDir, { recursive: true })
+					await rename(tmpPath, destAbsPath)
+					tmpPath = null
+				} catch {
+					if (tmpPath) {
+						try {
+							await unlink(tmpPath)
+						} catch {
+							/* best-effort */
+						}
+					}
+					reply
+						.status(500)
+						.send({ error: "write_failed", code: "write_failed" })
+					return
+				}
+
+				// Stamp action-log entry.
+				const entryId = nextEntryId(0, 1)
+				const now = new Date().toISOString()
+				const actionEntry = {
+					entry_type: "human_write" as const,
+					path: destRelPath,
+					sha: sha256,
+					author_class: "human-via-mcp" as const,
+					timestamp: now,
+					human_author_id: attributeToUser,
+					entry_id: entryId,
+					tick_counter: 0,
+				}
+				await appendActionLogEntry(iDir, 0, actionEntry)
+
+				// Append audit-log entry.
+				await appendWriteAudit(iDir, {
+					timestamp: now,
+					entry_id: entryId,
+					path: destRelPath,
+					sha: sha256,
+					author_class: "human-via-mcp",
+					human_author_id: attributeToUser,
+					rationale: null,
+					user_instruction_excerpt: null,
+					tick_counter: 0,
+					session_id: null,
+					overwrite: false,
+					dirs_created: [],
+					audit_log_appended: true,
+				})
+
+				reply.send({
+					ok: true,
+					path: destRelPath,
+					sha256,
+					bytes,
+					baseline_updated: false,
+					tick_will_observe: true,
+				})
+			},
+		)
 	}) // end of encapsulated scope
 }

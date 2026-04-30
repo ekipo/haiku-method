@@ -59,7 +59,7 @@ export async function appendActionLogEntry(
 	let fd: Awaited<ReturnType<typeof open>> | null = null
 	try {
 		fd = await open(filePath, "a")
-		const line = JSON.stringify(entry) + "\n"
+		const line = `${JSON.stringify(entry)}\n`
 		await fd.write(line)
 		await fd.sync()
 		return { ok: true }

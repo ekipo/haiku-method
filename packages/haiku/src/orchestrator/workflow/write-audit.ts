@@ -55,7 +55,10 @@ export interface ActionLogEntry {
 
 /** Format a write entry identifier: `HWM-{tickCounter}-{NN}` where NN is
  *  zero-padded to at least 2 digits (MCP-TOOL-CONTRACT.md §4.1). */
-export function nextEntryId(tickCounter: number, sequenceNumber: number): string {
+export function nextEntryId(
+	tickCounter: number,
+	sequenceNumber: number,
+): string {
 	const nn = String(sequenceNumber).padStart(2, "0")
 	return `HWM-${tickCounter}-${nn}`
 }
@@ -69,7 +72,7 @@ export function nextEntryId(tickCounter: number, sequenceNumber: number): string
  *  and appends `...` so the output is `max + 3` = 203 chars maximum. */
 export function truncateInstruction(text: string, max = 200): string {
 	if (text.length <= max) return text
-	return text.slice(0, max) + "..."
+	return `${text.slice(0, max)}...`
 }
 
 // ── Audit-log path ─────────────────────────────────────────────────────────
@@ -103,7 +106,7 @@ async function appendJsonlLine(
 	let fd: Awaited<ReturnType<typeof open>> | null = null
 	try {
 		fd = await open(filePath, "a")
-		await fd.write(line + "\n")
+		await fd.write(`${line}\n`)
 		await fd.sync()
 		return { ok: true }
 	} catch (err) {

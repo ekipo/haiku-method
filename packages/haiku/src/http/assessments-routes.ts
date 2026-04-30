@@ -101,8 +101,7 @@ function listAllAssessments(intentSlug: string): Array<{
 
 	// Sort newest-first.
 	results.sort(
-		(a, b) =>
-			new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+		(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 	)
 	return results
 }
@@ -125,7 +124,9 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 		}
 
 		if (!validateIntent(intent)) {
-			reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
+			reply
+				.status(404)
+				.send({ error: "intent_not_found", code: "intent_not_found" })
 			return
 		}
 
@@ -136,7 +137,11 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 		if (query.limit !== undefined) {
 			const parsed = Number.parseInt(query.limit, 10)
 			if (!Number.isFinite(parsed) || parsed < 1) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param", message: "limit must be a positive integer" })
+				reply.status(400).send({
+					error: "bad_param",
+					code: "bad_param",
+					message: "limit must be a positive integer",
+				})
 				return
 			}
 			limit = Math.min(parsed, 200)
@@ -147,7 +152,11 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 		if (query.since !== undefined) {
 			const ts = Date.parse(query.since)
 			if (Number.isNaN(ts)) {
-				reply.status(400).send({ error: "bad_param", code: "bad_param", message: "since must be a valid RFC 3339 timestamp" })
+				reply.status(400).send({
+					error: "bad_param",
+					code: "bad_param",
+					message: "since must be a valid RFC 3339 timestamp",
+				})
 				return
 			}
 			sinceMs = ts
@@ -170,7 +179,9 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 			if (stageFilter !== null) {
 				const assessment = readAssessmentFile(entry.absPath)
 				if (!assessment) return false
-				const findings = assessment.findings as Array<Record<string, unknown>> | undefined
+				const findings = assessment.findings as
+					| Array<Record<string, unknown>>
+					| undefined
 				if (!Array.isArray(findings)) return false
 				if (!findings.some((f) => f.stage === stageFilter)) return false
 			}
@@ -178,9 +189,12 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 			if (outcomeFilter !== null) {
 				const assessment = readAssessmentFile(entry.absPath)
 				if (!assessment) return false
-				const classifications = assessment.classifications as Array<Record<string, unknown>> | undefined
+				const classifications = assessment.classifications as
+					| Array<Record<string, unknown>>
+					| undefined
 				if (!Array.isArray(classifications)) return false
-				if (!classifications.some((c) => c.outcome === outcomeFilter)) return false
+				if (!classifications.some((c) => c.outcome === outcomeFilter))
+					return false
 			}
 			return true
 		})
@@ -212,7 +226,9 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 		}
 
 		if (!validateIntent(intent)) {
-			reply.status(404).send({ error: "intent_not_found", code: "intent_not_found" })
+			reply
+				.status(404)
+				.send({ error: "intent_not_found", code: "intent_not_found" })
 			return
 		}
 
@@ -257,9 +273,10 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 				const assessment = readAssessmentFile(absPath)
 				if (assessment === null) {
 					// File exists but cannot be parsed.
-					reply
-						.status(404)
-						.send({ error: "assessment_not_found", code: "assessment_not_found" })
+					reply.status(404).send({
+						error: "assessment_not_found",
+						code: "assessment_not_found",
+					})
 					return
 				}
 				reply.send({ ok: true, assessment })

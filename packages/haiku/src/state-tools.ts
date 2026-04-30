@@ -44,6 +44,7 @@ import {
 } from "./git-worktree.js"
 import { getCapabilities } from "./harness.js"
 import { escalate } from "./model-selection.js"
+import { clearMarkersForFeedbackSync } from "./orchestrator/workflow/baseline-clear-marker.js"
 import { reportError } from "./sentry.js"
 import { logSessionEvent, writeHaikuMetadata } from "./session-metadata.js"
 import { sealIntentState } from "./state-integrity.js"
@@ -7055,6 +7056,25 @@ export function handleStateTool(
 							{ status: "closed", closed_by: args.unit as string },
 							"agent",
 						)
+						// Drift-detection lifecycle hook (unit-09): the
+						// feedback-assessor's terminal close is also a
+						// terminal-status transition for any drift-marker
+						// linked to this feedback id. Best-effort.
+						try {
+							clearMarkersForFeedbackSync(
+								intentDir(args.intent as string),
+								fbId,
+								"closed",
+								{ intentSlug: args.intent as string },
+							)
+						} catch (err) {
+							emitTelemetry("haiku.drift.clear_marker_failed", {
+								intent: args.intent as string,
+								feedback_id: fbId,
+								terminal_status: "closed",
+								error: String((err as Error)?.message ?? err),
+							})
+						}
 					}
 				}
 
@@ -8959,6 +8979,36 @@ export function handleStateTool(
 				}
 			}
 
+			// Drift-detection lifecycle hook (unit-09): if this update
+			// transitions the FB into a terminal state (closed or rejected),
+			// walk drift-markers.json for any open marker linked to this
+			// feedback id and clear each. Per AC-G5 / AC-SF3 and
+			// DATA-CONTRACTS.md §4.4, `addressed` is a mid-state and does
+			// NOT clear the marker. Best-effort: failures are logged via
+			// telemetry but do not roll back the feedback update — the
+			// marker store is a suppression optimisation, not an integrity
+			// guarantee (ARCHITECTURE.md §8.4).
+			if (
+				updateFields.status === "closed" ||
+				updateFields.status === "rejected"
+			) {
+				try {
+					clearMarkersForFeedbackSync(
+						intentDir(intent),
+						feedbackId,
+						updateFields.status,
+						{ intentSlug: intent },
+					)
+				} catch (err) {
+					emitTelemetry("haiku.drift.clear_marker_failed", {
+						intent,
+						feedback_id: feedbackId,
+						terminal_status: updateFields.status,
+						error: String((err as Error)?.message ?? err),
+					})
+				}
+			}
+
 			const updateGitResult = gitCommitState(
 				stage
 					? `feedback: update ${feedbackId} in ${stage}`
@@ -9240,6 +9290,22 @@ export function handleStateTool(
 				rejectFound.path,
 				matter.stringify(`\n${rejectBody}\n`, rejectData),
 			)
+
+			// Drift-detection lifecycle hook (unit-09): rejection is a
+			// terminal state — clear any open drift-marker linked to this
+			// feedback id and update the baseline. Best-effort.
+			try {
+				clearMarkersForFeedbackSync(intentDir(intent), feedbackId, "rejected", {
+					intentSlug: intent,
+				})
+			} catch (err) {
+				emitTelemetry("haiku.drift.clear_marker_failed", {
+					intent,
+					feedback_id: feedbackId,
+					terminal_status: "rejected",
+					error: String((err as Error)?.message ?? err),
+				})
+			}
 
 			const rejectGitResult = gitCommitState(
 				stage
@@ -9707,6 +9773,27 @@ export function handleStateTool(
 			if (closedBy) newFm.closed_by = closedBy
 			writeFileSync(advPath, matter.stringify(`${advBody.trimEnd()}\n`, newFm))
 			sealIntentState(intentArg)
+
+			// Drift-detection lifecycle hook (unit-09): when the fix-loop
+			// terminal hat auto-closes the FB, walk drift-markers.json for
+			// any open marker linked to this feedback id and clear each.
+			// Best-effort: failures are surfaced via telemetry but do not
+			// block the advance.
+			if (isLast) {
+				try {
+					clearMarkersForFeedbackSync(intentDir(intentArg), fbId, "closed", {
+						intentSlug: intentArg,
+					})
+				} catch (err) {
+					emitTelemetry("haiku.drift.clear_marker_failed", {
+						intent: intentArg,
+						feedback_id: fbId,
+						terminal_status: "closed",
+						error: String((err as Error)?.message ?? err),
+					})
+				}
+			}
+
 			emitTelemetry(
 				isLast ? "haiku.feedback.closed" : "haiku.feedback.hat_advanced",
 				{

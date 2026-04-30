@@ -57,6 +57,7 @@ import {
 	writeJson,
 } from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
+import { clearMarkersForRevisitSync } from "./baseline-clear-marker.js"
 
 function readFrontmatter(filePath: string): Record<string, unknown> {
 	if (!existsSync(filePath)) return {}
@@ -212,6 +213,30 @@ export function workflowCompleteStage(
 	})
 	gitCommitState(`haiku: complete stage ${stage}`)
 	sealIntentState(slug)
+
+	// Drift-detection lifecycle hook (unit-09): when a stage completes
+	// with `advanced` outcome, walk drift-markers.json for any open
+	// trigger-revisit marker linked to this stage and clear each. Per
+	// AC-TR2 / DATA-CONTRACTS.md §3.6, "revisit complete" means the
+	// targeted stage re-passes its gate; that is exactly the path
+	// reaching here when `gateOutcome === "advanced"`. Best-effort:
+	// failures inside the clear path do not roll back the stage advance
+	// (the marker store is a suppression optimisation per ARCHITECTURE.md
+	// §8.4).
+	if (gateOutcome === "advanced") {
+		try {
+			clearMarkersForRevisitSync(intentDir(slug), stage, {
+				intentSlug: slug,
+			})
+		} catch (err) {
+			emitTelemetry("haiku.drift.clear_marker_failed", {
+				intent: slug,
+				revisit_target_stage: stage,
+				trigger: "revisit-complete",
+				error: String((err as Error)?.message ?? err),
+			})
+		}
+	}
 }
 
 /** Atomic complete + enter-next. Avoids leaving dirty state on the

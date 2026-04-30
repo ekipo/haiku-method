@@ -93,9 +93,18 @@ function maybePeriodicOwnSessionCleanup(dir: string): void {
 	}
 }
 
-export interface SubagentPromptFile {
+/** Result type for action-prompt writes (e.g. elaborate). Only `path` is
+ *  returned because action-prompt callers set the action's `message` field
+ *  themselves — they never consume the pre-built instruction string. */
+export interface ActionPromptFile {
 	/** Absolute path to the written prompt file. */
 	path: string
+}
+
+/** Result type for subagent-prompt writes. Includes `parentInstruction` so
+ *  the parent Agent tool call can relay the "Read this file" directive
+ *  verbatim without re-constructing it. */
+export interface SubagentPromptFile extends ActionPromptFile {
 	/** The minimal parent-facing instruction — "Read this file and execute its instructions." */
 	parentInstruction: string
 }
@@ -121,6 +130,38 @@ export function writeSubagentPrompt(opts: {
 	const parentInstruction = `Read the file at \`${path}\` and execute its instructions exactly. The file is the complete, canonical subagent prompt authored by the workflow engine — do not paraphrase or skip any of it.`
 
 	return { path, parentInstruction }
+}
+
+/**
+ * Write a per-action prompt body to a tmpfile and return `{ path }`. Mirrors
+ * `writeSubagentPrompt` but is keyed by action+intent+stage instead of
+ * unit+hat+bolt — used when an orchestrator action emission carries an
+ * authoritative prompt body too large to inline in the tool response (e.g.
+ * `elaborate`). Callers set their own `message` field on the action object
+ * and never need the pre-built instruction string, so only `path` is
+ * returned (see `ActionPromptFile`).
+ */
+export function writeActionPromptFile(opts: {
+	action: string
+	intent: string
+	stage?: string
+	content: string
+	tickHint?: string | number
+}): ActionPromptFile {
+	const { action, intent, stage, content } = opts
+	const tickHint =
+		opts.tickHint !== undefined && opts.tickHint !== null
+			? String(opts.tickHint)
+			: String(Date.now())
+	const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-")
+	const stagePart = stage ? `-${safe(stage)}` : ""
+	const slug = `action-${safe(action)}-${safe(intent)}${stagePart}-${safe(tickHint)}`
+	const dir = promptDir()
+	const path = join(dir, `${slug}.prompt.md`)
+	atomicWrite(path, content)
+	maybePeriodicOwnSessionCleanup(dir)
+
+	return { path }
 }
 
 /**

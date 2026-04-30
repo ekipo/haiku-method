@@ -13,9 +13,11 @@
 // `handlers/index.ts` maps state names to handlers. Adding a new
 // state name = adding the entry to the registry + the file.
 
+import { dirname } from "node:path"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
 import { type DerivedState, deriveCurrentState } from "./derive-state.js"
+import { runDriftDetectionGate } from "./drift-detection-gate.js"
 import { preTickFeedbackGate } from "./feedback-triage-gate.js"
 import { dispatchHandler, WORKFLOW_STATES } from "./handlers/index.js"
 import { preTickConsistency } from "./pre-tick.js"
@@ -138,6 +140,53 @@ export function runWorkflowTick(
 			state: triageState,
 			context: derived.context,
 			action: triageAction,
+		}
+	}
+
+	// Pre-tick drift-detection gate (AC-G13 / ARCHITECTURE.md §2.1).
+	// Position in chain: tamper-detection → feedback-triage → drift-detection → dispatch.
+	// Only fires when a stage is active (currentStage non-empty) — no surface to
+	// enumerate pre-stage or post-final.
+	if (derived.context.currentStage) {
+		// haikuRoot = dirname(dirname(intentDirPath)) — intentDirPath is
+		// <haikuRoot>/intents/<slug>, so two dirname() calls walk up to .haiku.
+		const haikuRoot = dirname(dirname(derived.context.intentDirPath))
+		const tickCounter =
+			typeof derived.context.stageState.iteration === "number"
+				? (derived.context.stageState.iteration as number)
+				: 0
+
+		const driftResult = runDriftDetectionGate({
+			intentDir: derived.context.intentDirPath,
+			intentSlug: slug,
+			activeStage: derived.context.currentStage,
+			haikuRoot,
+			tickCounter,
+		})
+
+		if (driftResult.error === "baseline_corrupt") {
+			return {
+				state: "error",
+				context: derived.context,
+				action: {
+					action: "error",
+					message:
+						driftResult.errorMessage ??
+						`Baseline file for stage '${derived.context.currentStage}' is corrupt. Run haiku_repair to re-establish the baseline.`,
+				},
+			}
+		}
+
+		if (driftResult.action === "manual_change_assessment") {
+			return {
+				state: "manual_change_assessment",
+				context: derived.context,
+				action: {
+					action: "manual_change_assessment",
+					slug,
+					findings: driftResult.findings,
+				},
+			}
 		}
 	}
 

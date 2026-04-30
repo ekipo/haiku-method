@@ -42,6 +42,7 @@ import intent_approved from "./intent_approved.js"
 import intent_complete from "./intent_complete.js"
 import intent_completion_fix from "./intent_completion_fix.js"
 import intent_completion_review from "./intent_completion_review.js"
+import manual_change_assessment from "./manual_change_assessment.js"
 import outputs_missing from "./outputs_missing.js"
 import pre_review from "./pre_review.js"
 import pre_review_waiting from "./pre_review_waiting.js"
@@ -93,6 +94,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["intent_complete", intent_complete],
 	["intent_completion_fix", intent_completion_fix],
 	["intent_completion_review", intent_completion_review],
+	["manual_change_assessment", manual_change_assessment],
 	["outputs_missing", outputs_missing],
 	["pre_review", pre_review],
 	["pre_review_waiting", pre_review_waiting],

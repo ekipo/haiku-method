@@ -25,10 +25,10 @@ quality_gates:
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
 status: active
-bolt: 1
+bolt: 2
 hat: builder
 started_at: '2026-04-30T12:40:45Z'
-hat_started_at: '2026-04-30T12:48:59Z'
+hat_started_at: '2026-04-30T12:59:57Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T12:40:45Z'
@@ -36,6 +36,11 @@ iterations:
     result: advance
   - hat: builder
     started_at: '2026-04-30T12:48:59Z'
+    completed_at: '2026-04-30T12:59:57Z'
+    result: reject
+    reason: 'auto-reject: quality_gate_failed (typecheck)'
+  - hat: builder
+    started_at: '2026-04-30T12:59:57Z'
     completed_at: null
     result: null
 ---

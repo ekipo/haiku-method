@@ -42,7 +42,7 @@ quality_gates:
       packages/haiku-ui/src/atoms/KnowledgeDropZone.tsx
       packages/haiku-ui/src/atoms/StagedFileRow.tsx
       packages/haiku-ui/src/atoms/DestinationSelect.tsx
-status: active
+status: completed
 bolt: 1
 hat: ''
 started_at: '2026-04-30T20:38:16Z'
@@ -50,8 +50,9 @@ hat_started_at: '2026-04-30T20:38:16Z'
 iterations:
   - hat: ''
     started_at: '2026-04-30T20:38:16Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T21:41:58Z'
+    result: advance
+completed_at: '2026-04-30T21:41:58Z'
 ---
 # SPA Knowledge Upload Panel (left sidebar)
 

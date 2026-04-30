@@ -179,13 +179,23 @@ export function runWorkflowTick(
 		}
 
 		if (driftResult.action === "manual_change_assessment") {
+			const intentMode =
+				typeof derived.context.intent.mode === "string"
+					? (derived.context.intent.mode as string)
+					: "continuous"
+			const action = buildManualChangeAssessmentAction(
+				{
+					intentSlug: slug,
+					stage: derived.context.currentStage,
+					tickCounter,
+					mode: intentMode,
+				},
+				driftResult.findings,
+			)
 			return {
 				state: "manual_change_assessment",
 				context: derived.context,
-				action: buildManualChangeAssessmentAction(
-					derived.context,
-					driftResult.findings,
-				),
+				action,
 			}
 		}
 	}

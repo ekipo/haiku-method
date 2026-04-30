@@ -1,86 +1,79 @@
 #!/usr/bin/env npx tsx
-// Tests for manual-change-assessment.ts — builder + action union guard.
+// Tests for handlers/manual-change-assessment.ts — builder for the
+// `manual_change_assessment` workflow action.
 //
-// Coverage (unit-05 spec + features/manual-change-assessment.feature):
-//  1. Builder produces action with action === 'manual_change_assessment'.
-//  2. findings array length equals input length; ordering preserved.
-//  3. legal_outcomes excludes trigger-revisit for current-stage findings (AC-CO1).
-//  4. legal_outcomes includes all four for earlier-stage findings (AC-EO1).
-//  5. legal_outcomes excludes inline-fix for file-removed change_kind (DATA-CONTRACTS §3.4).
-//  6. tick_id is unique per dispatch — two consecutive dispatches return different IDs.
-//  7. instructions mentions haiku_classify_drift and the four outcome strings.
-//  8. Same-tick atomic batching: 60 findings produce one action with all 60.
-//  9. isManualChangeAssessment guard returns true for the shape, false for others.
+// Coverage maps to features/manual-change-assessment.feature scenarios
+// and unit-05 completion criteria:
+//
+//  - Builder produces an action with `action === "manual_change_assessment"`.
+//  - `findings` array length and ordering preserved; each finding gets a
+//    stable `DRF-NN` id assigned.
+//  - `legal_outcomes` excludes `trigger-revisit` for current-stage findings
+//    (AC-CO1) and includes all four for earlier-stage findings (AC-EO1).
+//  - `legal_outcomes` excludes `inline-fix` for `file-removed` change_kind
+//    (DATA-CONTRACTS.md §3.4 / AC matrix).
+//  - `tick_id` is unique per dispatch — two dispatches return different IDs.
+//  - `instructions` mentions `haiku_classify_drift` and the four outcome
+//    strings.
+//  - Same-tick atomic batching: 60 findings produce one action with all 60
+//    in the `findings` array (Scenario "Large drift batch is dispatched in
+//    a single atomic action payload").
+//  - `isManualChangeAssessment` guard returns true for the new shape, false
+//    for any other action.
+//  - Default WorkflowHandler returns an `error` action (registry-only
+//    fallback; production path is the gate's direct emission).
 
 import assert from "node:assert"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 
-const tmp = mkdtempSync(join(tmpdir(), "haiku-mca-test-"))
+const { buildManualChangeAssessmentAction, isManualChangeAssessment } =
+	await import(
+		"../src/orchestrator/workflow/handlers/manual-change-assessment.ts"
+	)
 
-const {
-	buildManualChangeAssessmentAction,
-	isManualChangeAssessment,
-} = await import(
+const handlerModule = await import(
 	"../src/orchestrator/workflow/handlers/manual-change-assessment.ts"
 )
+const defaultHandler = handlerModule.default
+
+const actionsModule = await import("../src/orchestrator/actions.ts")
 
 let passed = 0
 let failed = 0
 
 function test(name, fn) {
 	try {
-		const r = fn()
-		if (r && typeof r.then === "function") {
-			return r.then(
-				() => {
-					passed++
-					console.log(`  ✓ ${name}`)
-				},
-				(e) => {
-					failed++
-					console.log(`  ✗ ${name}: ${e.message}`)
-					if (process.env.VERBOSE) console.error(e)
-				},
-			)
-		}
+		fn()
 		passed++
 		console.log(`  ✓ ${name}`)
-	} catch (e) {
+	} catch (err) {
 		failed++
-		console.log(`  ✗ ${name}: ${e.message}`)
-		if (process.env.VERBOSE) console.error(e)
+		console.log(`  ✗ ${name}: ${err.message}`)
+		if (process.env.VERBOSE) console.error(err)
 	}
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Fixtures ───────────────────────────────────────────────────────────────
 
-/** Make a minimal DerivedContext for testing. */
 function makeCtx(overrides = {}) {
 	return {
-		slug: "demo-intent",
-		studio: "software",
-		intentDirPath: join(tmp, "intents", "demo-intent"),
-		intent: { mode: "interactive", status: "active", studio: "software" },
-		currentStage: "design",
-		currentPhase: "execute",
-		stageState: { iteration: 7 },
+		intentSlug: "demo-intent",
+		stage: "design",
+		tickCounter: 1,
+		mode: "continuous",
 		...overrides,
 	}
 }
 
-/** Make a minimal DriftFinding for testing. */
 function makeFinding(overrides = {}) {
 	return {
 		path: "stages/design/artifacts/spec.md",
 		change_kind: "modified",
 		is_binary: false,
-		diff_unified: "--- a/spec.md\n+++ b/spec.md\n@@ -1 +1 @@\n-old\n+new\n",
-		before_sha256: "aaaa".repeat(16),
-		after_sha256: "bbbb".repeat(16),
+		diff_unified: "@@ -1,1 +1,1 @@\n-old\n+new",
+		before_sha256: "a".repeat(64),
+		after_sha256: "b".repeat(64),
 		before_bytes: 100,
-		after_bytes: 103,
+		after_bytes: 110,
 		tracking_class: "stage-output",
 		stage: "design",
 		context_unit: null,
@@ -88,285 +81,299 @@ function makeFinding(overrides = {}) {
 	}
 }
 
-// ── Scenario 1: action discriminator ──────────────────────────────────────
+// ── Tests ──────────────────────────────────────────────────────────────────
 
-console.log("\n=== Scenario 1: action discriminator ===")
+console.log("=== buildManualChangeAssessmentAction shape ===")
 
-test("builder produces action with action === 'manual_change_assessment'", () => {
-	const ctx = makeCtx()
-	const findings = [makeFinding()]
-	const action = buildManualChangeAssessmentAction(ctx, findings)
-
+test("action has discriminator manual_change_assessment", () => {
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
 	assert.strictEqual(action.action, "manual_change_assessment")
-	assert.ok(action.intent_slug, "intent_slug should be set")
-	assert.strictEqual(action.intent_slug, ctx.slug)
-	assert.ok(action.stage, "stage should be set")
-	assert.ok(action.tick_id, "tick_id should be set")
-	assert.ok(Array.isArray(action.findings), "findings should be an array")
-	assert.ok(typeof action.instructions === "string", "instructions should be a string")
-	assert.ok(action.legal_outcomes && typeof action.legal_outcomes === "object", "legal_outcomes should be an object")
 })
 
-// ── Scenario 2: findings array length + ordering ───────────────────────────
+test("action carries intent_slug, stage, mode, tick_id", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ intentSlug: "x", stage: "design", mode: "autopilot" }),
+		[makeFinding()],
+	)
+	assert.strictEqual(action.intent_slug, "x")
+	assert.strictEqual(action.stage, "design")
+	assert.strictEqual(action.mode, "autopilot")
+	assert.ok(typeof action.tick_id === "string" && action.tick_id.length > 0)
+})
 
-console.log("\n=== Scenario 2: findings array length and ordering ===")
+test("findings length and ordering preserved", () => {
+	const f1 = makeFinding({ path: "a.md" })
+	const f2 = makeFinding({ path: "b.md" })
+	const f3 = makeFinding({ path: "c.md" })
+	const action = buildManualChangeAssessmentAction(makeCtx(), [f1, f2, f3])
+	assert.strictEqual(action.findings.length, 3)
+	assert.strictEqual(action.findings[0].path, "a.md")
+	assert.strictEqual(action.findings[1].path, "b.md")
+	assert.strictEqual(action.findings[2].path, "c.md")
+})
 
-test("findings array length equals input length and ordering is preserved", () => {
-	const ctx = makeCtx()
+test("each finding gets a stable zero-padded DRF-NN id", () => {
 	const findings = [
-		makeFinding({ path: "stages/design/artifacts/a.md" }),
-		makeFinding({ path: "stages/design/artifacts/b.md" }),
-		makeFinding({ path: "stages/design/artifacts/c.md" }),
+		makeFinding({ path: "a.md" }),
+		makeFinding({ path: "b.md" }),
 	]
-	const action = buildManualChangeAssessmentAction(ctx, findings)
-
-	assert.strictEqual(action.findings.length, 3, "findings array length should match input")
-	assert.strictEqual(action.findings[0].path, "stages/design/artifacts/a.md", "first finding path preserved")
-	assert.strictEqual(action.findings[1].path, "stages/design/artifacts/b.md", "second finding path preserved")
-	assert.strictEqual(action.findings[2].path, "stages/design/artifacts/c.md", "third finding path preserved")
-})
-
-// ── Scenario 3: legal_outcomes excludes trigger-revisit for current-stage (AC-CO1) ──
-
-console.log("\n=== Scenario 3: legal_outcomes — current-stage excludes trigger-revisit (AC-CO1) ===")
-
-test("current-stage finding has trigger-revisit excluded from legal_outcomes (AC-CO1)", () => {
-	const ctx = makeCtx({ currentStage: "design" })
-	const finding = makeFinding({
-		path: "stages/design/artifacts/spec.md",
-		stage: "design",  // same as activeStage
-	})
-	const action = buildManualChangeAssessmentAction(ctx, [finding])
-
-	const outcomes = action.legal_outcomes[finding.path]
-	assert.ok(Array.isArray(outcomes), "legal_outcomes should have an entry for the finding path")
-	assert.ok(
-		!outcomes.includes("trigger-revisit"),
-		`trigger-revisit should be excluded for current-stage finding, got: [${outcomes.join(", ")}]`,
-	)
-	assert.ok(outcomes.includes("ignore"), "ignore should be allowed for current-stage finding")
-	assert.ok(outcomes.includes("inline-fix"), "inline-fix should be allowed for current-stage modified finding")
-	assert.ok(outcomes.includes("surface-as-feedback"), "surface-as-feedback should be allowed for current-stage finding")
-})
-
-// ── Scenario 4: legal_outcomes includes all four for earlier-stage (AC-EO1) ──
-
-console.log("\n=== Scenario 4: legal_outcomes — earlier-stage includes all four (AC-EO1) ===")
-
-test("earlier-stage finding has all four outcomes in legal_outcomes (AC-EO1)", () => {
-	const ctx = makeCtx({ currentStage: "development" })
-	const finding = makeFinding({
-		path: "stages/design/artifacts/spec.md",
-		stage: "design",  // earlier than activeStage "development"
-	})
-	const action = buildManualChangeAssessmentAction(ctx, [finding])
-
-	const outcomes = action.legal_outcomes[finding.path]
-	assert.ok(Array.isArray(outcomes), "legal_outcomes should have entry for the path")
-	assert.ok(outcomes.includes("ignore"), "ignore allowed for earlier-stage")
-	assert.ok(outcomes.includes("inline-fix"), "inline-fix allowed for earlier-stage")
-	assert.ok(outcomes.includes("surface-as-feedback"), "surface-as-feedback allowed for earlier-stage")
-	assert.ok(outcomes.includes("trigger-revisit"), "trigger-revisit allowed for earlier-stage (AC-EO1)")
-})
-
-// ── Scenario 5: legal_outcomes excludes inline-fix for file-removed (DATA-CONTRACTS §3.4) ──
-
-console.log("\n=== Scenario 5: legal_outcomes — file-removed excludes inline-fix (DATA-CONTRACTS §3.4) ===")
-
-test("file-removed finding has inline-fix excluded from legal_outcomes (DATA-CONTRACTS §3.4)", () => {
-	const ctx = makeCtx({ currentStage: "development" })
-	const finding = makeFinding({
-		path: "stages/inception/artifacts/DISCOVERY.md",
-		stage: "inception",  // earlier stage — so trigger-revisit IS allowed
-		change_kind: "file-removed",
-		after_sha256: null,
-		after_bytes: null,
-		diff_unified: null,
-	})
-	const action = buildManualChangeAssessmentAction(ctx, [finding])
-
-	const outcomes = action.legal_outcomes[finding.path]
-	assert.ok(Array.isArray(outcomes), "legal_outcomes should have entry for the path")
-	assert.ok(
-		!outcomes.includes("inline-fix"),
-		`inline-fix should be excluded for file-removed, got: [${outcomes.join(", ")}]`,
-	)
-	assert.ok(outcomes.includes("ignore"), "ignore allowed for file-removed")
-	assert.ok(outcomes.includes("surface-as-feedback"), "surface-as-feedback allowed for file-removed")
-	assert.ok(outcomes.includes("trigger-revisit"), "trigger-revisit allowed for earlier-stage file-removed")
-})
-
-test("current-stage file-removed: both inline-fix AND trigger-revisit excluded", () => {
-	const ctx = makeCtx({ currentStage: "design" })
-	const finding = makeFinding({
-		path: "stages/design/artifacts/removed.html",
-		stage: "design",  // same as activeStage → trigger-revisit excluded (AC-CO1)
-		change_kind: "file-removed",
-		after_sha256: null,
-		after_bytes: null,
-		diff_unified: null,
-	})
-	const action = buildManualChangeAssessmentAction(ctx, [finding])
-
-	const outcomes = action.legal_outcomes[finding.path]
-	assert.ok(!outcomes.includes("inline-fix"), "inline-fix excluded (file-removed)")
-	assert.ok(!outcomes.includes("trigger-revisit"), "trigger-revisit excluded (current-stage)")
-	assert.ok(outcomes.includes("ignore"), "ignore still allowed")
-	assert.ok(outcomes.includes("surface-as-feedback"), "surface-as-feedback still allowed")
-})
-
-// ── Scenario 6: tick_id unique per dispatch ────────────────────────────────
-
-console.log("\n=== Scenario 6: tick_id unique per dispatch ===")
-
-test("two consecutive dispatches produce different tick_ids", async () => {
-	const ctx = makeCtx()
-	const findings = [makeFinding()]
-
-	const action1 = buildManualChangeAssessmentAction(ctx, findings)
-	// Small delay to guarantee timestamp differs (tick_id includes ms timestamp).
-	await new Promise((r) => setTimeout(r, 5))
-	const action2 = buildManualChangeAssessmentAction(ctx, findings)
-
-	assert.ok(
-		action1.tick_id !== action2.tick_id,
-		`tick_ids should differ: "${action1.tick_id}" vs "${action2.tick_id}"`,
-	)
-})
-
-// ── Scenario 7: instructions mention haiku_classify_drift and four outcomes ──
-
-console.log("\n=== Scenario 7: instructions mention haiku_classify_drift and four outcomes ===")
-
-test("instructions mention haiku_classify_drift and all four outcome strings", () => {
-	const ctx = makeCtx()
-	const findings = [makeFinding()]
-	const action = buildManualChangeAssessmentAction(ctx, findings)
-
-	const instr = action.instructions
-	assert.ok(
-		instr.includes("haiku_classify_drift"),
-		"instructions should mention haiku_classify_drift",
-	)
-	assert.ok(instr.includes("ignore"), "instructions should mention 'ignore' outcome")
-	assert.ok(instr.includes("inline-fix"), "instructions should mention 'inline-fix' outcome")
-	assert.ok(instr.includes("surface-as-feedback"), "instructions should mention 'surface-as-feedback' outcome")
-	assert.ok(instr.includes("trigger-revisit"), "instructions should mention 'trigger-revisit' outcome")
-})
-
-// ── Scenario 8: same-tick atomic batching — 60 findings ───────────────────
-
-console.log("\n=== Scenario 8: same-tick atomic batching (60 findings) ===")
-
-test("60 findings produce one action with all 60 in the findings array (AC-G12)", () => {
-	const ctx = makeCtx()
-	const findings = Array.from({ length: 60 }, (_, i) =>
-		makeFinding({
-			path: `stages/design/artifacts/file-${String(i + 1).padStart(2, "0")}.md`,
-		}),
-	)
-	const action = buildManualChangeAssessmentAction(ctx, findings)
-
-	assert.strictEqual(action.action, "manual_change_assessment")
-	assert.strictEqual(
-		action.findings.length,
-		60,
-		`findings array should contain all 60 findings, got ${action.findings.length}`,
-	)
-	// Verify no pagination cursor or batch metadata.
-	assert.ok(!("page" in action), "action should have no 'page' field")
-	assert.ok(!("has_more" in action), "action should have no 'has_more' field")
-	assert.ok(!("batch_id" in action), "action should have no 'batch_id' field")
-})
-
-// ── Scenario 9: isManualChangeAssessment guard ─────────────────────────────
-
-console.log("\n=== Scenario 9: isManualChangeAssessment guard ===")
-
-test("isManualChangeAssessment returns true for a manual_change_assessment shape", () => {
-	const ctx = makeCtx()
-	const action = buildManualChangeAssessmentAction(ctx, [makeFinding()])
-	assert.ok(
-		isManualChangeAssessment(action),
-		"isManualChangeAssessment should return true for the new shape",
-	)
-})
-
-test("isManualChangeAssessment returns false for other action shapes", () => {
-	const others = [
-		{ action: "elaborate" },
-		{ action: "execute" },
-		{ action: "error", message: "oops" },
-		{ action: "gate_review" },
-		{ action: "feedback_triage" },
-	]
-	for (const other of others) {
-		assert.ok(
-			!isManualChangeAssessment(other),
-			`isManualChangeAssessment should return false for action '${other.action}'`,
-		)
-	}
-})
-
-// ── DRF-NN finding IDs are assigned and zero-padded ───────────────────────
-
-console.log("\n=== Additional: DRF-NN finding_id assignment ===")
-
-test("findings are assigned DRF-NN ids, zero-padded, starting at DRF-01", () => {
-	const ctx = makeCtx()
-	const findings = [
-		makeFinding({ path: "stages/design/artifacts/a.md" }),
-		makeFinding({ path: "stages/design/artifacts/b.md" }),
-		makeFinding({ path: "stages/design/artifacts/c.md" }),
-	]
-	const action = buildManualChangeAssessmentAction(ctx, findings)
-
+	const action = buildManualChangeAssessmentAction(makeCtx(), findings)
 	assert.strictEqual(action.findings[0].finding_id, "DRF-01")
 	assert.strictEqual(action.findings[1].finding_id, "DRF-02")
-	assert.strictEqual(action.findings[2].finding_id, "DRF-03")
 })
 
-test("DRF-NN ids are zero-padded to two digits", () => {
-	const ctx = makeCtx()
-	const findings = Array.from({ length: 9 }, (_, i) =>
-		makeFinding({ path: `stages/design/artifacts/file-${i}.md` }),
+test("DRF-NN scales past 9 with zero-padding for first 99 findings", () => {
+	const findings = Array.from({ length: 12 }, (_, i) =>
+		makeFinding({ path: `f-${i}.md` }),
 	)
-	const action = buildManualChangeAssessmentAction(ctx, findings)
+	const action = buildManualChangeAssessmentAction(makeCtx(), findings)
+	assert.strictEqual(action.findings[0].finding_id, "DRF-01")
+	assert.strictEqual(action.findings[8].finding_id, "DRF-09")
+	assert.strictEqual(action.findings[9].finding_id, "DRF-10")
+	assert.strictEqual(action.findings[11].finding_id, "DRF-12")
+})
 
-	for (let i = 0; i < 9; i++) {
-		const expectedId = `DRF-0${i + 1}`
-		assert.strictEqual(
-			action.findings[i].finding_id,
-			expectedId,
-			`finding ${i} should have id ${expectedId}, got ${action.findings[i].finding_id}`,
+console.log(
+	"=== legal_outcomes filter (AC-CO1, AC-EO1, DATA-CONTRACTS §3.4) ===",
+)
+
+test("current-stage findings exclude trigger-revisit (AC-CO1)", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "design" }),
+		[makeFinding({ path: "p.md", stage: "design" })],
+	)
+	const outcomes = action.legal_outcomes["p.md"]
+	assert.ok(Array.isArray(outcomes))
+	assert.ok(
+		!outcomes.includes("trigger-revisit"),
+		"trigger-revisit should be excluded",
+	)
+	assert.ok(outcomes.includes("ignore"))
+	assert.ok(outcomes.includes("inline-fix"))
+	assert.ok(outcomes.includes("surface-as-feedback"))
+})
+
+test("earlier-stage findings include all four outcomes (AC-EO1)", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "development" }),
+		[makeFinding({ path: "p.md", stage: "design" })],
+	)
+	const outcomes = action.legal_outcomes["p.md"]
+	assert.strictEqual(outcomes.length, 4)
+	assert.ok(outcomes.includes("ignore"))
+	assert.ok(outcomes.includes("inline-fix"))
+	assert.ok(outcomes.includes("surface-as-feedback"))
+	assert.ok(outcomes.includes("trigger-revisit"))
+})
+
+test("intent-scope findings (stage: null) are treated as cross-stage", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "design" }),
+		[makeFinding({ path: "intent.md", stage: null })],
+	)
+	const outcomes = action.legal_outcomes["intent.md"]
+	assert.ok(outcomes.includes("trigger-revisit"))
+})
+
+test("file-removed excludes inline-fix (DATA-CONTRACTS §3.4)", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "development" }),
+		[
+			makeFinding({
+				path: "gone.md",
+				stage: "design",
+				change_kind: "file-removed",
+				after_sha256: null,
+				after_bytes: null,
+				diff_unified: null,
+			}),
+		],
+	)
+	const outcomes = action.legal_outcomes["gone.md"]
+	assert.ok(!outcomes.includes("inline-fix"), "file-removed cannot inline-fix")
+	assert.ok(outcomes.includes("ignore"))
+	assert.ok(outcomes.includes("surface-as-feedback"))
+	assert.ok(outcomes.includes("trigger-revisit"))
+})
+
+test("file-removed on current stage gets ignore + surface-as-feedback only", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "design" }),
+		[
+			makeFinding({
+				path: "gone.md",
+				stage: "design",
+				change_kind: "file-removed",
+				after_sha256: null,
+				after_bytes: null,
+				diff_unified: null,
+			}),
+		],
+	)
+	const outcomes = action.legal_outcomes["gone.md"]
+	assert.ok(!outcomes.includes("inline-fix"))
+	assert.ok(!outcomes.includes("trigger-revisit"))
+	assert.ok(outcomes.includes("ignore"))
+	assert.ok(outcomes.includes("surface-as-feedback"))
+})
+
+test("new-file-detected admits all four outcomes when cross-stage", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "development" }),
+		[
+			makeFinding({
+				path: "new.md",
+				stage: "design",
+				change_kind: "new-file-detected",
+				before_sha256: null,
+				before_bytes: null,
+			}),
+		],
+	)
+	const outcomes = action.legal_outcomes["new.md"]
+	assert.strictEqual(outcomes.length, 4)
+})
+
+console.log("=== tick_id uniqueness ===")
+
+test("two consecutive dispatches produce different tick_ids", () => {
+	const a1 = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	const a2 = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	assert.notStrictEqual(a1.tick_id, a2.tick_id, "tick_ids must be unique")
+})
+
+test("tick_id includes the slug and counter", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ intentSlug: "abc", tickCounter: 7 }),
+		[makeFinding()],
+	)
+	assert.ok(
+		action.tick_id.includes("abc"),
+		`tick_id should mention slug, got ${action.tick_id}`,
+	)
+	assert.ok(
+		action.tick_id.includes("7"),
+		`tick_id should mention counter, got ${action.tick_id}`,
+	)
+})
+
+console.log("=== instructions prose ===")
+
+test("instructions mention haiku_classify_drift", () => {
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	assert.ok(
+		action.instructions.includes("haiku_classify_drift"),
+		"instructions must reference haiku_classify_drift",
+	)
+})
+
+test("instructions mention all four outcome strings", () => {
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	assert.ok(action.instructions.includes("ignore"))
+	assert.ok(action.instructions.includes("inline-fix"))
+	assert.ok(action.instructions.includes("surface-as-feedback"))
+	assert.ok(action.instructions.includes("trigger-revisit"))
+})
+
+test("instructions mention agent_rationale and rationale_excerpt (AC-EE5)", () => {
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	assert.ok(action.instructions.includes("agent_rationale"))
+	assert.ok(action.instructions.includes("rationale_excerpt"))
+})
+
+test("instructions list per-finding allowed outcomes", () => {
+	const action = buildManualChangeAssessmentAction(
+		makeCtx({ stage: "design" }),
+		[makeFinding({ path: "a.md", stage: "design" })],
+	)
+	// Should reference a.md path and outcome list
+	assert.ok(action.instructions.includes("a.md"))
+})
+
+console.log("=== large batch atomicity ===")
+
+test("60 findings produce one action with all 60 in findings array", () => {
+	const findings = Array.from({ length: 60 }, (_, i) =>
+		makeFinding({ path: `f-${i}.md` }),
+	)
+	const action = buildManualChangeAssessmentAction(makeCtx(), findings)
+	assert.strictEqual(action.findings.length, 60)
+	// And every one has a finding_id
+	for (let i = 0; i < 60; i++) {
+		assert.ok(
+			action.findings[i].finding_id?.startsWith("DRF-"),
+			`finding ${i} missing finding_id`,
 		)
+		assert.strictEqual(action.findings[i].path, `f-${i}.md`)
 	}
 })
 
-// ── mode is sourced from intent frontmatter ────────────────────────────────
-
-console.log("\n=== Additional: mode sourced from intent frontmatter ===")
-
-test("mode field reflects intent.mode from context", () => {
-	const ctx = makeCtx({ intent: { mode: "autopilot", status: "active", studio: "software" } })
-	const action = buildManualChangeAssessmentAction(ctx, [makeFinding()])
-	assert.strictEqual(action.mode, "autopilot")
+test("60 findings produce 60 entries in legal_outcomes map", () => {
+	const findings = Array.from({ length: 60 }, (_, i) =>
+		makeFinding({ path: `f-${i}.md` }),
+	)
+	const action = buildManualChangeAssessmentAction(makeCtx(), findings)
+	assert.strictEqual(Object.keys(action.legal_outcomes).length, 60)
 })
 
-test("mode defaults to 'interactive' when intent.mode is absent", () => {
-	const ctx = makeCtx({ intent: { status: "active", studio: "software" } })
-	const action = buildManualChangeAssessmentAction(ctx, [makeFinding()])
-	assert.strictEqual(action.mode, "interactive")
+console.log("=== isManualChangeAssessment guard ===")
+
+test("guard returns true for a built action", () => {
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	assert.strictEqual(isManualChangeAssessment(action), true)
 })
 
-// ── Cleanup + summary ──────────────────────────────────────────────────────
+test("guard returns false for a different action shape", () => {
+	const other = { action: "elaborate", slug: "foo" }
+	assert.strictEqual(isManualChangeAssessment(other), false)
+})
 
-try {
-	rmSync(tmp, { recursive: true, force: true })
-} catch {}
+test("guard returns false for an action with the wrong discriminator", () => {
+	const other = { action: "feedback_dispatch", findings: [], stage: "design" }
+	assert.strictEqual(isManualChangeAssessment(other), false)
+})
+
+test("guard returns false for null / undefined", () => {
+	assert.strictEqual(isManualChangeAssessment(null), false)
+	assert.strictEqual(isManualChangeAssessment(undefined), false)
+})
+
+test("guard returns false for an action missing required fields", () => {
+	const malformed = { action: "manual_change_assessment", stage: "design" }
+	assert.strictEqual(isManualChangeAssessment(malformed), false)
+})
+
+console.log("=== actions.ts re-exports ===")
+
+test("actions.ts re-exports buildManualChangeAssessmentAction", () => {
+	assert.strictEqual(
+		typeof actionsModule.buildManualChangeAssessmentAction,
+		"function",
+	)
+})
+
+test("actions.ts re-exports isManualChangeAssessment", () => {
+	assert.strictEqual(typeof actionsModule.isManualChangeAssessment, "function")
+})
+
+console.log("=== default WorkflowHandler fallback ===")
+
+test("default handler returns error action when reached via dispatch", () => {
+	const result = defaultHandler({
+		slug: "test",
+		studio: "software",
+		intentDirPath: "/tmp/x",
+		intent: {},
+		currentStage: "design",
+		currentPhase: "execute",
+	})
+	assert.strictEqual(result.action, "error")
+	assert.ok(typeof result.message === "string")
+	assert.ok(result.message.includes("manual_change_assessment"))
+})
+
+// ── Summary ────────────────────────────────────────────────────────────────
 
 console.log("")
-console.log(`  ${passed + failed} tests: ${passed} passed, ${failed} failed`)
-console.log("")
-
-process.exit(failed > 0 ? 1 : 0)
+console.log(`${passed} passed, ${failed} failed`)
+if (failed > 0) process.exit(1)

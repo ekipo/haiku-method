@@ -24,7 +24,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-markers.ts
-status: pending
+status: active
+bolt: 1
+hat: planner
+started_at: '2026-04-30T16:33:55Z'
+hat_started_at: '2026-04-30T16:33:55Z'
+iterations:
+  - hat: planner
+    started_at: '2026-04-30T16:33:55Z'
+    completed_at: null
+    result: null
 ---
 # Pending-assessment marker store (drift-markers.ts)
 

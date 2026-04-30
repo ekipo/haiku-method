@@ -26,12 +26,16 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
 status: active
 bolt: 1
-hat: planner
+hat: builder
 started_at: '2026-04-30T12:40:45Z'
-hat_started_at: '2026-04-30T12:40:45Z'
+hat_started_at: '2026-04-30T12:48:59Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T12:40:45Z'
+    completed_at: '2026-04-30T12:48:59Z'
+    result: advance
+  - hat: builder
+    started_at: '2026-04-30T12:48:59Z'
     completed_at: null
     result: null
 ---

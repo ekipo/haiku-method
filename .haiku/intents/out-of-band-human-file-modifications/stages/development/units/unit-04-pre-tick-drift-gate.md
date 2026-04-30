@@ -31,10 +31,10 @@ quality_gates:
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
 status: active
-bolt: 1
-hat: reviewer
+bolt: 2
+hat: builder
 started_at: '2026-04-30T17:07:13Z'
-hat_started_at: '2026-04-30T17:39:44Z'
+hat_started_at: '2026-04-30T17:43:42Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T17:07:13Z'
@@ -46,6 +46,23 @@ iterations:
     result: advance
   - hat: reviewer
     started_at: '2026-04-30T17:39:44Z'
+    completed_at: '2026-04-30T17:43:42Z'
+    result: reject
+    reason: >-
+      Diff generation for modified text files is broken: buildUnifiedDiff passes
+      a SHA-256 content hash to `git cat-file blob`, but git objects use SHA-1.
+      This means diff_unified will always be null for modified files — git will
+      never find the blob. The spec allows null as a fallback but AC-T1 and the
+      feature scenario 2 ("diff_unified field shows only the lines the PO
+      changed") require a real diff. Additionally, the test for Scenario 2 does
+      not assert diff_unified !== null, so the test passes even though diff
+      generation fails. Two additional gaps: (1) no test exercises the full
+      runWorkflowTick → drift-detection gate → manual_change_assessment
+      short-circuit path; (2) the kill-switch test uses real disk I/O rather
+      than mocking fs.readFile as the spec prescribes. The diff defect is the
+      blocker.
+  - hat: builder
+    started_at: '2026-04-30T17:43:42Z'
     completed_at: null
     result: null
 ---

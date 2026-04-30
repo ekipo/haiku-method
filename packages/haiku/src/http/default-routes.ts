@@ -20,6 +20,9 @@ import {
 	type ZodIssueWire,
 } from "haiku-api"
 import { HAIKU_UI_HTML } from "../haiku-ui-html.js"
+import { getPluginVersion, MCP_VERSION } from "../version.js"
+
+const PLUGIN_VERSION = getPluginVersion()
 
 export function registerDefaultRoutes(
 	instance: FastifyInstance,
@@ -37,6 +40,16 @@ export function registerDefaultRoutes(
 			return "starting"
 		}
 		return "ok"
+	})
+
+	// Version endpoint surfaced to the SPA so reviewers can see which
+	// MCP binary + plugin version is running when the review pane opens.
+	// Useful when a fix has merged but the running plugin hasn't yet
+	// updated, or when comparing observed behavior to what's documented
+	// in CHANGELOG.md. No auth — version is non-sensitive metadata.
+	instance.get("/api/version", async (_req, reply) => {
+		reply.header("Cache-Control", "no-store")
+		return { mcp_version: MCP_VERSION, plugin_version: PLUGIN_VERSION }
 	})
 
 	// NOTE on OPTIONS routing: @fastify/cors (registered above) owns

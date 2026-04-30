@@ -32,9 +32,9 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
 status: active
 bolt: 1
-hat: builder
+hat: reviewer
 started_at: '2026-04-30T17:07:13Z'
-hat_started_at: '2026-04-30T17:30:14Z'
+hat_started_at: '2026-04-30T17:39:44Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T17:07:13Z'
@@ -42,6 +42,10 @@ iterations:
     result: advance
   - hat: builder
     started_at: '2026-04-30T17:30:14Z'
+    completed_at: '2026-04-30T17:39:44Z'
+    result: advance
+  - hat: reviewer
+    started_at: '2026-04-30T17:39:44Z'
     completed_at: null
     result: null
 ---

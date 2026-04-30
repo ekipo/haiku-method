@@ -32,7 +32,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b' packages/haiku/src/http/upload-routes.ts
       packages/haiku/src/http/assessments-routes.ts
-status: pending
+status: active
+bolt: 1
+hat: planner
+started_at: '2026-04-30T17:06:39Z'
+hat_started_at: '2026-04-30T17:06:39Z'
+iterations:
+  - hat: planner
+    started_at: '2026-04-30T17:06:39Z'
+    completed_at: null
+    result: null
 ---
 # SPA upload + assessments HTTP endpoints
 

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "H·AI·K·U — universal lifecycle orchestration with hat-based workflows, completion criteria, and automatic context preservation.",
-    "version": "2.1.0"
+    "version": "2.2.0"
   },
   "plugins": [
     {

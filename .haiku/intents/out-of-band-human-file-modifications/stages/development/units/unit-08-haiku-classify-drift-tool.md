@@ -15,6 +15,9 @@ inputs:
 outputs:
   - packages/haiku/src/tools/orchestrator/haiku_classify_drift.ts
   - packages/haiku/test/haiku-classify-drift.test.mjs
+  - packages/haiku/src/orchestrator/workflow/drift-dispatch.ts
+  - packages/haiku/src/orchestrator/workflow/run-tick.ts
+  - packages/haiku/src/tools/orchestrator/index.ts
 quality_gates:
   - name: biome
     command: >-
@@ -28,7 +31,7 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/tools/orchestrator/haiku_classify_drift.ts
-status: active
+status: completed
 bolt: 1
 hat: ''
 started_at: '2026-04-30T21:45:41Z'
@@ -36,8 +39,9 @@ hat_started_at: '2026-04-30T21:45:41Z'
 iterations:
   - hat: ''
     started_at: '2026-04-30T21:45:41Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T22:05:53Z'
+    result: advance
+completed_at: '2026-04-30T22:05:53Z'
 ---
 # haiku_classify_drift MCP tool (assessment recorder)
 

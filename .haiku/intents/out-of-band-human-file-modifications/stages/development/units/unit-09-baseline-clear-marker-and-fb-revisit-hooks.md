@@ -30,7 +30,8 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/baseline-clear-marker.ts
-status: pending
+status: completed
+completed_at: '2026-04-30T22:25:58Z'
 ---
 # haiku_baseline_clear_marker + feedback/revisit lifecycle hooks
 

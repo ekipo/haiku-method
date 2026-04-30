@@ -29,7 +29,7 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/handlers/manual-change-assessment.ts
-status: active
+status: completed
 bolt: 1
 hat: ''
 started_at: '2026-04-30T20:38:18Z'
@@ -37,8 +37,9 @@ hat_started_at: '2026-04-30T20:38:18Z'
 iterations:
   - hat: ''
     started_at: '2026-04-30T20:38:18Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T21:37:34Z'
+    result: advance
+completed_at: '2026-04-30T21:37:34Z'
 ---
 # manual_change_assessment action handler + action union
 

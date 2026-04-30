@@ -16,6 +16,7 @@ outputs:
   - packages/haiku-ui/src/atoms/OutputThumbnail.tsx
   - packages/haiku-ui/src/pages/review/StageReview.tsx
   - packages/haiku-ui/tests/ReplaceOutputDialog.test.tsx
+  - packages/haiku-ui/src/pages/review/stage/StageReview.tsx
 quality_gates:
   - name: biome
     command: >-
@@ -38,7 +39,17 @@ quality_gates:
       packages/haiku-ui/src/molecules/OutputCardMenu.tsx
       packages/haiku-ui/src/organisms/ReplaceOutputDialog.tsx
       packages/haiku-ui/src/atoms/OutputThumbnail.tsx
-status: pending
+status: completed
+bolt: 1
+hat: ''
+started_at: '2026-04-30T21:45:42Z'
+hat_started_at: '2026-04-30T21:45:42Z'
+iterations:
+  - hat: ''
+    started_at: '2026-04-30T21:45:42Z'
+    completed_at: '2026-04-30T22:01:55Z'
+    result: advance
+completed_at: '2026-04-30T22:01:55Z'
 ---
 # SPA Stage Output Replacement card + dialog
 

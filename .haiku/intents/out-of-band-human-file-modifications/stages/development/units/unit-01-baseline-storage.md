@@ -24,7 +24,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
-status: pending
+status: active
+bolt: 1
+hat: planner
+started_at: '2026-04-30T12:40:45Z'
+hat_started_at: '2026-04-30T12:40:45Z'
+iterations:
+  - hat: planner
+    started_at: '2026-04-30T12:40:45Z'
+    completed_at: null
+    result: null
 ---
 # Baseline storage layer (drift-baseline.ts)
 

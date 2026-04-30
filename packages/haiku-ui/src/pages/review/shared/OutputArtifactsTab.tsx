@@ -191,7 +191,7 @@ export function OutputArtifactsTab({
 											</Card>
 										)
 									}
-									if (a.type === "file" && a.relativePath) {
+									if ((a.type as string) === "file" && a.relativePath) {
 										const authedPath = authedAssetUrl(a.relativePath)
 										return (
 											<Card

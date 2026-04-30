@@ -26,9 +26,9 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
 status: active
 bolt: 3
-hat: builder
+hat: reviewer
 started_at: '2026-04-30T12:40:45Z'
-hat_started_at: '2026-04-30T13:02:56Z'
+hat_started_at: '2026-04-30T13:11:10Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T12:40:45Z'
@@ -46,6 +46,10 @@ iterations:
     reason: 'auto-reject: quality_gate_failed (typecheck, unit-tests)'
   - hat: builder
     started_at: '2026-04-30T13:02:56Z'
+    completed_at: '2026-04-30T13:11:10Z'
+    result: advance
+  - hat: reviewer
+    started_at: '2026-04-30T13:11:10Z'
     completed_at: null
     result: null
 ---

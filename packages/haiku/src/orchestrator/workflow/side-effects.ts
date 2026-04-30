@@ -32,6 +32,7 @@ import {
 	createIntentBranch,
 	createStageBranch,
 	deleteStageBranch,
+	ensureOnIntentMain,
 	ensureOnStageBranch,
 	finalizeIntentBranches,
 	isBranchMerged,
@@ -409,4 +410,10 @@ export function workflowIntentComplete(slug: string): void {
 	}
 	cleanupIntentWorktrees(slug)
 	sealIntentState(slug)
+	// Belt-and-suspenders: finalizeIntentBranches above does the
+	// intent-main checkout, but if a stage-merge step short-circuited
+	// or a caller hits this path with main already merged, re-assert
+	// the working tree position so the agent always lands on the
+	// intent's hub branch on intent_complete.
+	ensureOnIntentMain(slug)
 }

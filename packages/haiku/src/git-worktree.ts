@@ -482,6 +482,28 @@ export function isOnIntentBranch(slug: string): boolean {
 	return getCurrentBranch() === `haiku/${slug}/main`
 }
 
+/**
+ * Ensure the working tree is on `haiku/<slug>/main`. Defensive helper
+ * for terminal intent paths (intent_complete, already-completed) where
+ * any prior subagent or merge resolution may have left HEAD on a stage
+ * branch. No-op when already on intent main, when not a git repo, or
+ * when intent main does not exist.
+ *
+ * Returns true on success (or no-op), false when the checkout failed.
+ */
+export function ensureOnIntentMain(slug: string): boolean {
+	if (!isGitRepo()) return true
+	const branch = `haiku/${slug}/main`
+	if (!branchExists(branch)) return true
+	if (getCurrentBranch() === branch) return true
+	try {
+		run(["git", "checkout", branch])
+		return true
+	} catch {
+		return false
+	}
+}
+
 /** Check if we're on a stage branch for the intent (discrete mode) */
 export function isOnStageBranch(slug: string, stage: string): boolean {
 	return getCurrentBranch() === `haiku/${slug}/${stage}`

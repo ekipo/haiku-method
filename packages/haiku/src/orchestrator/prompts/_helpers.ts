@@ -103,10 +103,116 @@ export function inlineFile(absPath: string, heading: string): string {
 	return `### ${heading}\n\n*Source: \`${absPath}\`*\n\n~~~~\n${body}\n~~~~\n`
 }
 
+/** Read a unit's iterations frontmatter and emit a "Prior rejection" block
+ *  for the next bolt. The most-recent completed iteration with
+ *  `result === "reject"` and a non-empty `reason` is surfaced so the next
+ *  bolt's hat — whether re-running its own work after an auto-reject, or
+ *  picking up after a downstream hat bounced back — knows what was rejected.
+ *
+ *  Without this, `inlineFile()` strips the unit FM (where iterations live)
+ *  and the next-bolt prompt is silent on what failed. The reviewer's reason
+ *  ("Two defects: ...") or the quality-gate auto-reject summary
+ *  ("auto-reject: quality_gate_failed (typecheck, ...)") are dropped on the
+ *  floor and the next bolt re-discovers the failure mode from scratch.
+ *
+ *  Returns "" when no completed reject is found (first hat / first bolt /
+ *  unit file missing). */
+export function buildPriorRejectBlock(unitFilePath: string): string {
+	if (!existsSync(unitFilePath)) return ""
+	let iters: Array<{
+		hat?: unknown
+		completed_at?: unknown
+		result?: unknown
+		reason?: unknown
+	}> = []
+	try {
+		const { data } = parseFrontmatter(readFileSync(unitFilePath, "utf8"))
+		if (Array.isArray(data.iterations)) {
+			iters = data.iterations as typeof iters
+		}
+	} catch {
+		return ""
+	}
+	for (let i = iters.length - 1; i >= 0; i--) {
+		const it = iters[i]
+		if (!it) continue
+		if (!it.completed_at) continue
+		if (it.result !== "reject") continue
+		if (typeof it.reason !== "string" || !it.reason.trim()) continue
+		const hatName = typeof it.hat === "string" ? it.hat : "previous hat"
+		return [
+			"## Prior rejection — address this before advancing",
+			"",
+			`The previous bolt's **${hatName}** hat rejected the work with this reason:`,
+			"",
+			"~~~~",
+			it.reason.trim(),
+			"~~~~",
+			"",
+			"Treat each item as a hard requirement: your hat is NOT done until every issue above is resolved. Reference the specific items in your final commit message and your hat-completion summary so the next reviewer can verify closure. Do NOT call `haiku_unit_advance_hat` while any of these remain open — call `haiku_unit_reject_hat` with what's still outstanding.",
+		].join("\n")
+	}
+	return ""
+}
+
+/** Mirror of `buildPriorRejectBlock` for fix-loop prompts. Reads a
+ *  feedback file's `iterations:` frontmatter (shape: FeedbackIteration —
+ *  `result: "advanced" | "closed" | "reopened" | "rejected"`) and surfaces
+ *  the most-recent `rejected` entry's reason so a fix-loop bolt N+1 hat
+ *  knows what the previous attempt was rejected for (assessor reject,
+ *  fixer-side `haiku_feedback_reject`, etc).
+ *
+ *  Returns "" when no rejected iteration is found (first fix bolt, fresh
+ *  finding, missing file). */
+export function buildPriorFeedbackRejectBlock(
+	feedbackFilePath: string,
+): string {
+	if (!existsSync(feedbackFilePath)) return ""
+	let iters: Array<{
+		bolt?: unknown
+		hat?: unknown
+		completed_at?: unknown
+		result?: unknown
+		reason?: unknown
+	}> = []
+	try {
+		const { data } = parseFrontmatter(readFileSync(feedbackFilePath, "utf8"))
+		if (Array.isArray(data.iterations)) {
+			iters = data.iterations as typeof iters
+		}
+	} catch {
+		return ""
+	}
+	for (let i = iters.length - 1; i >= 0; i--) {
+		const it = iters[i]
+		if (!it) continue
+		if (!it.completed_at) continue
+		if (it.result !== "rejected") continue
+		if (typeof it.reason !== "string" || !it.reason.trim()) continue
+		const hatName = typeof it.hat === "string" ? it.hat : "previous fixer"
+		const boltStr = typeof it.bolt === "number" ? ` (bolt ${it.bolt})` : ""
+		return [
+			"## Prior fix-bolt rejection — address this before advancing",
+			"",
+			`The previous fix attempt's **${hatName}** hat${boltStr} was rejected with this reason:`,
+			"",
+			"~~~~",
+			it.reason.trim(),
+			"~~~~",
+			"",
+			"Treat each item as a hard requirement on this bolt: do NOT repeat the same approach the previous bolt took unless you've identified a meaningfully different root cause. Reference the items by name in your bolt summary and the commit message so the next assessor can verify closure.",
+		].join("\n")
+	}
+	return ""
+}
+
 /** Emit a `<subagent>` block whose body is a tmpfile pointer instead
  *  of an inlined prompt. The full prompt is written to a session-scoped
  *  tmpfile; the parent's instruction tells the spawning agent to read
- *  it. */
+ *  it. The `background` attribute on the emitted block is auto-gated on
+ *  the active harness's `subagents.backgroundSpawn` capability — Claude
+ *  Code supports it, others don't, so the dispatch markup is only
+ *  decorated where the parent can actually follow it. */
 export function emitSubagentDispatchBlock(opts: {
 	unit: string
 	hat: string
@@ -132,6 +238,7 @@ export function emitSubagentDispatchBlock(opts: {
 		model,
 		heading,
 		toolAttr,
+		background: getCapabilities().subagents.backgroundSpawn,
 	})
 }
 

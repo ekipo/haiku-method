@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-04-30
+
+### Added
+- Plugin is now installable from npm
+
+## [3.3.0] - 2026-04-30
+
+### Added
+- Article landmarks improve navigation and accessibility of intent, stage, and unit review content for screen readers and assistive technology.
+
+## [3.2.1] - 2026-04-30
+
+### Fixed
+- Elaborate fan-out now correctly transmits parent context to discovery subagents via the prompt_file mechanism.
+
+## [3.2.0] - 2026-04-30
+
+### Added
+- Plugin now displays its version in the footer and exposes version information via `/api/version` endpoint for programmatic access.
+
+## [3.1.0] - 2026-04-30
+
+### Fixed
+
+- Agent now receives prior-rejection context when retrying failed units, enabling it to learn from previous attempts and avoid repeating mistakes in subsequent bolts.
+
+## [3.0.0] - 2026-04-30
+
+### Changed
+- `migrate` now requires you to explicitly specify an intent slug or use `--all` instead of inferring the target.
+- `migrate` runs in dry-run mode by default so you can preview changes before applying them with `--execute`.
+- `migrate` will not run on a dirty working tree, preventing accidental data loss.
+
+## [2.3.0] - 2026-04-30
+
+### Added
+- The plugin is now available on npm as `haiku-method`, simplifying installation through standard package managers.
+
+## [2.1.0] - 2026-04-30
+
+### Added
+- Elaboration now includes review criteria directly in the prompt file, giving agents full visibility into review expectations before they begin working.
+
 ## [2.0.0] - 2026-04-29
 
 ### Changed

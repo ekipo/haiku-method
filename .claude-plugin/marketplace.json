@@ -6,13 +6,17 @@
   },
   "metadata": {
     "description": "H·AI·K·U — universal lifecycle orchestration with hat-based workflows, completion criteria, and automatic context preservation.",
-    "version": "2.0.0"
+    "version": "3.3.1"
   },
   "plugins": [
     {
       "name": "haiku",
       "description": "H·AI·K·U methodology — universal lifecycle orchestration with hat-based workflows, completion criteria, and automatic context preservation.",
-      "source": "./plugin",
+      "source": {
+        "source": "npm",
+        "package": "haiku-method",
+        "version": "3.3.1"
+      },
       "category": "Pattern",
       "keywords": [
         "haiku",

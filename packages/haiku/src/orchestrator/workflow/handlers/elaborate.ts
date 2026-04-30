@@ -37,10 +37,10 @@ import {
 	mergeDiscoveryWorktree,
 } from "../../../git-worktree.js"
 import {
-	buildElaboratorInstruction,
 	cleanupPreExecuteFeedback,
 	isStagePreExecute,
 	listUnits,
+	type OrchestratorAction,
 	resolveIntentStages,
 	resolveStageMetadata,
 	resolveStageReview,
@@ -53,6 +53,7 @@ import {
 import {
 	getStageIterationCount,
 	gitCommitState,
+	intentDir,
 	isGitRepo,
 	MAX_INTEGRATOR_ATTEMPTS,
 	parseFrontmatter,
@@ -67,13 +68,178 @@ import {
 	readReviewAgentPaths,
 	studioSearchPaths,
 } from "../../../studio-reader.js"
+import { writeActionPromptFile } from "../../../subagent-prompt-file.js"
 import { emitTelemetry } from "../../../telemetry.js"
+import { buildElaboratePromptBody } from "../../prompts/elaborate.js"
 import { countOpenFeedbackForGateCheck } from "../feedback-triage-gate.js"
 import type { WorkflowHandler } from "./_types.js"
+
+/**
+ * Render the full elaborate prompt body, write it to a session-scoped
+ * tmpfile, and return the action with `prompt_file` stamped + a short
+ * "Read this file" message replacing whatever long-form message the
+ * caller suggested. Mutates and returns `action` for ergonomic use at
+ * the return sites in this handler.
+ */
+function withPromptFile(
+	action: Record<string, unknown>,
+	slug: string,
+	studio: string,
+): OrchestratorAction {
+	let body: string
+	try {
+		const dir = intentDir(slug)
+		body = buildElaboratePromptBody({
+			slug,
+			studio,
+			action: action as OrchestratorAction,
+			dir,
+		})
+	} catch (err) {
+		// Render failed (e.g. TypeError in prompt builder) — return the
+		// action as-is so the inline prompt-builder rethrows the real
+		// error through the normal response path.
+		console.error(
+			`[haiku] elaborate prompt-body render failed for ${slug}: ${err instanceof Error ? err.message : String(err)}. Falling back to inline rendering.`,
+		)
+		return action as OrchestratorAction
+	}
+
+	try {
+		const stage = (action.stage as string) || ""
+		const iteration = (action.iteration as number | undefined) ?? 0
+		const tickHint = `${iteration}-${Date.now()}`
+		const { path } = writeActionPromptFile({
+			action: "elaborate",
+			intent: slug,
+			stage,
+			content: body,
+			tickHint,
+		})
+		action.prompt_file = path
+		action.message = `Read \`${path}\` and execute its instructions exactly. The file is the canonical, authoritative elaboration prompt for this tick.`
+	} catch (err) {
+		// Best-effort: if the file write fails, leave the action
+		// untouched and let the legacy inline prompt-builder render
+		// the body in the response. This keeps the workflow alive
+		// even when /tmp is unwritable.
+		console.error(
+			`[haiku] elaborate prompt-file write failed for ${slug}: ${err instanceof Error ? err.message : String(err)}. Falling back to inline rendering.`,
+		)
+	}
+	return action as OrchestratorAction
+}
 
 function readFrontmatter(filePath: string): Record<string, unknown> {
 	const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
 	return data
+}
+
+/** Tool-enforced feature coverage check. For each `.feature` file
+ *  under `<intent>/features/`, walk every unit in the current stage
+ *  looking for an owner. A unit owns a feature when ANY of:
+ *
+ *    - the unit body or its closes: list cites `features/<name>.feature`
+ *    - a unit `quality_gates:` command path matches the feature's
+ *      relative path (covers test runners that target the feature)
+ *
+ *  Returns an `error` action when ≥1 feature has zero owners; null
+ *  when every feature is covered (or the features dir is absent). */
+function validateFeatureCoverage(
+	slug: string,
+	currentStage: string,
+): OrchestratorAction | null {
+	const iDir = intentDir(slug)
+	const featuresDir = join(iDir, "features")
+	if (!existsSync(featuresDir)) return null
+	let featureFiles: string[]
+	try {
+		featureFiles = readdirSync(featuresDir).filter((f) =>
+			f.endsWith(".feature"),
+		)
+	} catch {
+		return null
+	}
+	if (featureFiles.length === 0) return null
+
+	const unitsDir = join(iDir, "stages", currentStage, "units")
+	if (!existsSync(unitsDir)) {
+		// No units yet — surface the orphan list rather than blocking
+		// the elaborator before they've even drafted anything. This is
+		// rare in practice (we only enter this gate in fresh-elaborate
+		// mode after at least one unit exists), but keep the contract
+		// explicit.
+		return null
+	}
+
+	interface UnitCorpus {
+		name: string
+		body: string
+		closes: string[]
+		gateCommands: string[]
+	}
+	const unitCorpus: UnitCorpus[] = []
+	for (const f of readdirSync(unitsDir).filter((f) => f.endsWith(".md"))) {
+		const path = join(unitsDir, f)
+		try {
+			const raw = readFileSync(path, "utf8")
+			const { data, body } = parseFrontmatter(raw)
+			const closes = Array.isArray(data.closes) ? (data.closes as string[]) : []
+			const gates = Array.isArray(data.quality_gates)
+				? (data.quality_gates as Array<unknown>)
+				: []
+			const gateCommands: string[] = []
+			for (const g of gates) {
+				if (typeof g === "string") {
+					gateCommands.push(g)
+				} else if (g && typeof g === "object") {
+					const cmd = (g as Record<string, unknown>).command
+					if (typeof cmd === "string") gateCommands.push(cmd)
+					const verify = (g as Record<string, unknown>).verify
+					if (typeof verify === "string") gateCommands.push(verify)
+				}
+			}
+			unitCorpus.push({
+				name: f.replace(/\.md$/, ""),
+				body: body || "",
+				closes,
+				gateCommands,
+			})
+		} catch {
+			/* skip unreadable */
+		}
+	}
+
+	const uncovered: string[] = []
+	for (const fname of featureFiles) {
+		const relPath = `features/${fname}`
+		let owned = false
+		for (const u of unitCorpus) {
+			if (
+				u.body.includes(fname) ||
+				u.body.includes(relPath) ||
+				u.closes.some((c) => c === relPath || c.endsWith(`/${fname}`)) ||
+				u.gateCommands.some(
+					(c) => c.includes(relPath) || c.includes(`/${fname}`),
+				)
+			) {
+				owned = true
+				break
+			}
+		}
+		if (!owned) uncovered.push(relPath)
+	}
+
+	if (uncovered.length === 0) return null
+
+	return {
+		action: "error",
+		error: "feature_coverage_gap",
+		intent: slug,
+		stage: currentStage,
+		uncovered,
+		message: `Feature coverage gap: ${uncovered.length} feature file(s) under \`features/\` are not owned by any unit in stage '${currentStage}'.\n\nOrphan feature(s):\n${uncovered.map((p) => `  - ${p}`).join("\n")}\n\nFor each orphan feature, either:\n- Update an existing unit's body to cite \`${uncovered[0]}\` (or one of the orphans) so it's clear which unit owns the behavior, OR\n- Add a unit \`closes:\` entry referencing the feature path, OR\n- Reference the feature path in a unit's \`quality_gates:\` command (e.g. \`bun test ${uncovered[0]}\`), OR\n- If a feature is genuinely out of scope for this intent, delete the feature file. Do NOT leave orphans.\n\nAfter wiring coverage, call \`haiku_run_next { intent: "${slug}" }\` to re-validate.`,
+	}
 }
 
 const emit: WorkflowHandler = (ctx) => {
@@ -262,20 +428,24 @@ const emit: WorkflowHandler = (ctx) => {
 		pendingUnitsList.length === 0
 	) {
 		if (updatedTurns === 1) {
-			return {
-				action: "elaborate",
-				intent: slug,
+			return withPromptFile(
+				{
+					action: "elaborate",
+					intent: slug,
+					studio,
+					stage: currentStage,
+					elaboration: elaborationMode,
+					iteration: iterativeEntryIteration,
+					visits: iterativeEntryIteration,
+					iterative: true,
+					completed_units: completedUnitsList.map((u) => u.name),
+					pending_units: pendingUnitsList.map((u) => u.name),
+					stage_metadata: resolveStageMetadata(studio, currentStage),
+					message: `Re-entering stage '${currentStage}' with ${completedUnitsList.length} completed unit(s) from prior iteration(s). Treat completed work as knowledge; decide whether this iteration needs new or modified units.`,
+				},
+				slug,
 				studio,
-				stage: currentStage,
-				elaboration: elaborationMode,
-				iteration: iterativeEntryIteration,
-				visits: iterativeEntryIteration,
-				iterative: true,
-				completed_units: completedUnitsList.map((u) => u.name),
-				pending_units: pendingUnitsList.map((u) => u.name),
-				stage_metadata: resolveStageMetadata(studio, currentStage),
-				message: `Re-entering stage '${currentStage}' with ${completedUnitsList.length} completed unit(s) from prior iteration(s). Treat completed work as knowledge; decide whether this iteration needs new or modified units.`,
-			}
+			)
 		}
 		workflowAdvancePhase(slug, currentStage, "gate")
 		return {
@@ -290,15 +460,19 @@ const emit: WorkflowHandler = (ctx) => {
 	}
 
 	if (!hasUnits) {
-		return {
-			action: "elaborate",
-			intent: slug,
+		return withPromptFile(
+			{
+				action: "elaborate",
+				intent: slug,
+				studio,
+				stage: currentStage,
+				elaboration: elaborationMode,
+				stage_metadata: resolveStageMetadata(studio, currentStage),
+				message: `Elaborate stage '${currentStage}' into units with completion criteria`,
+			},
+			slug,
 			studio,
-			stage: currentStage,
-			elaboration: elaborationMode,
-			stage_metadata: resolveStageMetadata(studio, currentStage),
-			message: `Elaborate stage '${currentStage}' into units with completion criteria`,
-		}
+		)
 	}
 
 	// ── Additive elaborate mode (iteration > 1, post-execute only) ─────
@@ -352,30 +526,26 @@ const emit: WorkflowHandler = (ctx) => {
 
 		if (pendingUnits.length > 0 && unitsWithoutCloses.length > 0) {
 			const validation_error = `New units missing \`closes:\` field: ${unitsWithoutCloses.join(", ")}. Every new unit in a revisit cycle MUST declare \`closes: [FB-NN]\` referencing the feedback items it addresses.`
-			return {
-				...basePayload,
-				validation_error,
-				message: buildElaboratorInstruction({
-					visits: iteration,
-					pendingFeedbackCount: pendingFeedback.length,
-					stage: currentStage,
-					situation: `Validation error: ${validation_error}`,
-				}),
-			}
+			return withPromptFile(
+				{
+					...basePayload,
+					validation_error,
+				},
+				slug,
+				studio,
+			)
 		}
 
 		if (invalidCloseRefs.length > 0) {
 			const validation_error = `Invalid \`closes:\` references: ${invalidCloseRefs.map((r) => `${r.unit} → ${r.ref}`).join(", ")}. References must match existing pending feedback IDs.`
-			return {
-				...basePayload,
-				validation_error,
-				message: buildElaboratorInstruction({
-					visits: iteration,
-					pendingFeedbackCount: pendingFeedback.length,
-					stage: currentStage,
-					situation: `Validation error: ${validation_error}`,
-				}),
-			}
+			return withPromptFile(
+				{
+					...basePayload,
+					validation_error,
+				},
+				slug,
+				studio,
+			)
 		}
 
 		if (pendingUnits.length > 0 && pendingFeedback.length > 0) {
@@ -398,28 +568,25 @@ const emit: WorkflowHandler = (ctx) => {
 			)
 			if (orphaned.length > 0) {
 				const validation_error = `Orphaned feedback — not referenced by any unit's \`closes:\` field: ${orphaned.map((f) => `${f.id}: ${f.title}`).join("; ")}. Create units for these or reject the feedback items.`
-				return {
-					...basePayload,
-					validation_error,
-					message: buildElaboratorInstruction({
-						visits: iteration,
-						pendingFeedbackCount: pendingFeedback.length,
-						stage: currentStage,
-						situation: `Validation error: ${validation_error}`,
-					}),
-				}
+				return withPromptFile(
+					{
+						...basePayload,
+						validation_error,
+					},
+					slug,
+					studio,
+				)
 			}
 		}
 
 		if (pendingUnits.length === 0 && pendingFeedback.length > 0) {
-			return {
-				...basePayload,
-				message: buildElaboratorInstruction({
-					visits: iteration,
-					pendingFeedbackCount: pendingFeedback.length,
-					stage: currentStage,
-				}),
-			}
+			return withPromptFile(
+				{
+					...basePayload,
+				},
+				slug,
+				studio,
+			)
 		}
 	}
 
@@ -565,6 +732,20 @@ const emit: WorkflowHandler = (ctx) => {
 			if (crossNaming) return crossNaming
 		}
 	}
+
+	// Feature coverage gate: every intent-root .feature file must be
+	// owned by at least one unit in the current stage. Owners count as
+	// any of:
+	//   - The unit body cites the feature filename (`features/foo.feature`
+	//     mentioned in the body, OR `closes:` cite list).
+	//   - A unit's `quality_gates:` command names a path that touches
+	//     the feature's relative path.
+	// Run BEFORE pre-review dispatch so we don't spin up reviewers
+	// against specs that already have orphan features — they'll flag
+	// the orphan as a finding and create noise that the coverage gate
+	// would have caught for free.
+	const featureCoverageError = validateFeatureCoverage(slug, currentStage)
+	if (featureCoverageError) return featureCoverageError
 
 	// Pre-execution adversarial review
 	{

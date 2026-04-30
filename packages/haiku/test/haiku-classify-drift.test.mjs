@@ -1006,6 +1006,52 @@ await test("response carries ok, assessment_id, feedback_created, pending_marker
 	assert.match(data.next_tick_will, /dispatch_review_fix_for_/)
 })
 
+console.log("\n=== author_class round-trip (Finding 1) ===")
+
+await test("finding with author_class 'human-via-mcp' produces baseline entry with author_class 'human-via-mcp' (not 'human-implicit')", async () => {
+	const { slug, intentDir } = makeFixture()
+	const filePath = join(intentDir, "stages/design/artifacts/spec.md")
+	writeFileSync(filePath, "new content\n")
+	const finding = makeFinding({
+		path: "stages/design/artifacts/spec.md",
+		after_sha256: computeFileSha256Sync(filePath),
+		// Simulate gate stamping human-via-mcp from the action log.
+		author_class: "human-via-mcp",
+	})
+	const tickId = setupDispatch(intentDir, {
+		stage: "design",
+		findings: [finding],
+	})
+
+	const result = await tool.handle({
+		intent_slug: slug,
+		tick_id: tickId,
+		classifications: [
+			{
+				path: finding.path,
+				outcome: "ignore",
+				rationale_excerpt: "stamped by haiku_human_write",
+			},
+		],
+		agent_rationale: "Human used haiku_human_write; absorbing.",
+	})
+	const data = parseResponse(result)
+	assert.strictEqual(data.ok, true, `expected ok, got ${JSON.stringify(data)}`)
+	assert.strictEqual(data.baselines_updated, 1)
+
+	// Baseline entry must preserve 'human-via-mcp', not downgrade to 'human-implicit'.
+	const baseline = readBaseline(intentDir, "design")
+	assert.ok(baseline)
+	const entry = baseline.entries.get("stages/design/artifacts/spec.md")
+	assert.ok(entry, "baseline entry should exist")
+	assert.strictEqual(
+		entry.author_class,
+		"human-via-mcp",
+		`Expected author_class 'human-via-mcp' but got '${entry.author_class}'. ` +
+			"The dispatch schema was not persisting author_class, causing the classifier to always write 'human-implicit'.",
+	)
+})
+
 // ── Wrap up ────────────────────────────────────────────────────────────────
 
 console.log(`\n${"=".repeat(60)}`)

@@ -461,7 +461,10 @@ await test("writeBaseline output ends with a trailing newline (canonical form)",
 		entries: new Map([[entry.path, entry]]),
 	})
 	const raw = readFileSync(join(stageDir, "baseline.json"), "utf-8")
-	assert.ok(raw.endsWith("\n"), "baseline.json must end with a trailing newline")
+	assert.ok(
+		raw.endsWith("\n"),
+		"baseline.json must end with a trailing newline",
+	)
 })
 
 console.log("\n=== Atomic write safety ===")

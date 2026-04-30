@@ -29,7 +29,11 @@ import { rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import matter from "gray-matter"
 import { appendActionLogEntry } from "../../orchestrator/workflow/action-log.js"
-import { canonicalisePath } from "../../orchestrator/workflow/drift-baseline.js"
+import {
+	canonicalisePath,
+	getCurrentTickCounter,
+	isDriftDetectionDisabled,
+} from "../../orchestrator/workflow/drift-baseline.js"
 import {
 	appendWriteAudit,
 	nextEntryId,
@@ -55,20 +59,6 @@ function getIntentStages(intentDir: string): string[] {
 	}
 }
 
-/** Detect whether drift detection is disabled in .haiku/settings.yml.
- *  Returns true when drift_detection is explicitly false; false otherwise. */
-function isDriftDetectionDisabled(root: string): boolean {
-	const settingsPath = join(root, "settings.yml")
-	if (!existsSync(settingsPath)) return false
-	try {
-		const raw = readFileSync(settingsPath, "utf8")
-		const { data } = matter(`---\n${raw}\n---\n`)
-		return (data as Record<string, unknown>).drift_detection === false
-	} catch {
-		return false
-	}
-}
-
 /** Detect whether human_write_require_rationale is set to true in
  *  .haiku/settings.yml. Returns false when absent or not true. */
 function isRationaleRequired(root: string): boolean {
@@ -83,35 +73,6 @@ function isRationaleRequired(root: string): boolean {
 	} catch {
 		return false
 	}
-}
-
-/** Read the current tick counter from the active stage's state.json.
- *  Returns 0 when not determinable (safe default for entry-ID purposes). */
-function getCurrentTickCounter(intentDir: string): number {
-	const stagesDir = join(intentDir, "stages")
-	if (!existsSync(stagesDir)) return 0
-	try {
-		const stageDirs = readdirSync(stagesDir, { withFileTypes: true })
-			.filter((e) => e.isDirectory())
-			.map((e) => e.name)
-		for (const stage of stageDirs) {
-			const stateFile = join(stagesDir, stage, "state.json")
-			if (!existsSync(stateFile)) continue
-			try {
-				const state = JSON.parse(readFileSync(stateFile, "utf8")) as Record<
-					string,
-					unknown
-				>
-				const iter = state.iteration
-				if (typeof iter === "number") return iter
-			} catch {
-				// continue to next stage
-			}
-		}
-	} catch {
-		// ignore
-	}
-	return 0
 }
 
 /** Count existing lines in write-audit.jsonl to derive the next sequence

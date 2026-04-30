@@ -606,12 +606,12 @@ export default defineTool({
 						// file path that re-emerged after the gate scan).
 						const absPath = join(intentDir, canonical)
 						if (existsSync(absPath)) {
-							// Check if the originating drift event indicates a
-							// human-via-mcp write (action log carried that class);
-							// otherwise default to human-implicit per DATA-CONTRACTS
-							// §6.1 inference rule.
+							// Use the author_class carried on the finding from the gate
+							// (which read the action log at dispatch time). Fall back
+							// to "human-implicit" per DATA-CONTRACTS §6.1 inference rule
+							// when the field is absent (e.g. legacy dispatch records).
 							const authorClass: BaselineEntry["author_class"] =
-								"human-implicit"
+								f.author_class ?? "human-implicit"
 							const trackingClass = f.tracking_class
 							const entry = baselineEntryForFile({
 								pathRel: canonical,

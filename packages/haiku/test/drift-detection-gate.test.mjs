@@ -39,19 +39,17 @@ import { join } from "node:path"
 
 const tmp = mkdtempSync(join(tmpdir(), "haiku-drift-gate-test-"))
 
-const {
-	runDriftDetectionGate,
-	isDriftDetectionDisabled,
-} = await import("../src/orchestrator/workflow/drift-detection-gate.ts")
+const { runDriftDetectionGate, isDriftDetectionDisabled } = await import(
+	"../src/orchestrator/workflow/drift-detection-gate.ts"
+)
 
-const {
-	writeBaseline,
-	readBaseline,
-} = await import("../src/orchestrator/workflow/drift-baseline.ts")
+const { writeBaseline, readBaseline } = await import(
+	"../src/orchestrator/workflow/drift-baseline.ts"
+)
 
-const {
-	appendMarker,
-} = await import("../src/orchestrator/workflow/drift-markers.ts")
+const { appendMarker } = await import(
+	"../src/orchestrator/workflow/drift-markers.ts"
+)
 
 let passed = 0
 let failed = 0
@@ -97,7 +95,7 @@ function makeIntentDir(name, opts = {}) {
 }
 
 function makeHaikuRoot(name, opts = {}) {
-	const haikuRoot = join(tmp, name + "-haikuroot")
+	const haikuRoot = join(tmp, `${name}-haikuroot`)
 	mkdirSync(haikuRoot, { recursive: true })
 	if (opts.driftDetectionOff) {
 		writeFileSync(join(haikuRoot, "settings.yml"), "drift_detection: false\n")
@@ -141,7 +139,7 @@ async function writeBaselineForStage(intentDir, stage, entries) {
 // Add an anchor file to baseline and disk to prevent OOM heuristic from
 // triggering in single-file test scenarios.
 // When 1 file out of 2 changes, that's 50% which is NOT > 50%, so no OOM.
-function addAnchorFile(intentDir, stage, artifactsDir) {
+function addAnchorFile(_intentDir, stage, artifactsDir) {
 	const anchorContent = "<!-- anchor file — stable across test -->"
 	const anchorName = "anchor-stable.html"
 	const anchorPath = join(artifactsDir, anchorName)
@@ -192,9 +190,13 @@ await test("modified finding emitted when on-disk SHA differs from baseline", as
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	assert.strictEqual(result.action, "manual_change_assessment", "action should be manual_change_assessment")
+	assert.strictEqual(
+		result.action,
+		"manual_change_assessment",
+		"action should be manual_change_assessment",
+	)
 	// Should have an individual finding (not OOM synthetic).
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, `finding for ${relPath} should be present`)
 	assert.strictEqual(finding.change_kind, "modified")
 	assert.strictEqual(finding.after_sha256, sha256(newContent))
@@ -225,7 +227,7 @@ await test("modified finding includes correct SHAs for text files", async () => 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, `finding for ${relPath} should be present`)
 	assert.strictEqual(finding.change_kind, "modified")
 	assert.strictEqual(finding.before_sha256, sha256(originalContent))
@@ -239,7 +241,8 @@ await test("modified finding includes correct SHAs for text files", async () => 
 			`A null here means the content sidecar was not written or not read correctly.`,
 	)
 	assert.ok(
-		typeof finding.diff_unified === "string" && finding.diff_unified.includes("---"),
+		typeof finding.diff_unified === "string" &&
+			finding.diff_unified.includes("---"),
 		`diff_unified should contain unified diff header '---'`,
 	)
 	assert.ok(
@@ -271,7 +274,9 @@ await test("new-file-detected with is_binary=true and diff_unified=null for bina
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === "knowledge/market-research.pdf")
+	const finding = result.findings.find(
+		(f) => f.path === "knowledge/market-research.pdf",
+	)
 	assert.ok(finding, "should have a finding for knowledge/market-research.pdf")
 	assert.strictEqual(finding.change_kind, "new-file-detected")
 	assert.strictEqual(finding.before_sha256, null)
@@ -280,7 +285,9 @@ await test("new-file-detected with is_binary=true and diff_unified=null for bina
 	assert.strictEqual(finding.diff_unified, null)
 })
 
-console.log("\n=== Scenario 4: outputs/ alias — canonical key is artifacts/ ===")
+console.log(
+	"\n=== Scenario 4: outputs/ alias — canonical key is artifacts/ ===",
+)
 
 await test("outputs/ alias file gets pathRel canonicalised to artifacts/", async () => {
 	const { intentDir, stage, stageDir, artifactsDir } = makeIntentDir("s04")
@@ -308,7 +315,7 @@ await test("outputs/ alias file gets pathRel canonicalised to artifacts/", async
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === canonicalRelPath)
+	const finding = result.findings.find((f) => f.path === canonicalRelPath)
 	assert.ok(finding, `finding should use canonical key ${canonicalRelPath}`)
 	assert.strictEqual(finding.change_kind, "modified")
 })
@@ -387,7 +394,7 @@ await test("change detected on next tick, not during in-flight bolt", async () =
 
 	// Now the gate fires and detects the change.
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, "should find the modified file")
 	assert.strictEqual(finding.change_kind, "modified")
 })
@@ -405,19 +412,29 @@ await test("baseline absent → establish mode: zero findings, state.json stampe
 	// No baseline.json — gate runs in establish mode.
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	assert.strictEqual(result.baselineEstablished, true, "baselineEstablished should be true")
+	assert.strictEqual(
+		result.baselineEstablished,
+		true,
+		"baselineEstablished should be true",
+	)
 	assert.strictEqual(result.action, null, "no action on first tick")
 	assert.strictEqual(result.findings.length, 0)
 
 	// Verify state.json was stamped.
 	const stateRaw = readFileSync(join(stageDir, "state.json"), "utf-8")
 	const state = JSON.parse(stateRaw)
-	assert.ok(state.drift_baseline_established_at, "state.json should have drift_baseline_established_at")
+	assert.ok(
+		state.drift_baseline_established_at,
+		"state.json should have drift_baseline_established_at",
+	)
 
 	// Verify baseline.json was written.
 	const baseline = readBaseline(intentDir, stage)
 	assert.ok(baseline !== null, "baseline.json should exist after establish")
-	assert.ok(baseline.entries.has(`stages/${stage}/artifacts/hero.html`), "hero.html entry in baseline")
+	assert.ok(
+		baseline.entries.has(`stages/${stage}/artifacts/hero.html`),
+		"hero.html entry in baseline",
+	)
 })
 
 console.log("\n=== Scenario 9: Kill-switch off ===")
@@ -450,10 +467,16 @@ await test("drift_detection: false → gate is a complete no-op", async () => {
 
 	assert.strictEqual(result.action, null, "kill-switch: no action")
 	assert.strictEqual(result.findings.length, 0, "kill-switch: no findings")
-	assert.strictEqual(result.baselineEstablished, false, "kill-switch: no establish either")
+	assert.strictEqual(
+		result.baselineEstablished,
+		false,
+		"kill-switch: no establish either",
+	)
 })
 
-console.log("\n=== Scenario 9a: Kill-switch I/O isolation (behavioral proxy) ===")
+console.log(
+	"\n=== Scenario 9a: Kill-switch I/O isolation (behavioral proxy) ===",
+)
 
 await test("kill-switch: gate returns null action even when corrupt baseline exists (AC-G1-KS)", async () => {
 	// Behavioral proxy for "zero reads": if the kill-switch truly bypasses all
@@ -473,15 +496,25 @@ await test("kill-switch: gate returns null action even when corrupt baseline exi
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	// Kill-switch must prevent baseline read entirely — corrupt JSON is invisible.
-	assert.strictEqual(result.action, null, "kill-switch: no action despite corrupt baseline")
-	assert.strictEqual(result.findings.length, 0, "kill-switch: no findings despite corrupt baseline")
+	assert.strictEqual(
+		result.action,
+		null,
+		"kill-switch: no action despite corrupt baseline",
+	)
+	assert.strictEqual(
+		result.findings.length,
+		0,
+		"kill-switch: no findings despite corrupt baseline",
+	)
 	assert.ok(
 		result.error === undefined,
 		`kill-switch: no error field — gate must not read baseline at all (AC-G1-KS). Got error: ${result.error}`,
 	)
 })
 
-console.log("\n=== Scenario 10: Kill-switch re-enabled — no auto-re-establish ===")
+console.log(
+	"\n=== Scenario 10: Kill-switch re-enabled — no auto-re-establish ===",
+)
 
 await test("gate reuses existing baseline after kill-switch re-enable; does not re-establish", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s10")
@@ -491,7 +524,10 @@ await test("gate reuses existing baseline after kill-switch re-enable; does not 
 	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
 
 	// File was changed while kill-switch was off. Baseline still has the agent SHA.
-	writeFileSync(join(artifactsDir, "dashboard-layout.html"), "<html>changed while off</html>")
+	writeFileSync(
+		join(artifactsDir, "dashboard-layout.html"),
+		"<html>changed while off</html>",
+	)
 	await writeBaselineForStage(intentDir, stage, {
 		[relPath]: {
 			path: relPath,
@@ -513,9 +549,13 @@ await test("gate reuses existing baseline after kill-switch re-enable; does not 
 
 	// The gate reuses the existing baseline and detects the drift that happened while off.
 	// It does NOT auto-re-establish (which would silently swallow the change).
-	assert.strictEqual(result.baselineEstablished, false, "should not re-establish")
+	assert.strictEqual(
+		result.baselineEstablished,
+		false,
+		"should not re-establish",
+	)
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, "should find the drifted file")
 	assert.strictEqual(finding.change_kind, "modified")
 })
@@ -542,11 +582,12 @@ await test("editor temp files (.swp, .swo, ~, .#, 4913) do not produce findings"
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	// No temp file findings.
-	const tempFindings = result.findings.filter(f =>
-		f.path.endsWith(".swp") ||
-		f.path.endsWith("~") ||
-		f.path.includes(".#") ||
-		f.path.endsWith("4913")
+	const tempFindings = result.findings.filter(
+		(f) =>
+			f.path.endsWith(".swp") ||
+			f.path.endsWith("~") ||
+			f.path.includes(".#") ||
+			f.path.endsWith("4913"),
 	)
 	assert.strictEqual(tempFindings.length, 0, "no temp file findings")
 	// spec.md unchanged → no action.
@@ -574,7 +615,7 @@ await test("file-removed finding with after_sha256=null and diff_unified=null", 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, `finding for ${relPath}`)
 	assert.strictEqual(finding.change_kind, "file-removed")
 	assert.strictEqual(finding.after_sha256, null)
@@ -617,7 +658,7 @@ await test("binary replacement: is_binary=true, diff_unified=null", async () => 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, `finding for ${relPath}`)
 	assert.strictEqual(finding.is_binary, true)
 	assert.strictEqual(finding.diff_unified, null)
@@ -649,7 +690,7 @@ await test("open marker with matching SHA suppresses finding", async () => {
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	// Marker suppresses — no finding for this path.
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(!finding, "finding should be suppressed by marker")
 	assert.strictEqual(result.action, null)
 })
@@ -674,22 +715,27 @@ await test("stale marker (SHA changed again) is removed and fresh finding emitte
 	})
 
 	// Marker's baseline_sha_at_creation matches the FIRST edit, not the current one.
-	await appendMarker(intentDir, makeMarker(relPath, firstEditSha, {
-		linked_feedback_id: "FB-06",
-	}))
+	await appendMarker(
+		intentDir,
+		makeMarker(relPath, firstEditSha, {
+			linked_feedback_id: "FB-06",
+		}),
+	)
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	// Stale marker detected → marker will be removed asynchronously.
 	// A fresh finding should be emitted for the second edit.
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, "fresh finding should be emitted for double-edit")
 	assert.strictEqual(finding.change_kind, "modified")
 	assert.strictEqual(finding.after_sha256, sha256(secondEditContent))
 })
 
-console.log("\n=== Scenario 16: Terminal-state marker cleared → gate detects normally ===")
+console.log(
+	"\n=== Scenario 16: Terminal-state marker cleared → gate detects normally ===",
+)
 
 await test("when no marker exists (cleared), gate detects the drift normally", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s16")
@@ -709,7 +755,7 @@ await test("when no marker exists (cleared), gate detects the drift normally", a
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
 	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(f => f.path === relPath)
+	const finding = result.findings.find((f) => f.path === relPath)
 	assert.ok(finding, "gate detects normally without marker")
 	assert.strictEqual(finding.change_kind, "modified")
 })
@@ -725,8 +771,15 @@ await test("corrupt baseline JSON → error: baseline_corrupt returned", async (
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	assert.strictEqual(result.error, "baseline_corrupt", "error should be baseline_corrupt")
-	assert.ok(result.errorMessage?.includes("corrupt"), "errorMessage should mention corrupt")
+	assert.strictEqual(
+		result.error,
+		"baseline_corrupt",
+		"error should be baseline_corrupt",
+	)
+	assert.ok(
+		result.errorMessage?.includes("corrupt"),
+		"errorMessage should mention corrupt",
+	)
 	assert.strictEqual(result.action, null, "no action on corrupt baseline")
 	assert.strictEqual(result.findings.length, 0)
 })
@@ -749,7 +802,9 @@ await test("README.md at intent root is not detected", async () => {
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	const readmeFinding = result.findings.find(f => f.path.includes("README.md"))
+	const readmeFinding = result.findings.find((f) =>
+		f.path.includes("README.md"),
+	)
 	assert.ok(!readmeFinding, "README.md should not produce a finding")
 	// No change to tracked files → no action.
 	assert.strictEqual(result.action, null)
@@ -771,17 +826,22 @@ await test("files in units/ directory are not in the tracked surface", async () 
 	// Write a unit file (should be excluded from tracked surface).
 	const unitsDir = join(stageDir, "units")
 	mkdirSync(unitsDir, { recursive: true })
-	writeFileSync(join(unitsDir, "unit-01-foo.md"), "---\nstatus: pending\n---\n# Foo")
+	writeFileSync(
+		join(unitsDir, "unit-01-foo.md"),
+		"---\nstatus: pending\n---\n# Foo",
+	)
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	const unitFinding = result.findings.find(f => f.path.includes("units/"))
+	const unitFinding = result.findings.find((f) => f.path.includes("units/"))
 	assert.ok(!unitFinding, "units/ files should not produce findings")
 	// No tracked files changed.
 	assert.strictEqual(result.action, null)
 })
 
-console.log("\n=== Scenario 20: runWorkflowTick → drift → manual_change_assessment ===")
+console.log(
+	"\n=== Scenario 20: runWorkflowTick → drift → manual_change_assessment ===",
+)
 
 await test("runWorkflowTick emits manual_change_assessment action when drift detected (AC-G13)", async () => {
 	// Build a minimal .haiku fixture that runWorkflowTick can drive:
@@ -833,7 +893,11 @@ await test("runWorkflowTick emits manual_change_assessment action when drift det
 	// Active stage state.json — execute phase, active status.
 	writeFileSync(
 		join(stageDir, "state.json"),
-		JSON.stringify({ phase: "execute", status: "active", iteration: 1 }, null, 2),
+		JSON.stringify(
+			{ phase: "execute", status: "active", iteration: 1 },
+			null,
+			2,
+		),
 	)
 
 	// Write the original file and establish a baseline.
@@ -847,36 +911,154 @@ await test("runWorkflowTick emits manual_change_assessment action when drift det
 
 	writeFileSync(join(artifactsDir, "spec.md"), originalContent)
 	await writeBaselineForStage(iDir, activeStageName, {
-		[relPath]: makeBaselineEntry(relPath, originalContent, { stage: activeStageName }),
-		[anchorRelPath]: makeBaselineEntry(anchorRelPath, anchorContent, { stage: activeStageName }),
+		[relPath]: makeBaselineEntry(relPath, originalContent, {
+			stage: activeStageName,
+		}),
+		[anchorRelPath]: makeBaselineEntry(anchorRelPath, anchorContent, {
+			stage: activeStageName,
+		}),
 	})
 
 	// Now simulate a human modifying spec.md out-of-band.
-	const modifiedContent = "# API Spec\n\nHuman edited this without going through MCP.\n"
+	const modifiedContent =
+		"# API Spec\n\nHuman edited this without going through MCP.\n"
 	writeFileSync(join(artifactsDir, "spec.md"), modifiedContent)
 
 	// Run one full workflow tick via runWorkflowTick.
-	const { runWorkflowTick } = await import("../src/orchestrator/workflow/run-tick.ts")
+	const { runWorkflowTick } = await import(
+		"../src/orchestrator/workflow/run-tick.ts"
+	)
 	const result = runWorkflowTick(slug, haikuRoot)
 
-	assert.ok(result !== null, "runWorkflowTick must return a result for a valid intent")
+	assert.ok(
+		result !== null,
+		"runWorkflowTick must return a result for a valid intent",
+	)
 	assert.strictEqual(
 		result.action?.action,
 		"manual_change_assessment",
 		`Expected manual_change_assessment action but got '${result.action?.action}'. ` +
 			`State was: '${result.state}'.`,
 	)
-	assert.ok(
-		Array.isArray(result.action.findings),
-		"findings must be an array",
-	)
-	assert.ok(
-		result.action.findings.length > 0,
-		"findings must be non-empty",
-	)
-	const specFinding = result.action.findings.find(f => f.path === relPath)
+	assert.ok(Array.isArray(result.action.findings), "findings must be an array")
+	assert.ok(result.action.findings.length > 0, "findings must be non-empty")
+	const specFinding = result.action.findings.find((f) => f.path === relPath)
 	assert.ok(specFinding, `finding for ${relPath} should be present`)
 	assert.strictEqual(specFinding.change_kind, "modified")
+})
+
+console.log(
+	"\n=== Scenario 21: Intent-scope knowledge sidecar survives stage transition (Finding 3) ===",
+)
+
+await test("intent-scope knowledge sidecar written at intent level; diff works after simulated stage transition", async () => {
+	const { intentDir, stage, artifactsDir } = makeIntentDir("s21")
+	const haikuRoot = makeHaikuRoot("s21")
+
+	// Create intent-scope knowledge directory and file.
+	const knowledgeDir = join(intentDir, "knowledge")
+	mkdirSync(knowledgeDir, { recursive: true })
+	const knowledgePath = join(knowledgeDir, "market-research.md")
+	const originalContent = "# Market Research\n\nOriginal findings.\n"
+	const newContent = "# Market Research\n\nHuman updated findings.\n"
+	writeFileSync(knowledgePath, originalContent)
+
+	// Add a stable anchor to prevent the OOM heuristic.
+	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
+
+	// Establish a baseline that includes the intent-scope knowledge file.
+	// stageOwner = null for intent-scope entries.
+	const relPath = "knowledge/market-research.md"
+	const _stageRelPath = `stages/${stage}/artifacts/${anchor.relPath.split("/").pop()}`
+	await writeBaselineForStage(intentDir, stage, {
+		[relPath]: {
+			path: relPath,
+			sha256: sha256(originalContent),
+			bytes: Buffer.byteLength(originalContent),
+			mtime_ns: Date.now() * 1_000_000,
+			is_binary: false,
+			author_class: "agent",
+			acknowledged_at: new Date().toISOString(),
+			acknowledged_via: "baseline-init",
+			stage: null,
+			tracking_class: "knowledge",
+		},
+		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
+	})
+
+	// First gate pass — should write sidecar at intent level (not stage level).
+	const result1 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+	assert.strictEqual(result1.action, null, "no action on unchanged content")
+
+	// Verify the sidecar is at the intent level.
+	const { baselineIntentContentPath } = await import(
+		"../src/orchestrator/workflow/drift-baseline.ts"
+	)
+	const intentSidecarPath = baselineIntentContentPath(
+		intentDir,
+		sha256(originalContent),
+	)
+	assert.ok(
+		existsSync(intentSidecarPath),
+		"sidecar should be written at intent level",
+	)
+
+	// Simulate stage transition: the baseline only tracks the intent-scope
+	// knowledge file. If the sidecar were stored under the old stage, it
+	// would not be found after transition. We verify that the next gate pass
+	// (on a different stage name) can still produce a diff.
+	const newStage = "development"
+	const newStageDir = join(intentDir, "stages", newStage)
+	const newArtifactsDir = join(newStageDir, "artifacts")
+	mkdirSync(newArtifactsDir, { recursive: true })
+	writeFileSync(
+		join(newStageDir, "state.json"),
+		JSON.stringify({ iteration: 2, status: "active" }),
+	)
+
+	// Add an anchor file to the new stage so the OOM heuristic doesn't fire
+	// (1 changed / 2 total = 50%, not > 50%).
+	const newAnchor = addAnchorFile(intentDir, newStage, newArtifactsDir)
+
+	// Re-use the same knowledge entry in the new stage's baseline.
+	await writeBaselineForStage(intentDir, newStage, {
+		[relPath]: {
+			path: relPath,
+			sha256: sha256(originalContent),
+			bytes: Buffer.byteLength(originalContent),
+			mtime_ns: Date.now() * 1_000_000,
+			is_binary: false,
+			author_class: "agent",
+			acknowledged_at: new Date().toISOString(),
+			acknowledged_via: "baseline-init",
+			stage: null,
+			tracking_class: "knowledge",
+		},
+		[newAnchor.relPath]: makeBaselineEntry(
+			newAnchor.relPath,
+			newAnchor.content,
+			{ stage: newStage },
+		),
+	})
+
+	// Human modifies the knowledge file.
+	writeFileSync(knowledgePath, newContent)
+
+	// Gate on the NEW stage should still find the sidecar and produce a diff.
+	const result2 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, newStage))
+	assert.strictEqual(
+		result2.action,
+		"manual_change_assessment",
+		"drift should be detected on new stage",
+	)
+	const finding = result2.findings.find((f) => f.path === relPath)
+	assert.ok(finding, "finding for knowledge file should be present")
+	assert.strictEqual(finding.change_kind, "modified")
+	// diff_unified should be non-null because the sidecar is at intent level.
+	assert.ok(
+		finding.diff_unified !== null,
+		"diff_unified should be non-null — intent-level sidecar must survive stage transition",
+	)
 })
 
 // ── Cleanup + summary ──────────────────────────────────────────────────────

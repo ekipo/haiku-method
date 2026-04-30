@@ -31,6 +31,7 @@ import {
 	computeFileSha256,
 	enumerateTrackedSurface,
 	isBinary,
+	isDriftDetectionDisabled,
 	readBaseline,
 	type TrackingClass,
 	writeBaseline,
@@ -51,21 +52,6 @@ function getIntentStages(intentDir: string): string[] {
 			.map((e) => e.name)
 	} catch {
 		return []
-	}
-}
-
-/** Detect whether drift detection is disabled in .haiku/settings.yml.
- *  Returns true when drift_detection is explicitly false; otherwise false
- *  (the feature is enabled by default). */
-function isDriftDetectionDisabled(root: string): boolean {
-	const settingsPath = join(root, "settings.yml")
-	if (!existsSync(settingsPath)) return false
-	try {
-		const raw = readFileSync(settingsPath, "utf8")
-		const { data } = matter(`---\n${raw}\n---\n`)
-		return (data as Record<string, unknown>).drift_detection === false
-	} catch {
-		return false
 	}
 }
 

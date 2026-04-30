@@ -52,7 +52,10 @@ import type { MultipartFile } from "@fastify/multipart"
 import fastifyMultipart from "@fastify/multipart"
 import type { FastifyInstance } from "fastify"
 import { appendActionLogEntry } from "../orchestrator/workflow/action-log.js"
-import { canonicalisePath } from "../orchestrator/workflow/drift-baseline.js"
+import {
+	canonicalisePath,
+	getCurrentTickCounter,
+} from "../orchestrator/workflow/drift-baseline.js"
 import {
 	appendWriteAudit,
 	nextEntryId,
@@ -459,7 +462,8 @@ export async function registerUploadRoutes(
 				}
 
 				// Stamp action-log entry (author_class: "human-via-mcp").
-				const entryId = nextEntryId(0, 1)
+				const tickCounter = getCurrentTickCounter(iDir, stage)
+				const entryId = nextEntryId(tickCounter, 1)
 				const now = new Date().toISOString()
 				const actionEntry = {
 					entry_type: "human_write" as const,
@@ -469,9 +473,9 @@ export async function registerUploadRoutes(
 					timestamp: now,
 					human_author_id: attributeToUser,
 					entry_id: entryId,
-					tick_counter: 0,
+					tick_counter: tickCounter,
 				}
-				await appendActionLogEntry(iDir, 0, actionEntry)
+				await appendActionLogEntry(iDir, tickCounter, actionEntry)
 
 				// Append audit-log entry (AC-TA2 / write-audit.jsonl).
 				await appendWriteAudit(iDir, {
@@ -483,7 +487,7 @@ export async function registerUploadRoutes(
 					human_author_id: attributeToUser,
 					rationale: null,
 					user_instruction_excerpt: null, // SPA uploads have no chat instruction (spec §1)
-					tick_counter: 0,
+					tick_counter: tickCounter,
 					session_id: null,
 					overwrite: targetExists,
 					dirs_created: [],
@@ -688,7 +692,13 @@ export async function registerUploadRoutes(
 				}
 
 				// Stamp action-log entry.
-				const entryId = nextEntryId(0, 1)
+				// For stage-scoped uploads use that stage's tick; for intent-scope
+				// knowledge (stage === null) walk all stages to find the active one.
+				const knowledgeTickCounter =
+					stage !== null
+						? getCurrentTickCounter(iDir, stage)
+						: getCurrentTickCounter(iDir)
+				const entryId = nextEntryId(knowledgeTickCounter, 1)
 				const now = new Date().toISOString()
 				const actionEntry = {
 					entry_type: "human_write" as const,
@@ -698,9 +708,9 @@ export async function registerUploadRoutes(
 					timestamp: now,
 					human_author_id: attributeToUser,
 					entry_id: entryId,
-					tick_counter: 0,
+					tick_counter: knowledgeTickCounter,
 				}
-				await appendActionLogEntry(iDir, 0, actionEntry)
+				await appendActionLogEntry(iDir, knowledgeTickCounter, actionEntry)
 
 				// Append audit-log entry.
 				await appendWriteAudit(iDir, {
@@ -712,7 +722,7 @@ export async function registerUploadRoutes(
 					human_author_id: attributeToUser,
 					rationale: null,
 					user_instruction_excerpt: null,
-					tick_counter: 0,
+					tick_counter: knowledgeTickCounter,
 					session_id: null,
 					overwrite: false,
 					dirs_created: [],

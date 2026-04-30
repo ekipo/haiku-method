@@ -22,21 +22,29 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import matter from "gray-matter"
 import {
+	type AuthorClass,
 	type Baseline,
 	type BaselineEntry,
 	baselineContentPath,
+	baselineIntentContentPath,
 	computeFileSha256Sync,
 	enumerateTrackedSurface,
 	isBinarySync,
+	isDriftDetectionDisabled,
 	readActionLogSync,
 	readBaseline,
-	readBaselineContent,
+	readBaselineContentWithFallback,
 	type TrackingClass,
 	writeBaselineContentSync,
+	writeBaselineIntentContentSync,
 	writeBaselineSync,
 } from "./drift-baseline.js"
+
+// Re-export so callers that import isDriftDetectionDisabled from this module
+// continue to work (e.g. drift-detection-gate.test.mjs).
+export { isDriftDetectionDisabled }
+
 import {
 	findOpenMarker,
 	isStaleMarker,
@@ -61,6 +69,11 @@ export interface DriftFinding {
 	context_unit: string | null
 	/** True when this is a synthetic out-of-sync finding (ARCHITECTURE.md §8.3). */
 	is_baseline_oom?: boolean
+	/** Author class attributed to this finding (ARCHITECTURE.md §6.2).
+	 *  Set by the gate from the action log; carried through dispatch so
+	 *  haiku_classify_drift can write the correct author_class on the
+	 *  baseline entry without re-reading the log. */
+	author_class?: AuthorClass
 }
 
 /** Return type of `runDriftDetectionGate`. */
@@ -86,22 +99,6 @@ export interface DriftGateCtx {
 	tickCounter: number
 }
 
-// ── Kill-switch helper ─────────────────────────────────────────────────────
-
-/** Return true when `drift_detection: false` is set in settings.yml.
- *  Default is enabled (returns false). Never throws. */
-export function isDriftDetectionDisabled(haikuRoot: string): boolean {
-	const settingsPath = join(haikuRoot, "settings.yml")
-	if (!existsSync(settingsPath)) return false
-	try {
-		const raw = readFileSync(settingsPath, "utf-8")
-		const { data } = matter(`---\n${raw}\n---\n`)
-		return (data as Record<string, unknown>).drift_detection === false
-	} catch {
-		return false
-	}
-}
-
 // ── Diff generation ────────────────────────────────────────────────────────
 
 const MAX_DIFF_LINES = 200
@@ -124,7 +121,12 @@ function buildUnifiedDiff(
 	afterAbsPath: string,
 ): string | null {
 	try {
-		const beforeBuf = readBaselineContent(intentDir, activeStage, beforeSha256)
+		// Try stage path first, fall back to intent-level for knowledge/ files.
+		const beforeBuf = readBaselineContentWithFallback(
+			intentDir,
+			activeStage,
+			beforeSha256,
+		)
 		if (beforeBuf === null) return null
 
 		const afterBuf = readFileSync(afterAbsPath)
@@ -439,16 +441,21 @@ export function runDriftDetectionGate(
 		if (baselineEntry.sha256 === currentSha) {
 			// No change — happy path. Lazily write the content sidecar so that
 			// "before" content is available the next time this file changes.
+			// Intent-scope entries (stageOwner === null) get a sidecar at the
+			// intent level to survive stage transitions.
 			if (!currentBinary && !baselineEntry.is_binary) {
-				const sidecarPath = baselineContentPath(
-					intentDir,
-					activeStage,
-					currentSha,
-				)
+				const isIntentScope = entry.stageOwner === null
+				const sidecarPath = isIntentScope
+					? baselineIntentContentPath(intentDir, currentSha)
+					: baselineContentPath(intentDir, activeStage, currentSha)
 				if (!existsSync(sidecarPath)) {
 					try {
 						const buf = readFileSync(entry.absPath)
-						writeBaselineContentSync(intentDir, activeStage, currentSha, buf)
+						if (isIntentScope) {
+							writeBaselineIntentContentSync(intentDir, currentSha, buf)
+						} else {
+							writeBaselineContentSync(intentDir, activeStage, currentSha, buf)
+						}
 					} catch {
 						// Non-fatal.
 					}
@@ -504,10 +511,8 @@ export function runDriftDetectionGate(
 			tracking_class: entry.trackingClass,
 			stage: entry.stageOwner,
 			context_unit: null,
-			// Include author_class as a non-standard field so handlers have it.
-			// (The DriftFinding type is open via index signature in the assessment handler.)
-			...({ author_class: authorClass } as Record<string, unknown>),
-		} as DriftFinding & { author_class: string })
+			author_class: authorClass,
+		})
 	}
 
 	// Remove stale markers (fire-and-forget, non-blocking).

@@ -57,6 +57,7 @@ const DriftFindingSchema = z.object({
 	stage: z.string().nullable(),
 	context_unit: z.string().nullable(),
 	is_baseline_oom: z.boolean().optional(),
+	author_class: z.enum(["agent", "human-via-mcp", "human-implicit"]).optional(),
 })
 
 /** On-disk shape of `drift-dispatch.json`. */
@@ -168,6 +169,7 @@ export function buildDriftDispatch(args: {
 			...(f.is_baseline_oom !== undefined
 				? { is_baseline_oom: f.is_baseline_oom }
 				: {}),
+			...(f.author_class !== undefined ? { author_class: f.author_class } : {}),
 		})),
 		legal_outcomes: Object.fromEntries(
 			Object.entries(args.legalOutcomes).map(([k, v]) => [k, v.slice()]),

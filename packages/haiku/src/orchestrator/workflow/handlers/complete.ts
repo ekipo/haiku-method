@@ -2,12 +2,14 @@
 // terminal state.
 //
 // FIRES WHEN: derive-state sees `intent.status === "completed"`.
-// Pure function of context.slug; the runNext counterpart at
-// orchestrator.ts:2200 produces the byte-identical shape.
+// The runNext counterpart at orchestrator.ts:2200 produces the
+// byte-identical shape.
 //
-// Defensive checkout: re-asserts `haiku/<slug>/main` on every tick
-// against an already-completed intent, in case a prior subagent or
-// manual merge left HEAD on a stage branch.
+// Defensive checkout: calls ensureOnIntentMain(ctx.slug), which runs
+// `git checkout haiku/<slug>/main`. This is a git side-effect — not a
+// pure function — but it is idempotent (no-op when HEAD is already on
+// the correct branch) and a no-op in non-git environments where
+// ensureOnIntentMain catches and silently ignores git errors.
 
 import { ensureOnIntentMain } from "../../../git-worktree.js"
 import type { WorkflowHandler } from "./_types.js"

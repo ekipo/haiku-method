@@ -33,6 +33,7 @@ import {
 } from "node:fs"
 import { open, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
+import matter from "gray-matter"
 import { z } from "zod"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -201,9 +202,13 @@ export async function writeBaseline(
 
 	// Write content sidecars so diff generation can read "before" content
 	// without relying on git (which uses SHA-1, not SHA-256).
+	// Intent-scope entries (stage === null) get a sidecar at the intent level.
 	for (const [, entry] of baseline.entries) {
 		if (entry.is_binary) continue
-		const sidecarPath = baselineContentPath(intentDir, stage, entry.sha256)
+		const isIntentScope = entry.stage === null
+		const sidecarPath = isIntentScope
+			? baselineIntentContentPath(intentDir, entry.sha256)
+			: baselineContentPath(intentDir, stage, entry.sha256)
 		if (existsSync(sidecarPath)) continue
 		try {
 			const filePath = join(intentDir, entry.path)
@@ -211,7 +216,11 @@ export async function writeBaseline(
 			const buf = readFileSync(filePath)
 			const computedSha = createHash("sha256").update(buf).digest("hex")
 			if (computedSha !== entry.sha256) continue
-			writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+			if (isIntentScope) {
+				writeBaselineIntentContentSync(intentDir, entry.sha256, buf)
+			} else {
+				writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+			}
 		} catch {
 			// Non-fatal: sidecar is best-effort.
 		}
@@ -514,9 +523,13 @@ export function writeBaselineSync(
 
 	// Write content sidecars so diff generation can read "before" content
 	// without relying on git (which uses SHA-1, not SHA-256).
+	// Intent-scope entries (stage === null) get a sidecar at the intent level.
 	for (const [, entry] of baseline.entries) {
 		if (entry.is_binary) continue
-		const sidecarPath = baselineContentPath(intentDir, stage, entry.sha256)
+		const isIntentScope = entry.stage === null
+		const sidecarPath = isIntentScope
+			? baselineIntentContentPath(intentDir, entry.sha256)
+			: baselineContentPath(intentDir, stage, entry.sha256)
 		if (existsSync(sidecarPath)) continue
 		try {
 			const filePath = join(intentDir, entry.path)
@@ -524,7 +537,11 @@ export function writeBaselineSync(
 			const buf = readFileSync(filePath)
 			const computedSha = createHash("sha256").update(buf).digest("hex")
 			if (computedSha !== entry.sha256) continue
-			writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+			if (isIntentScope) {
+				writeBaselineIntentContentSync(intentDir, entry.sha256, buf)
+			} else {
+				writeBaselineContentSync(intentDir, stage, entry.sha256, buf)
+			}
 		} catch {
 			// Non-fatal: sidecar is best-effort.
 		}
@@ -550,6 +567,24 @@ export function baselineContentPath(
 	return join(baselineContentDir(intentDir, stage), sha256)
 }
 
+// ── Intent-scope sidecar helpers ───────────────────────────────────────────
+
+/** Returns the absolute path to the intent-level content-sidecar directory.
+ *  Used for intent-scope knowledge/ entries whose `stageOwner` is null —
+ *  those files are not owned by any stage, so the sidecar must live at the
+ *  intent level to survive stage transitions. */
+export function baselineIntentContentDir(intentDir: string): string {
+	return join(intentDir, "baseline-content")
+}
+
+/** Returns the absolute path for a specific intent-level sidecar file. */
+export function baselineIntentContentPath(
+	intentDir: string,
+	sha256: string,
+): string {
+	return join(baselineIntentContentDir(intentDir), sha256)
+}
+
 /** Write a content sidecar. Non-fatal on error. */
 export function writeBaselineContentSync(
 	intentDir: string,
@@ -566,6 +601,21 @@ export function writeBaselineContentSync(
 	}
 }
 
+/** Write an intent-level content sidecar. Non-fatal on error. */
+export function writeBaselineIntentContentSync(
+	intentDir: string,
+	sha256: string,
+	content: Buffer,
+): void {
+	try {
+		const dir = baselineIntentContentDir(intentDir)
+		mkdirSync(dir, { recursive: true })
+		writeFileSync(baselineIntentContentPath(intentDir, sha256), content)
+	} catch {
+		// Non-fatal.
+	}
+}
+
 /** Read a content sidecar. Returns null when absent or unreadable. */
 export function readBaselineContent(
 	intentDir: string,
@@ -576,6 +626,90 @@ export function readBaselineContent(
 		return readFileSync(baselineContentPath(intentDir, stage, sha256))
 	} catch {
 		return null
+	}
+}
+
+/** Read a content sidecar, checking the stage path first and falling back to
+ *  the intent-level path. This enables legacy stage-stamped sidecars for
+ *  knowledge/ files to still resolve after being moved to intent scope. */
+export function readBaselineContentWithFallback(
+	intentDir: string,
+	stage: string,
+	sha256: string,
+): Buffer | null {
+	// Try stage path first (stage-owned files, and legacy knowledge sidecars).
+	const stageBuf = readBaselineContent(intentDir, stage, sha256)
+	if (stageBuf !== null) return stageBuf
+	// Fall back to intent-level path (intent-scope knowledge files).
+	try {
+		return readFileSync(baselineIntentContentPath(intentDir, sha256))
+	} catch {
+		return null
+	}
+}
+
+// ── Tick-counter helper ────────────────────────────────────────────────────
+
+/** Read the current tick counter (iteration) from the active stage's
+ *  state.json. When `stage` is supplied, reads only that stage's state.json.
+ *  When omitted, walks all stage directories and returns the first `iteration`
+ *  found (for callers that don't know the active stage).
+ *  Returns 0 when not determinable (safe default for entry-ID purposes). */
+export function getCurrentTickCounter(
+	intentDir: string,
+	stage?: string,
+): number {
+	const stagesDir = join(intentDir, "stages")
+	if (!existsSync(stagesDir)) return 0
+
+	const tryRead = (stateFile: string): number | null => {
+		if (!existsSync(stateFile)) return null
+		try {
+			const state = JSON.parse(readFileSync(stateFile, "utf-8")) as Record<
+				string,
+				unknown
+			>
+			const iter = state.iteration
+			return typeof iter === "number" ? iter : null
+		} catch {
+			return null
+		}
+	}
+
+	if (stage !== undefined) {
+		return tryRead(join(stagesDir, stage, "state.json")) ?? 0
+	}
+
+	try {
+		const stageDirs = readdirSync(stagesDir, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => e.name)
+		for (const s of stageDirs) {
+			const v = tryRead(join(stagesDir, s, "state.json"))
+			if (v !== null) return v
+		}
+	} catch {
+		// ignore
+	}
+	return 0
+}
+
+// ── Kill-switch helper ─────────────────────────────────────────────────────
+
+/** Return true when `drift_detection: false` is set in `.haiku/settings.yml`.
+ *  Default is enabled (returns false). Never throws.
+ *
+ *  Extracted here so `drift-detection-gate.ts`, `haiku_human_write.ts`, and
+ *  `haiku_baseline_init.ts` all share one implementation. */
+export function isDriftDetectionDisabled(haikuRoot: string): boolean {
+	const settingsPath = join(haikuRoot, "settings.yml")
+	if (!existsSync(settingsPath)) return false
+	try {
+		const raw = readFileSync(settingsPath, "utf-8")
+		const { data } = matter(`---\n${raw}\n---\n`)
+		return (data as Record<string, unknown>).drift_detection === false
+	} catch {
+		return false
 	}
 }
 

@@ -28,7 +28,7 @@ quality_gates:
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/write-audit.ts
       packages/haiku/src/orchestrator/workflow/action-log.ts
-status: active
+status: completed
 bolt: 1
 hat: reviewer
 started_at: '2026-04-30T16:33:47Z'
@@ -44,8 +44,9 @@ iterations:
     result: advance
   - hat: reviewer
     started_at: '2026-04-30T16:45:46Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T16:48:28Z'
+    result: advance
+completed_at: '2026-04-30T16:48:28Z'
 ---
 # Write-audit JSONL log + per-tick action log
 

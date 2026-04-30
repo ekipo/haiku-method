@@ -43,7 +43,17 @@ quality_gates:
       packages/haiku-ui/src/atoms/DriftEntryRow.tsx
       packages/haiku-ui/src/pages/review/DriftAssessmentsView.tsx
       packages/haiku-ui/src/atoms/OutcomeBadge.tsx
-status: pending
+status: completed
+bolt: 1
+hat: ''
+started_at: '2026-04-30T22:06:43Z'
+hat_started_at: '2026-04-30T22:06:43Z'
+iterations:
+  - hat: ''
+    started_at: '2026-04-30T22:06:43Z'
+    completed_at: '2026-04-30T22:18:23Z'
+    result: advance
+completed_at: '2026-04-30T22:18:23Z'
 ---
 # SPA Drift-Detected Banner + Drift Assessments view + outcome badges
 

@@ -25,7 +25,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts
-status: pending
+status: active
+bolt: 1
+hat: planner
+started_at: '2026-04-30T16:33:52Z'
+hat_started_at: '2026-04-30T16:33:52Z'
+iterations:
+  - hat: planner
+    started_at: '2026-04-30T16:33:52Z'
+    completed_at: null
+    result: null
 ---
 # haiku_baseline_init MCP tool (rollout bootstrap)
 

@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/a11y/noNoninteractiveTabindex: assessment-list rows are keyboard-focusable per features/drift-assessment-visibility.feature + DESIGN-BRIEF Screen 3 §"Accessibility requirements" — the row's interactive children (badge link + expand toggle) are individually focusable, but the spec also requires the row itself to receive focus so a screen-reader user can hear the full record summary as one announcement when arrow-keying through the list. */
 /**
  * DriftAssessmentsView — full route at
  * `/review/{intentSlug}/drift-assessments`. Lists ManualChangeAssessment
@@ -80,9 +81,7 @@ export interface CorruptAssessment {
 
 export type AssessmentEntry = AssessmentRecord | CorruptAssessment
 
-function isCorrupt(
-	entry: AssessmentEntry,
-): entry is CorruptAssessment {
+function isCorrupt(entry: AssessmentEntry): entry is CorruptAssessment {
 	return (entry as CorruptAssessment).error === "parse-error"
 }
 
@@ -163,15 +162,15 @@ export function formatAssessmentSummary(
 	}
 
 	if (total === 1) {
-		const outcome = (Object.keys(counts) as Array<keyof AssessmentSummaryInput>)
-			.find((k) => counts[k] === 1)
+		const outcome = (
+			Object.keys(counts) as Array<keyof AssessmentSummaryInput>
+		).find((k) => counts[k] === 1)
 		return `1 change classified as ${outcome}`
 	}
 
 	const parts: string[] = []
 	if (counts.ignore > 0) parts.push(`${counts.ignore} ignored`)
-	if (counts["inline-fix"] > 0)
-		parts.push(`${counts["inline-fix"]} inline-fix`)
+	if (counts["inline-fix"] > 0) parts.push(`${counts["inline-fix"]} inline-fix`)
 	if (counts["surface-as-feedback"] > 0)
 		parts.push(`${counts["surface-as-feedback"]} surface-as-feedback`)
 	if (counts["trigger-revisit"] > 0)
@@ -228,10 +227,7 @@ export function DriftAssessmentsView({
 			{sorted.length === 0 ? (
 				<EmptyState />
 			) : (
-				<ol
-					data-testid="drift-assessments-list"
-					className="space-y-2"
-				>
+				<ol data-testid="drift-assessments-list" className="space-y-2">
 					{sorted.map((entry) =>
 						isCorrupt(entry) ? (
 							<CorruptRow key={entry.id} entry={entry} />
@@ -265,8 +261,8 @@ function EmptyState(): React.ReactElement {
 				No out-of-band changes have been detected yet.
 			</p>
 			<p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-				When a file is modified outside the agent loop, the next workflow
-				tick will classify it and the assessment will appear here.
+				When a file is modified outside the agent loop, the next workflow tick
+				will classify it and the assessment will appear here.
 			</p>
 		</div>
 	)
@@ -305,9 +301,7 @@ function AssessmentRow({
 	const [expanded, setExpanded] = useState(false)
 
 	const revisitState =
-		record.outcome === "trigger-revisit"
-			? revisitStateOf(record)
-			: undefined
+		record.outcome === "trigger-revisit" ? revisitStateOf(record) : undefined
 
 	const href =
 		record.outcome === "surface-as-feedback" && record.linked_feedback_id

@@ -40,10 +40,7 @@
  */
 
 import { useId, useState } from "react"
-import {
-	type DriftEntry,
-	DriftEntryRow,
-} from "../atoms/DriftEntryRow"
+import { type DriftEntry, DriftEntryRow } from "../atoms/DriftEntryRow"
 
 export type { DriftEntry } from "../atoms/DriftEntryRow"
 
@@ -106,9 +103,7 @@ export function DriftBanner({
 					onClick={() => setExpanded((v) => !v)}
 					aria-expanded={expanded}
 					aria-controls={listId}
-					aria-label={
-						expanded ? "Hide changed files" : "Show changed files"
-					}
+					aria-label={expanded ? "Hide changed files" : "Show changed files"}
 					className="inline-flex items-center justify-center w-8 h-8 rounded text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-amber-950 shrink-0"
 				>
 					<span aria-hidden="true" className="text-base leading-none">
@@ -117,9 +112,8 @@ export function DriftBanner({
 				</button>
 			</header>
 			{expanded && (
-				<div
+				<section
 					id={listId}
-					role="region"
 					aria-label="Changed files"
 					className="border-t border-amber-200 dark:border-amber-900/60 px-2 py-2 space-y-1"
 				>
@@ -130,7 +124,7 @@ export function DriftBanner({
 							onView={onView}
 						/>
 					))}
-				</div>
+				</section>
 			)}
 		</section>
 	)

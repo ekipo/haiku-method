@@ -16,6 +16,7 @@ export type TransitionKey =
 	| "review-to-gate"
 	| "gate-to-next-stage"
 	| "feedback-dispatch"
+	| "manual-change-assessment"
 
 export interface TransitionOpts {
 	from?: string
@@ -37,7 +38,12 @@ export function payloadFor(
 ): PayloadResult | null {
 	const stageLower = stage.name.toLowerCase()
 	const isFirst = idx === 0
-	const baseGate = mStage === "auto" ? "auto" : mStage === "discrete" ? "external" : stage.gate.type
+	const baseGate =
+		mStage === "auto"
+			? "auto"
+			: mStage === "discrete"
+				? "external"
+				: stage.gate.type
 
 	const map: Partial<Record<TransitionKey, PayloadResult>> = {
 		"preelab-to-stage1": {
@@ -84,11 +90,13 @@ export function payloadFor(
 			writes: [
 				{
 					path: ".haiku/intents/{slug}/intent.md",
-					change: 'frontmatter: `active_stage: "inception"`, `status: "in_progress"`',
+					change:
+						'frontmatter: `active_stage: "inception"`, `status: "in_progress"`',
 				},
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/state.json`,
-					change: '`{ phase: "elaborate", elaboration_turns: 0 }` (creates the file)',
+					change:
+						'`{ phase: "elaborate", elaboration_turns: 0 }` (creates the file)',
 				},
 			],
 			instructions: `Orchestrator advances the workflow engine into \`${stage.name}.elaborate\`. The agent should now don the first hat and begin elaboration with the user.`,
@@ -127,7 +135,8 @@ export function payloadFor(
 			writes: [
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/state.json`,
-					change: "`pre_review_dispatched: true`, `pre_review_dispatched_at: <timestamp>`",
+					change:
+						"`pre_review_dispatched: true`, `pre_review_dispatched_at: <timestamp>`",
 				},
 			],
 			instructions:
@@ -203,7 +212,8 @@ export function payloadFor(
 				},
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/units/unit-NN-*.md`,
-					change: "frontmatter validated; nothing mutated unless validation auto-fixes naming",
+					change:
+						"frontmatter validated; nothing mutated unless validation auto-fixes naming",
 				},
 			],
 			instructions: `Calls \`_openReviewAndWait()\`, which **blocks** the MCP tool call until the user clicks \`Approve\` or \`Request Changes\` in the web UI. On approve → \`phase\` advances to \`execute\`. On reject → ${isFirst ? "`phase` resets to `pending`" : "`phase` stays at `elaborate`"} and any user comments left in the UI become \`feedback/FB-NN.md\` files on the stage. **The review UI does NOT re-open while those FBs are pending** — the workflow engine routes through \`feedback_dispatch\` (for human comments) or \`review_fix\` (for inline-fix items) until each finding is closed or escalated.`,
@@ -260,13 +270,15 @@ export function payloadFor(
 				{
 					hook: "inject-context",
 					target: "next agent prompt prepend (per spawned unit context)",
-					what: "each unit gets a self-contained `<subagent tool=\"Agent\">` block with frontmatter, depends_on outputs, first hat's instructions — all embedded inside the block",
+					what: 'each unit gets a self-contained `<subagent tool="Agent">` block with frontmatter, depends_on outputs, first hat\'s instructions — all embedded inside the block',
 				},
 			],
-			action: opts.units && opts.units.length > 1 ? "start_units" : "start_unit",
+			action:
+				opts.units && opts.units.length > 1 ? "start_units" : "start_unit",
 			summary: `wave ${opts.from ?? "?"} complete → start wave ${opts.to ?? "?"} (${(opts.units ?? []).join(", ")})`,
 			payload: {
-				action: opts.units && opts.units.length > 1 ? "start_units" : "start_unit",
+				action:
+					opts.units && opts.units.length > 1 ? "start_units" : "start_unit",
 				units: opts.units,
 				completed_wave: opts.from,
 				next_wave: opts.to,
@@ -279,7 +291,8 @@ export function payloadFor(
 			writes: [
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/units/{prev-wave-unit}.md`,
-					change: 'frontmatter: `status: "complete"`, final `outputs:` recorded',
+					change:
+						'frontmatter: `status: "complete"`, final `outputs:` recorded',
 				},
 				{
 					path: `.haiku/worktrees/{new-wave-unit}/`,
@@ -303,7 +316,8 @@ export function payloadFor(
 				},
 			],
 			action: "advance_phase + run_quality_gates",
-			summary: "all units complete — enter review and run quality gates atomically",
+			summary:
+				"all units complete — enter review and run quality gates atomically",
 			payload: {
 				action: "advance_phase",
 				from: "execute",
@@ -320,11 +334,12 @@ export function payloadFor(
 			writes: [
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/state.json`,
-					change: '`phase: "review"`, then `quality_gates_run_at: <ts>` after gates run',
+					change:
+						'`phase: "review"`, then `quality_gates_run_at: <ts>` after gates run',
 				},
 			],
 			instructions:
-				"`haiku_run_next` flips `phase` to `review` and **runs the quality gates as part of the same call** — tests, lint, typecheck. On failure, the next call returns `fix_quality_gates` with the failure list and stays in `review`. On success, the next call returns `action: \"review\"` to dispatch the parallel review agents.",
+				'`haiku_run_next` flips `phase` to `review` and **runs the quality gates as part of the same call** — tests, lint, typecheck. On failure, the next call returns `fix_quality_gates` with the failure list and stays in `review`. On success, the next call returns `action: "review"` to dispatch the parallel review agents.',
 		},
 		"review-to-gate": {
 			injection: [
@@ -389,7 +404,9 @@ export function payloadFor(
 						? "stage_complete_discrete"
 						: "advance_stage",
 				from_stage: stageLower,
-				to_stage: opts.isLast ? null : (opts.nextStageName ?? "").toLowerCase() || null,
+				to_stage: opts.isLast
+					? null
+					: (opts.nextStageName ?? "").toLowerCase() || null,
 				mode: mStage,
 			},
 			validations: [
@@ -406,7 +423,8 @@ export function payloadFor(
 						},
 						{
 							path: ".haiku/intents/{slug}/intent.md",
-							change: 'frontmatter: `status: "completed"`, `active_stage: null`',
+							change:
+								'frontmatter: `status: "completed"`, `active_stage: null`',
 						},
 					]
 				: [
@@ -420,6 +438,62 @@ export function payloadFor(
 				: mStage === "discrete"
 					? "Stage complete; intent paused. The user must run `/haiku:pickup` to resume."
 					: "`workflowAdvanceStage()` moves the workflow engine into the next stage's `pending` phase.",
+		},
+		"manual-change-assessment": {
+			injection: [
+				{
+					hook: "MCP tool result",
+					target: "agent's `tool_use_result`",
+					what: "`action: manual_change_assessment` — pre-tick drift gate observed SHA divergence on tracked-surface files; agent must classify each finding before per-state dispatch resumes.",
+				},
+				{
+					hook: "buildManualChangeAssessmentAction()",
+					target: "agent prompt",
+					what: "Each finding gets a stable `DRF-NN` id, a per-finding `legal_outcomes` list (filtered per AC-CO1: current-stage findings exclude `trigger-revisit`; per DATA-CONTRACTS.md §3.4: `file-removed` excludes `inline-fix`), and the agent receives instructions to call `haiku_classify_drift` with non-empty `agent_rationale` plus per-finding `rationale_excerpt` (AC-EE5).",
+				},
+			],
+			action: "manual_change_assessment",
+			summary:
+				"out-of-band human edits detected on the tracked surface — agent classifies each finding into ignore / inline-fix / surface-as-feedback / trigger-revisit",
+			payload: {
+				action: "manual_change_assessment",
+				stage: stageLower,
+				tick_id: "tick-{slug}-{counter}-{iso}-{rand}",
+				findings: [
+					{
+						finding_id: "DRF-01",
+						path: ".haiku/intents/{slug}/stages/{stage}/artifacts/...",
+						change_kind: "modified",
+						is_binary: false,
+						stage: stageLower,
+					},
+				],
+				mode: "continuous",
+				legal_outcomes: {
+					"<path>": ["ignore", "inline-fix", "surface-as-feedback"],
+				},
+				message:
+					"Classify each finding via `haiku_classify_drift` (one Classification per finding, parallel-indexed). After the call returns, `haiku_run_next` resumes per-state dispatch.",
+			},
+			validations: [
+				"Pre-tick drift gate produced ≥ 1 DriftFinding for the active stage",
+				"Active stage's baseline.json was readable (non-corrupt) — corrupt baselines route to `error` instead",
+				"Kill-switch `drift_detection: false` is NOT set in plugin settings",
+			],
+			writes: [
+				{
+					path: ".haiku/intents/{slug}/stages/{stage}/drift-assessments/DA-NN.json",
+					change:
+						"agent's classify call writes the `Assessment` record (append-only, durable per AC-G11)",
+				},
+				{
+					path: ".haiku/intents/{slug}/stages/{stage}/baseline.json",
+					change:
+						"updated for terminal outcomes (`ignore`, `inline-fix`); held for non-terminal outcomes (pending-marker written instead — see AC-G4)",
+				},
+			],
+			instructions:
+				"**New (2026-04-30) — pre-tick drift gate dispatch.** Position in pre-tick chain: tamper-detection → feedback-triage → drift-detection → per-state dispatch. When the drift gate finds SHA divergence on the tracked surface (knowledge, stage artifacts, etc.), it short-circuits dispatch and emits this action. The agent receives all findings in one atomic batch (AC-G12) with per-finding legal-outcome filters; classification side effects (assessment record, baseline mutation, optional feedback / revisit) all happen inside `haiku_classify_drift` — the action is read-only metadata.",
 		},
 		"feedback-dispatch": {
 			injection: [
@@ -452,11 +526,11 @@ export function payloadFor(
 				{
 					path: `.haiku/intents/{slug}/stages/${stageLower}/feedback/FB-NN.md`,
 					change:
-						"agent calls `haiku_feedback_update { resolution: \"<choice>\" }` (set route) or POSTs reply (`close_as_answered: true` flips status to `addressed`)",
+						'agent calls `haiku_feedback_update { resolution: "<choice>" }` (set route) or POSTs reply (`close_as_answered: true` flips status to `addressed`)',
 				},
 			],
 			instructions:
-				"**New (2026-04-27) — replaces the buggy gate_review re-pop.** When the user left feedback at the gate with `resolution: null` (\"Let agent decide\") or filed a question, the workflow engine hands the items back to the agent for inline handling instead of re-popping the review UI. The agent walks each item: needs_triage → set resolution; question → reply + close_as_answered; once cleared the gate re-evaluates per the (now-set) resolutions and dispatches inline_fixes through the worktree-based fix-chain. The screen never re-opens until every open FB is closed/addressed/rejected.",
+				'**New (2026-04-27) — replaces the buggy gate_review re-pop.** When the user left feedback at the gate with `resolution: null` ("Let agent decide") or filed a question, the workflow engine hands the items back to the agent for inline handling instead of re-popping the review UI. The agent walks each item: needs_triage → set resolution; question → reply + close_as_answered; once cleared the gate re-evaluates per the (now-set) resolutions and dispatches inline_fixes through the worktree-based fix-chain. The screen never re-opens until every open FB is closed/addressed/rejected.',
 		},
 	}
 	return map[key] ?? null

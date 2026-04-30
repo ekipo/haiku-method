@@ -18,15 +18,15 @@
 // No new third-party dependencies: node:crypto, node:fs/promises, node:path
 // only (plus the existing zod already in packages/haiku).
 
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import {
 	createReadStream,
 	existsSync,
+	mkdirSync,
 	readdirSync,
 	readFileSync,
 } from "node:fs"
-import { mkdtemp, open, rename, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { open, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
 import { z } from "zod"
 
@@ -145,35 +145,53 @@ export function readBaseline(
 
 /** Serialise the baseline to canonical JSON (sorted keys, 2-space indent,
  *  trailing newline) and atomically rename a tempfile into place so a
- *  concurrent reader never observes a partial write. */
+ *  concurrent reader never observes a partial write.
+ *
+ *  Atomicity note: the tempfile is created in the SAME directory as the
+ *  target file. This matters because POSIX `rename(2)` is only guaranteed
+ *  atomic when source and destination are on the same filesystem. Using
+ *  `os.tmpdir()` would put the tempfile on a potentially different
+ *  filesystem (e.g. a tmpfs mount) and `rename` would fall back to
+ *  copy-then-unlink, which is NOT atomic — a concurrent reader could
+ *  observe the partial copy. */
 export async function writeBaseline(
 	intentDir: string,
 	stage: string,
 	baseline: Baseline,
 ): Promise<void> {
 	const targetPath = baselinePath(intentDir, stage)
+	const targetDir = dirname(targetPath)
 
-	// Build disk object from entries map.
+	// Ensure the stage directory exists so writeFile/rename have a home.
+	mkdirSync(targetDir, { recursive: true })
+
+	// Build disk object with SORTED keys (canonical form). JSON.stringify
+	// preserves insertion order, so we must sort the keys explicitly before
+	// constructing the object.
+	const sortedKeys = Array.from(baseline.entries.keys()).sort()
 	const diskObj: Record<string, BaselineEntry> = {}
-	for (const [key, entry] of baseline.entries) {
-		diskObj[key] = entry
+	for (const key of sortedKeys) {
+		const entry = baseline.entries.get(key)
+		if (entry !== undefined) diskObj[key] = entry
 	}
 
 	// Canonical JSON: 2-space indent, trailing newline.
 	const json = `${JSON.stringify(diskObj, null, 2)}\n`
 
-	// Write to tempfile in the same directory as the target so rename is
-	// atomic on POSIX (same filesystem, single inode operation).
-	const _dir = dirname(targetPath)
-	const tmpDir = await mkdtemp(join(tmpdir(), "haiku-baseline-"))
-	const tmpPath = join(tmpDir, `baseline-${stage}-${process.pid}.json.tmp`)
+	// Tempfile in the target directory so rename is same-filesystem (atomic).
+	// Use a random suffix to avoid collisions across concurrent writers.
+	const tmpPath = join(
+		targetDir,
+		`.baseline-${process.pid}-${randomBytes(6).toString("hex")}.json.tmp`,
+	)
 
 	try {
 		await writeFile(tmpPath, json, "utf-8")
 		await rename(tmpPath, targetPath)
-	} finally {
-		// Best-effort cleanup of tmpDir regardless of success/failure.
-		await rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	} catch (err) {
+		// Best-effort cleanup of the tempfile if the rename never landed.
+		await unlink(tmpPath).catch(() => {})
+		throw err
 	}
 }
 
@@ -302,9 +320,13 @@ function walkDir(absDir: string, baseDir: string): string[] {
 
 /** Record returned by enumerateTrackedSurface. */
 export interface TrackedSurfaceEntry {
-	/** Path relative to the intent directory (canonical, artifacts/ not outputs/). */
+	/** Path relative to the intent directory, in CANONICAL form
+	 *  (`stages/{stage}/artifacts/...` even when the file lives under the
+	 *  `outputs/` alias on disk). This is the baseline key. */
 	pathRel: string
-	/** Absolute path on disk. */
+	/** Absolute path on disk — points to the ACTUAL file location on the
+	 *  filesystem, which for the `outputs/` alias differs from `pathRel`.
+	 *  Hashing/stat must use this path; baseline lookups use `pathRel`. */
 	absPath: string
 	/** Tracking class. */
 	trackingClass: TrackingClass
@@ -330,19 +352,22 @@ export function enumerateTrackedSurface(
 	const results: TrackedSurfaceEntry[] = []
 
 	// Helper: add all files under a directory as tracked surface entries.
+	// `absPath` is anchored to the file's REAL location on disk (so it works
+	// for the `outputs/` alias too); `pathRel` is the canonicalised baseline
+	// key (`outputs/` → `artifacts/`).
 	function addDir(
 		absDir: string,
 		trackingClass: TrackingClass,
 		stageOwner: string | null,
-		_canonicalPrefix: string,
 	) {
 		if (!existsSync(absDir)) return
 		const files = walkDir(absDir, intentDir)
 		for (const rel of files) {
-			// Canonicalise (rewrite outputs/ → artifacts/).
 			const canonical = canonicalisePath(rel)
 			if (isWorkflowManaged(canonical)) continue
-			const absPath = join(intentDir, canonical)
+			// absPath uses the original (un-canonicalised) relative path so it
+			// resolves to the actual file on disk, even for the outputs/ alias.
+			const absPath = join(intentDir, rel)
 			results.push({ pathRel: canonical, absPath, trackingClass, stageOwner })
 		}
 	}
@@ -351,40 +376,21 @@ export function enumerateTrackedSurface(
 	const stageBase = join(intentDir, "stages", stage)
 
 	// artifacts/ (canonical) — stage-output class.
-	addDir(
-		join(stageBase, "artifacts"),
-		"stage-output",
-		stage,
-		`stages/${stage}/artifacts`,
-	)
+	addDir(join(stageBase, "artifacts"), "stage-output", stage)
 
 	// outputs/ (alias → treated as artifacts/) — stage-output class.
-	// We enumerate the directory but canonicalise the paths.
-	addDir(
-		join(stageBase, "outputs"),
-		"stage-output",
-		stage,
-		`stages/${stage}/outputs`,
-	)
+	// We enumerate the directory but canonicalise the pathRel; absPath
+	// stays anchored to the on-disk outputs/ location.
+	addDir(join(stageBase, "outputs"), "stage-output", stage)
 
 	// knowledge/ — knowledge class.
-	addDir(
-		join(stageBase, "knowledge"),
-		"knowledge",
-		stage,
-		`stages/${stage}/knowledge`,
-	)
+	addDir(join(stageBase, "knowledge"), "knowledge", stage)
 
 	// discovery/ — knowledge class.
-	addDir(
-		join(stageBase, "discovery"),
-		"knowledge",
-		stage,
-		`stages/${stage}/discovery`,
-	)
+	addDir(join(stageBase, "discovery"), "knowledge", stage)
 
 	// Intent-scope knowledge/ — stageOwner null.
-	addDir(join(intentDir, "knowledge"), "knowledge", null, "knowledge")
+	addDir(join(intentDir, "knowledge"), "knowledge", null)
 
 	// Deduplicate by pathRel (outputs/ alias may overlap with artifacts/).
 	const seen = new Set<string>()

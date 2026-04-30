@@ -21,7 +21,14 @@
 
 import assert from "node:assert"
 import { createHash } from "node:crypto"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -329,6 +336,32 @@ test("excludes baseline.json, drift-markers.json, write-audit.jsonl", () => {
 	)
 })
 
+test("outputs/ alias: pathRel is canonicalised (artifacts/) but absPath points to the real outputs/ file on disk", () => {
+	const { intentDir, stage, stageDir } = makeIntentDir("enum-outputs-alias")
+
+	// Place a file under the legacy outputs/ alias on disk — NOT in artifacts/.
+	mkdirSync(join(stageDir, "outputs"), { recursive: true })
+	writeFileSync(join(stageDir, "outputs", "hero.html"), "<html/>")
+
+	const entries = enumerateTrackedSurface(intentDir, stage)
+	const aliasEntry = entries.find(
+		(e) => e.pathRel === `stages/${stage}/artifacts/hero.html`,
+	)
+
+	assert.ok(
+		aliasEntry !== undefined,
+		"pathRel should be canonicalised to artifacts/",
+	)
+	assert.ok(
+		existsSync(aliasEntry.absPath),
+		`absPath must point at the real on-disk location (outputs/) — got ${aliasEntry.absPath}`,
+	)
+	assert.ok(
+		aliasEntry.absPath.includes("/outputs/"),
+		`absPath should include /outputs/ for alias files — got ${aliasEntry.absPath}`,
+	)
+})
+
 test("excludes editor temp files matching ^.#, ~$, .swp$, .swo$, ^4913$", () => {
 	const { intentDir, stage, stageDir } = makeIntentDir("enum-exclude-editor")
 
@@ -383,6 +416,52 @@ test("leaves knowledge/ and discovery/ paths untouched", () => {
 		canonicalisePath("knowledge/global.md"),
 		"knowledge/global.md",
 	)
+})
+
+console.log("\n=== writeBaseline canonical output ===")
+
+await test("writeBaseline emits keys in sorted order regardless of Map insertion order", async () => {
+	const { intentDir, stage, stageDir } = makeIntentDir("sorted-keys")
+
+	// Insert keys in deliberately-unsorted order.
+	const entryZ = makeEntry({
+		path: "stages/development/artifacts/zzz.md",
+	})
+	const entryA = makeEntry({
+		path: "stages/development/artifacts/aaa.md",
+	})
+	const entryM = makeEntry({
+		path: "stages/development/artifacts/mmm.md",
+	})
+	const baseline = {
+		entries: new Map([
+			[entryZ.path, entryZ],
+			[entryA.path, entryA],
+			[entryM.path, entryM],
+		]),
+	}
+
+	await writeBaseline(intentDir, stage, baseline)
+	const json = readFileSync(join(stageDir, "baseline.json"), "utf-8")
+
+	// JSON.stringify preserves insertion order — if we did NOT sort, zzz
+	// would appear first. Verify the keys appear in alphabetical order.
+	const idxA = json.indexOf("aaa.md")
+	const idxM = json.indexOf("mmm.md")
+	const idxZ = json.indexOf("zzz.md")
+	assert.ok(idxA > 0, "aaa key should be present")
+	assert.ok(idxA < idxM, "aaa should appear before mmm")
+	assert.ok(idxM < idxZ, "mmm should appear before zzz")
+})
+
+await test("writeBaseline output ends with a trailing newline (canonical form)", async () => {
+	const { intentDir, stage, stageDir } = makeIntentDir("trailing-newline")
+	const entry = makeEntry({ path: "stages/development/artifacts/x.md" })
+	await writeBaseline(intentDir, stage, {
+		entries: new Map([[entry.path, entry]]),
+	})
+	const raw = readFileSync(join(stageDir, "baseline.json"), "utf-8")
+	assert.ok(raw.endsWith("\n"), "baseline.json must end with a trailing newline")
 })
 
 console.log("\n=== Atomic write safety ===")

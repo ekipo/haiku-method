@@ -1,6 +1,6 @@
 ---
 title: Baseline storage layer (drift-baseline.ts)
-model: sonnet
+model: opus
 inputs:
   - intent.md
   - knowledge/DISCOVERY.md
@@ -25,10 +25,10 @@ quality_gates:
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
 status: active
-bolt: 3
-hat: reviewer
+bolt: 4
+hat: builder
 started_at: '2026-04-30T12:40:45Z'
-hat_started_at: '2026-04-30T13:11:10Z'
+hat_started_at: '2026-04-30T13:15:16Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T12:40:45Z'
@@ -50,8 +50,24 @@ iterations:
     result: advance
   - hat: reviewer
     started_at: '2026-04-30T13:11:10Z'
+    completed_at: '2026-04-30T13:15:16Z'
+    result: reject
+    reason: >-
+      Two defects: (1) enumerateTrackedSurface produces incorrect absPath for
+      files in stages/{stage}/outputs/ — canonicalisePath rewrites the relative
+      path to artifacts/ but then join(intentDir, canonical) points to the
+      non-existent artifacts/ location rather than the actual outputs/ file on
+      disk; confirmed empirically (absPath exists on disk: false). Any
+      drift-gate SHA computation via absPath will fail for outputs/-alias files.
+      (2) writeBaseline does not sort JSON keys — spec requires "sorted keys"
+      but JSON.stringify preserves insertion order. Quality issues: dead `_dir`
+      variable on line 167 (computed, never used) and misleading atomicity
+      comment (tempfile goes to tmpdir(), not same dir as target).
+  - hat: builder
+    started_at: '2026-04-30T13:15:16Z'
     completed_at: null
     result: null
+model_original: sonnet
 ---
 # Baseline storage layer (drift-baseline.ts)
 

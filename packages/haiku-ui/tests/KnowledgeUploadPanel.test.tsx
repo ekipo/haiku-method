@@ -142,7 +142,9 @@ describe("KnowledgeUploadPanel — initial render", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 1024)])
 		const select = screen.getByTestId("destination-select") as HTMLSelectElement
 		expect(select.value).toBe("intent")
@@ -178,7 +180,9 @@ describe("KnowledgeUploadPanel — drop / browse staging", () => {
 				onUpload={onUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		const f1 = makeFile("a.md", 200)
 		const f2 = makeFile("b.md", 300)
 		setFiles(input, [f1, f2])
@@ -200,8 +204,14 @@ describe("KnowledgeUploadPanel — validation", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
-		const big = makeFile("huge.bin", 20 * 1024 * 1024, "application/octet-stream")
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
+		const big = makeFile(
+			"huge.bin",
+			20 * 1024 * 1024,
+			"application/octet-stream",
+		)
 		const ok = makeFile("notes.md", 1024)
 		setFiles(input, [big, ok])
 		// The valid file stages.
@@ -225,7 +235,9 @@ describe("KnowledgeUploadPanel — cancel + success toast", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("notes.md", 512)])
 		expect(screen.getByTestId("staged-list")).toBeTruthy()
 		fireEvent.click(screen.getByTestId("knowledge-upload-cancel"))
@@ -242,7 +254,9 @@ describe("KnowledgeUploadPanel — cancel + success toast", () => {
 				onUpload={onUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		fireEvent.click(screen.getByTestId("knowledge-upload-submit"))
 		// Re-open the panel — success collapses it. Toast still renders inside
@@ -280,7 +294,9 @@ describe("KnowledgeUploadPanel — 413 / partial-failure surfacing", () => {
 				onError={onError}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		fireEvent.click(screen.getByTestId("knowledge-upload-submit"))
 		await waitFor(() => {
@@ -308,13 +324,15 @@ describe("KnowledgeUploadPanel — 413 / partial-failure surfacing", () => {
 				onUpload={onUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [f1, f2])
 		fireEvent.click(screen.getByTestId("knowledge-upload-submit"))
 		await waitFor(() => {
-			expect(
-				screen.getByTestId("knowledge-upload-submit").textContent,
-			).toMatch(/Retry 1 file/)
+			expect(screen.getByTestId("knowledge-upload-submit").textContent).toMatch(
+				/Retry 1 file/,
+			)
 		})
 		// f1 (succeeded) was removed from the staged list; f2 (failed) remains.
 		const stagedList = screen.getByTestId("staged-list")
@@ -332,7 +350,9 @@ describe("KnowledgeUploadPanel — live-region announcements", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		const live = screen.getByTestId("knowledge-upload-live")
 		expect(live.textContent).toBe("Added brand.md")
@@ -346,7 +366,9 @@ describe("KnowledgeUploadPanel — live-region announcements", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		const removeBtn = screen.getByRole("button", {
 			name: "Remove brand.md from upload",
@@ -364,14 +386,14 @@ describe("KnowledgeUploadPanel — live-region announcements", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		fireEvent.click(screen.getByTestId("knowledge-upload-submit"))
 		await waitFor(() => {
 			const live = screen.getByTestId("knowledge-upload-live")
-			expect(live.textContent).toMatch(
-				/Uploaded 1 files to Intent knowledge/,
-			)
+			expect(live.textContent).toMatch(/Uploaded 1 files to Intent knowledge/)
 		})
 	})
 })
@@ -397,7 +419,9 @@ describe("KnowledgeUploadPanel — ARIA literal-string regression guards", () =>
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		const list = screen.getByTestId("staged-list")
 		expect(list.getAttribute("role")).toBe("list")
@@ -405,7 +429,7 @@ describe("KnowledgeUploadPanel — ARIA literal-string regression guards", () =>
 		expect(row.getAttribute("role")).toBe("listitem")
 	})
 
-	it("remove button has aria-label='Remove ${file.name} from upload'", () => {
+	it("remove button has aria-label='Remove <file.name> from upload' (interpolated literal)", () => {
 		render(
 			<KnowledgeUploadPanel
 				intentSlug="demo-intent"
@@ -413,7 +437,9 @@ describe("KnowledgeUploadPanel — ARIA literal-string regression guards", () =>
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		expect(
 			screen.getByRole("button", { name: "Remove brand.md from upload" }),
@@ -509,7 +535,9 @@ describe("KnowledgeUploadPanel — tab order", () => {
 				onUpload={okUpload}
 			/>,
 		)
-		const input = screen.getByTestId("knowledge-drop-zone-input") as HTMLInputElement
+		const input = screen.getByTestId(
+			"knowledge-drop-zone-input",
+		) as HTMLInputElement
 		setFiles(input, [makeFile("brand.md", 800)])
 		const caret = screen.getByTestId("knowledge-upload-caret")
 		const zone = screen.getByTestId("knowledge-drop-zone")

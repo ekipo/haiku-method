@@ -501,7 +501,13 @@ export function writeBaselineSync(
 export function readActionLogSync(
 	intentDir: string,
 	tickCounter: number,
-): Array<{ entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }> {
+): Array<{
+	entry_type: string
+	path: string
+	sha: string
+	author_class: string
+	tick_counter: number
+}> {
 	const filePath = join(intentDir, "action-log.jsonl")
 	if (!existsSync(filePath)) return []
 
@@ -512,12 +518,24 @@ export function readActionLogSync(
 		return []
 	}
 
-	const results: Array<{ entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }> = []
+	const results: Array<{
+		entry_type: string
+		path: string
+		sha: string
+		author_class: string
+		tick_counter: number
+	}> = []
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim()
 		if (!trimmed) continue
 		try {
-			const parsed = JSON.parse(trimmed) as { entry_type: string; path: string; sha: string; author_class: string; tick_counter: number }
+			const parsed = JSON.parse(trimmed) as {
+				entry_type: string
+				path: string
+				sha: string
+				author_class: string
+				tick_counter: number
+			}
 			if (parsed.tick_counter === tickCounter) {
 				results.push(parsed)
 			}

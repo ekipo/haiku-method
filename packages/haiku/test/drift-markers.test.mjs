@@ -142,7 +142,11 @@ await test("corrupt file returns empty array AND emits warning to captured logge
 		threw = true
 	}
 
-	assert.strictEqual(threw, false, "readMarkers should not throw on corrupt file")
+	assert.strictEqual(
+		threw,
+		false,
+		"readMarkers should not throw on corrupt file",
+	)
 	assert.ok(store !== undefined, "should return a store")
 	assert.strictEqual(store.markers.length, 0, "should return empty markers")
 	assert.strictEqual(warnings.length, 1, "should emit exactly one warning")
@@ -196,7 +200,10 @@ await test("rejects marker where both linked_feedback_id and linked_revisit_targ
 		caught instanceof MarkerInvariantError,
 		`should throw MarkerInvariantError — got ${caught?.constructor?.name}: ${caught?.message}`,
 	)
-	assert.ok(caught.message.includes("mutual-exclusion"), "message should mention invariant")
+	assert.ok(
+		caught.message.includes("mutual-exclusion"),
+		"message should mention invariant",
+	)
 })
 
 await test("rejects marker where both linked_feedback_id and linked_revisit_target_stage are non-null", async () => {
@@ -233,7 +240,11 @@ await test("accepts valid surface-as-feedback marker (only linked_feedback_id se
 	} catch {
 		threw = true
 	}
-	assert.strictEqual(threw, false, "should not throw for valid surface-as-feedback marker")
+	assert.strictEqual(
+		threw,
+		false,
+		"should not throw for valid surface-as-feedback marker",
+	)
 
 	const store = readMarkers(intentDir)
 	assert.strictEqual(store.markers.length, 1)
@@ -253,7 +264,11 @@ await test("accepts valid trigger-revisit marker (only linked_revisit_target_sta
 	} catch {
 		threw = true
 	}
-	assert.strictEqual(threw, false, "should not throw for valid trigger-revisit marker")
+	assert.strictEqual(
+		threw,
+		false,
+		"should not throw for valid trigger-revisit marker",
+	)
 })
 
 console.log("\n=== findOpenMarker ===")
@@ -371,7 +386,12 @@ await test("clearMarker rejects (surface-as-feedback, revisit-complete) with Tri
 
 	let caught
 	try {
-		await clearMarker(intentDir, marker.path, "g".repeat(64), "revisit-complete")
+		await clearMarker(
+			intentDir,
+			marker.path,
+			"g".repeat(64),
+			"revisit-complete",
+		)
 	} catch (e) {
 		caught = e
 	}
@@ -419,7 +439,12 @@ await test("clearMarker rejects (trigger-revisit, feedback-rejected) with Trigge
 
 	let caught
 	try {
-		await clearMarker(intentDir, marker.path, "i".repeat(64), "feedback-rejected")
+		await clearMarker(
+			intentDir,
+			marker.path,
+			"i".repeat(64),
+			"feedback-rejected",
+		)
 	} catch (e) {
 		caught = e
 	}
@@ -497,21 +522,35 @@ await test("removeMarker deletes open markers for a path; preserves closed marke
 		created_by_assessment_id: "AS-11",
 	})
 
-	await writeMarkers(intentDir, { markers: [openMarker, closedMarker, otherMarker] })
+	await writeMarkers(intentDir, {
+		markers: [openMarker, closedMarker, otherMarker],
+	})
 	await removeMarker(intentDir, "stages/design/artifacts/hero.html")
 
 	const store = readMarkers(intentDir)
 	const openHero = store.markers.filter(
-		(m) => m.path === "stages/design/artifacts/hero.html" && m.cleared_at === null,
+		(m) =>
+			m.path === "stages/design/artifacts/hero.html" && m.cleared_at === null,
 	)
-	assert.strictEqual(openHero.length, 0, "open marker for hero.html should be removed")
+	assert.strictEqual(
+		openHero.length,
+		0,
+		"open marker for hero.html should be removed",
+	)
 
 	const closedHero = store.markers.filter(
-		(m) => m.path === "stages/design/artifacts/hero.html" && m.cleared_at !== null,
+		(m) =>
+			m.path === "stages/design/artifacts/hero.html" && m.cleared_at !== null,
 	)
-	assert.strictEqual(closedHero.length, 1, "closed marker for hero.html should be preserved")
+	assert.strictEqual(
+		closedHero.length,
+		1,
+		"closed marker for hero.html should be preserved",
+	)
 
-	const other = store.markers.filter((m) => m.path === "stages/design/artifacts/other.html")
+	const other = store.markers.filter(
+		(m) => m.path === "stages/design/artifacts/other.html",
+	)
 	assert.strictEqual(other.length, 1, "other path marker should be preserved")
 })
 

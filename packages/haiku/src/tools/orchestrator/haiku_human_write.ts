@@ -18,7 +18,13 @@
 //   - ACCEPTANCE-CRITERIA.md AC-AB1, AC-AB2, AC-TA1–AC-TA4, AC-ALIAS1/2
 
 import { createHash, randomBytes } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+} from "node:fs"
 import { rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import matter from "gray-matter"
@@ -273,7 +279,6 @@ function validatePath(
 	const parentDir = dirname(absCandidate)
 	if (existsSync(parentDir)) {
 		try {
-			const { realpathSync } = require("node:fs") as typeof import("node:fs")
 			const realParent = realpathSync(parentDir)
 			const realIntent = realpathSync(intentAbs)
 			if (

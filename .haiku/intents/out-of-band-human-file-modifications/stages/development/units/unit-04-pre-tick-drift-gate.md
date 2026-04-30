@@ -30,7 +30,16 @@ quality_gates:
     command: >-
       ! grep -nE '\bTBD\b|\bTODO\b'
       packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
-status: pending
+status: active
+bolt: 1
+hat: planner
+started_at: '2026-04-30T17:07:13Z'
+hat_started_at: '2026-04-30T17:07:13Z'
+iterations:
+  - hat: planner
+    started_at: '2026-04-30T17:07:13Z'
+    completed_at: null
+    result: null
 ---
 # Pre-tick drift-detection gate + run-tick integration
 

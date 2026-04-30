@@ -11,6 +11,7 @@
 
 import type { ToolDef } from "../types.js"
 import haiku_baseline_init from "./haiku_baseline_init.js"
+import haiku_human_write from "./haiku_human_write.js"
 import haiku_intent_archive from "./haiku_intent_archive.js"
 import haiku_intent_create from "./haiku_intent_create.js"
 import haiku_intent_reset from "./haiku_intent_reset.js"
@@ -22,6 +23,7 @@ export const orchestratorToolHandlers: ReadonlyMap<string, ToolDef> = new Map(
 	(
 		[
 			haiku_baseline_init,
+			haiku_human_write,
 			haiku_intent_archive,
 			haiku_intent_create,
 			haiku_intent_reset,

@@ -30,12 +30,16 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/action-log.ts
 status: active
 bolt: 1
-hat: planner
+hat: builder
 started_at: '2026-04-30T16:33:47Z'
-hat_started_at: '2026-04-30T16:33:47Z'
+hat_started_at: '2026-04-30T16:40:10Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T16:33:47Z'
+    completed_at: '2026-04-30T16:40:10Z'
+    result: advance
+  - hat: builder
+    started_at: '2026-04-30T16:40:10Z'
     completed_at: null
     result: null
 ---

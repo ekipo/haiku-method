@@ -18,6 +18,7 @@ import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
 import { type DerivedState, deriveCurrentState } from "./derive-state.js"
 import { runDriftDetectionGate } from "./drift-detection-gate.js"
+import { buildDriftDispatch, writeDriftDispatch } from "./drift-dispatch.js"
 import { preTickFeedbackGate } from "./feedback-triage-gate.js"
 import { dispatchHandler, WORKFLOW_STATES } from "./handlers/index.js"
 import { buildManualChangeAssessmentAction } from "./handlers/manual-change-assessment.js"
@@ -191,6 +192,21 @@ export function runWorkflowTick(
 					mode: intentMode,
 				},
 				driftResult.findings,
+			)
+			// Persist the active dispatch so haiku_classify_drift can validate
+			// tick_id, hydrate findings into the assessment record, and apply
+			// the per-finding legal_outcomes filter without trusting agent
+			// input for any of those values.
+			writeDriftDispatch(
+				derived.context.intentDirPath,
+				buildDriftDispatch({
+					tickId: action.tick_id,
+					stage: action.stage,
+					tickCounter,
+					mode: action.mode,
+					findings: action.findings,
+					legalOutcomes: action.legal_outcomes,
+				}),
 			)
 			return {
 				state: "manual_change_assessment",

@@ -26,7 +26,7 @@ Run the full H·AI·K·U lifecycle autonomously from description to delivery. Au
 
 - **Pause on blockers or ambiguity.** If the workflow engine returns an error or a decision that can't be inferred from the intent's goals, stop and surface it to the user. Never guess.
 - **Pause on scope explosion.** If elaborate produces more than 5 units in a single stage, stop and ask the user to confirm scope — that's a signal the task is bigger than it looked and autopilot may not be appropriate.
-- **Pause before PR creation.** Even when `haiku_run_next` reaches `external_review_requested`, surface the PR creation step to the user — don't open PRs autonomously.
+- **Pause before mid-workflow PR creation.** When `haiku_run_next` returns `external_review_requested` mid-lifecycle (e.g. per-unit MRs in discrete mode), surface the PR creation step to the user — don't open PRs autonomously. The final intent-completion delivery PR is the exception: after `intent_complete`, open the delivery PR (`haiku/<slug>/main` → `main`) directly. The intent-completion review gate is the human checkpoint; pausing again is redundant.
 - **Stop on phase-level failures.** `error`, `max_bolts_exceeded`, `unit_scope_violation` not clearable after one retry, or any workflow engine rejection that persists across two calls → stop and report.
 
 ## Combined with other skills

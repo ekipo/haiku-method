@@ -1,6 +1,6 @@
 ---
 title: haiku_human_write MCP tool
-model: sonnet
+model: opus
 depends_on:
   - unit-01-baseline-storage
   - unit-03-write-audit-log
@@ -44,8 +44,19 @@ iterations:
     result: advance
   - hat: reviewer
     started_at: '2026-04-30T17:26:52Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-04-30T17:46:58Z'
+    result: reject
+    reason: >-
+      haiku_human_write is registered in orchestratorToolHandlers (dispatch
+      works) but is NOT added to orchestrator/tool-defs.ts, so it does not
+      appear in MCP tools/list. The completion criterion explicitly requires
+      "visible to MCP tools/list". The fix: add a haiku_human_write entry to
+      packages/haiku/src/orchestrator/tool-defs.ts (or derive
+      orchestratorToolDefs from orchestratorToolHandlers so registered tools are
+      automatically listed). Same gap exists for haiku_baseline_init but that is
+      not this unit's scope. All 20 tests pass (908 total), tsc clean, Biome
+      clean — only this tools/list visibility gap blocks completion.
+model_original: sonnet
 ---
 # haiku_human_write MCP tool
 

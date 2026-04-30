@@ -16,5 +16,20 @@
       "result": null
     }
   ],
-  "elaboration_turns": 1
+  "elaboration_turns": 5,
+  "decision_log": [
+    {
+      "decision": "Drift-detected banner control surface (passive vs interactive)",
+      "options": [
+        "Passive observer — read-only banner, no controls; reviewer just sees the system state (matches design-stage ARCHITECTURE.md §1 and SPA-UI-SPECS.md §0)",
+        "Interactive — include the 'Run now' button per DESIGN-BRIEF Screen 3 so the reviewer can manually trigger the next tick"
+      ],
+      "choice": "Passive observer — read-only banner, no controls; reviewer just sees the system state (matches design-stage ARCHITECTURE.md §1 and SPA-UI-SPECS.md §0)",
+      "source": "autonomous-acknowledged",
+      "rationale": "DESIGN-BRIEF Screen 3 specifies a 'Run now' button on the drift-detected banner, but design-stage ARCHITECTURE.md §1 (banner is a passive system-state indicator) and SPA-UI-SPECS.md §0 (passive-observer constraint) both forbid controls on this surface. When two design artifacts conflict, ARCHITECTURE.md wins on behavior because the SPA-UI-SPECS.md is derivative of the architecture and explicitly calls out the passive-observer constraint. Unit-13 omits the button. The DESIGN-BRIEF should be reconciled in a follow-up; flagging here so the user can veto if they actually want the interactive variant.",
+      "recorded_at": "2026-04-30T01:00:18Z"
+    }
+  ],
+  "pre_review_dispatched": true,
+  "pre_review_dispatched_at": "2026-04-30T01:00:21Z"
 }

@@ -27,9 +27,9 @@ quality_gates:
       packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts
 status: active
 bolt: 1
-hat: builder
+hat: reviewer
 started_at: '2026-04-30T16:33:52Z'
-hat_started_at: '2026-04-30T16:53:40Z'
+hat_started_at: '2026-04-30T17:01:21Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T16:33:52Z'
@@ -37,6 +37,10 @@ iterations:
     result: advance
   - hat: builder
     started_at: '2026-04-30T16:53:40Z'
+    completed_at: '2026-04-30T17:01:21Z'
+    result: advance
+  - hat: reviewer
+    started_at: '2026-04-30T17:01:21Z'
     completed_at: null
     result: null
 ---

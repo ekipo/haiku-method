@@ -26,9 +26,9 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-baseline.ts
 status: active
 bolt: 4
-hat: builder
+hat: reviewer
 started_at: '2026-04-30T12:40:45Z'
-hat_started_at: '2026-04-30T13:15:16Z'
+hat_started_at: '2026-04-30T13:21:56Z'
 iterations:
   - hat: planner
     started_at: '2026-04-30T12:40:45Z'
@@ -65,6 +65,10 @@ iterations:
       comment (tempfile goes to tmpdir(), not same dir as target).
   - hat: builder
     started_at: '2026-04-30T13:15:16Z'
+    completed_at: '2026-04-30T13:21:56Z'
+    result: advance
+  - hat: reviewer
+    started_at: '2026-04-30T13:21:56Z'
     completed_at: null
     result: null
 model_original: sonnet

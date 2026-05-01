@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { stripWildcardAllowedOrigins } from "./config.js"
 import { stopHttpServer } from "./http.js"
+import { checkPluginIntegrity } from "./plugin-self-repair.js"
 import { flush as flushSentry, reportError } from "./sentry.js"
 
 const server = new Server(
@@ -221,8 +222,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 	return { tools: filteredTools }
 })
 
-// Call tools — wrapped to trigger hot-swap after response when an update is staged
+// Call tools
 server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+	// Integrity check: did the plugin dir disappear under us? Throttled
+	// to once per few seconds; reports + attempts self-repair on
+	// detection. See plugin-self-repair.ts.
+	const args = (request.params?.arguments ?? {}) as Record<string, unknown>
+	const sessionCtxForCheck = args._session_context as
+		| Record<string, string>
+		| undefined
+	const integrity = checkPluginIntegrity(sessionCtxForCheck)
+	if (!integrity.ok) {
+		const detail = integrity.result
+			? `${integrity.result.method}${integrity.result.reason ? `:${integrity.result.reason}` : ""}${integrity.result.error ? ` — ${integrity.result.error}` : ""}`
+			: "no-result"
+		const msg = `Haiku plugin dir was wiped from under the running MCP server and self-repair failed (${detail}). Run \`/plugin install haiku@haiku\` (or \`/plugin update haiku\`) to restore it manually.`
+		return {
+			content: [{ type: "text" as const, text: msg }],
+			isError: true,
+		}
+	}
+
 	let result: Awaited<ReturnType<typeof handleToolCall>>
 	try {
 		result = await handleToolCall(request, extra?.signal)

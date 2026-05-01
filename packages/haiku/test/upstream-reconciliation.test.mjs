@@ -448,6 +448,12 @@ Creates a feedback record.
 
 	console.log("\n=== pre-tick gate ===")
 
+	// SCENARIO D: migration-safety — the first elaboration of a stage with
+	// ≥1 completed prior MUST silently establish the corpus fingerprint
+	// (no fire) and stamp `state.json.upstream_reconciliation_fingerprint`.
+	// A null fingerprint is a migration sentinel: it means "we have not
+	// fingerprinted this corpus yet" and MUST onboard silently rather than
+	// firing on stale priors that the operator never agreed to flag.
 	await test("first elaboration with priors silently establishes fingerprint (no fire) and stamps state.json", async () => {
 		const { projDir, intentDirPath, slug, stages } = createProject(
 			"recon-gate-establish",
@@ -500,6 +506,14 @@ intent_locked → 409
 		)
 	})
 
+	// SCENARIO F: migration-safety — once a fingerprint has been stamped
+	// (i.e. the migration has run), a subsequent first-elaborate where the
+	// CURRENT corpus differs from the stored fingerprint MUST fire
+	// `upstream_reconciliation_required`. This is the round-trip proof that
+	// silent establish (D) plus drift detection compose correctly: silent
+	// establish is not "ignore me forever", it is a one-time migration
+	// step, after which corpus drift relative to the stored fingerprint
+	// is the firing condition.
 	await test("emits upstream_reconciliation_required when stored fingerprint differs from current corpus", async () => {
 		const { projDir, intentDirPath, slug, stages } = createProject(
 			"recon-gate-fires-on-drift",
@@ -552,6 +566,13 @@ intent_locked → 409
 		)
 	})
 
+	// SCENARIO E: migration-safety — when the stored fingerprint matches
+	// the current corpus, the gate MUST fall through even when the
+	// detector functions WOULD find divergence. The fingerprint is the
+	// migration acknowledgment; a matching fingerprint means "the operator
+	// (or the silent establish) has already accepted this corpus shape",
+	// so the gate stays quiet. This is the steady-state path that prevents
+	// re-firing on every tick post-migration.
 	await test("does not fire when stored fingerprint matches current corpus (clean steady state)", async () => {
 		const { projDir, intentDirPath, slug, stages } = createProject(
 			"recon-gate-fingerprint-match",
@@ -678,6 +699,12 @@ intent_locked → 409
 		)
 	})
 
+	// SCENARIO G: migration-safety — `haiku_reconciliation_acknowledge`
+	// records the operator's decision in `state.json.decision_log` and
+	// re-stamps the fingerprint so the next tick falls through. This is
+	// the manual rollback path: when the gate fires on real corpus drift,
+	// the operator can acknowledge with a rationale and the gate accepts
+	// the new corpus shape as the new baseline going forward.
 	await test("haiku_reconciliation_acknowledge records decision and unblocks next tick", async () => {
 		const { projDir, intentDirPath, slug, stages } = createProject(
 			"recon-ack",

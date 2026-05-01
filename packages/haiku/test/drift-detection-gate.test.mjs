@@ -256,6 +256,10 @@ await test("modified finding includes correct SHAs for text files", async () => 
 
 console.log("\n=== Scenario 3: New file dropped — silently auto-baselined ===")
 
+// SCENARIO A: migration-safety — a file present on disk but absent from
+// baseline (i.e. a null/unrecorded SHA) MUST silently establish a baseline
+// entry and emit zero findings. The contract is "only previously-recorded
+// SHAs that change become findings". A null SHA = silent establish, no fire.
 await test("file present on disk but absent from baseline is silently auto-added (no finding, no action)", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s03")
 	const haikuRoot = makeHaikuRoot("s03")
@@ -289,6 +293,12 @@ await test("file present on disk but absent from baseline is silently auto-added
 	assert.strictEqual(entry.tracking_class, "knowledge")
 })
 
+// SCENARIO B: migration-safety — once an entry has been silently established
+// (so its SHA is now previously-recorded), the NEXT tick where the on-disk
+// content differs MUST emit a `modified` finding. This is the round-trip
+// proof that establish + change-detect compose correctly: the silent
+// establish is not a permanent "ignore me" pass — it is a one-time migration
+// step, after which the standard SHA-changed contract takes over.
 await test("auto-added file fires a modified finding on the NEXT tick when it actually changes", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s03b")
 	const haikuRoot = makeHaikuRoot("s03b")
@@ -435,6 +445,12 @@ await test("change detected on next tick, not during in-flight bolt", async () =
 
 console.log("\n=== Scenario 8: First tick — baseline establishment ===")
 
+// SCENARIO C: migration-safety — when baseline.json is absent entirely, the
+// first tick MUST establish from current disk state with zero findings and
+// stamp `state.json.drift_baseline_established_at`. This is the
+// migration-from-zero path: an intent that pre-dates the gate landing on
+// the codebase has no baseline, and the gate must onboard it silently
+// rather than firing a flood of "everything changed" findings.
 await test("baseline absent → establish mode: zero findings, state.json stamped, baseline written", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s08")
 	const haikuRoot = makeHaikuRoot("s08")
@@ -1200,6 +1216,124 @@ await test("diff for change followed by >CONTEXT unchanged lines preserves the c
 		insertedLines,
 		["X"],
 		`inserted lines should be ["X"] — bug drops change when trailingEqual > CONTEXT`,
+	)
+})
+
+// ── Scenario H: kill-switch end-to-end (universal rollback) ────────────────
+
+console.log(
+	"\n=== Scenario H: kill-switch end-to-end over divergent corpus ===",
+)
+
+// SCENARIO H: migration-safety — when `drift_detection: false` is written to
+// `.haiku/settings.yml`, the gate is the universal rollback escape hatch the
+// runbook (unit-01 scenario 2) promises. Even with a tracked file whose SHA
+// has demonstrably drifted from its baseline entry, the kill-switch path
+// MUST return the no-op result shape — no findings, no
+// `manual_change_assessment` action, no baseline establish — so an operator
+// confronting a flood of false positives can flip the bit and stop the
+// gate cold without rolling back code.
+await test("Scenario H — kill-switch silences the gate over a divergent corpus (universal rollback)", async () => {
+	const { intentDir, stage, artifactsDir } = makeIntentDir("sH")
+	// Kill-switch ON via .haiku/settings.yml.
+	const haikuRoot = makeHaikuRoot("sH", { driftDetectionOff: true })
+
+	const relPath = `stages/${stage}/artifacts/dashboard-layout.html`
+	const baselineContent = "<html>baseline content</html>"
+	const driftedContent = "<html>human edited out-of-band</html>"
+
+	// Establish a baseline that records a SHA different from what the disk
+	// will contain — so a no-kill-switch gate WOULD fire `modified`.
+	writeFileSync(join(artifactsDir, "dashboard-layout.html"), baselineContent)
+	await writeBaselineForStage(intentDir, stage, {
+		[relPath]: makeBaselineEntry(relPath, baselineContent),
+	})
+
+	// Drift the on-disk file.
+	writeFileSync(join(artifactsDir, "dashboard-layout.html"), driftedContent)
+
+	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+
+	// Kill-switch returns the no-op shape regardless of corpus state.
+	assert.strictEqual(
+		result.action,
+		null,
+		"kill-switch: action MUST be null even with divergent corpus",
+	)
+	assert.strictEqual(
+		result.findings.length,
+		0,
+		"kill-switch: zero findings even with divergent corpus",
+	)
+	assert.strictEqual(
+		result.baselineEstablished,
+		false,
+		"kill-switch: gate MUST NOT establish either",
+	)
+	assert.ok(
+		result.error === undefined,
+		`kill-switch: no error field — gate is a complete no-op (got error: ${result.error})`,
+	)
+})
+
+// ── Scenario I: writeBaselineSync failure → no silent re-establish loop ────
+
+console.log(
+	"\n=== Scenario I: writeBaselineSync failure → graceful degradation ===",
+)
+
+// SCENARIO I: migration-safety — when the establish-mode persistence path
+// fails (writeBaselineSync throws), the gate MUST NOT produce a flood of
+// findings on the user-visible path: it returns the no-op shape (no
+// `manual_change_assessment` action, no findings) so a transient I/O error
+// during baseline migration cannot cause a cascade of false drift signals.
+// On a second tick under the same failure conditions, behavior must remain
+// identical — the gate degrades gracefully without producing different
+// output across consecutive ticks. This is the contract behind the
+// `haiku.drift.baseline.write_failed` emitter (unit-02): write failures
+// surface as telemetry, not as user-facing findings.
+await test("Scenario I — writeBaselineSync failure does not produce findings on tick 1 or tick 2", async () => {
+	const { intentDir, stage, stageDir, artifactsDir } = makeIntentDir("sI")
+	const haikuRoot = makeHaikuRoot("sI")
+
+	// Surface non-empty: place a file on disk so establish has something to
+	// process. baseline.json is absent → the gate enters establish mode.
+	writeFileSync(join(artifactsDir, "page.html"), "<html>page v1</html>")
+
+	// Force `writeBaselineSync` to throw on the establish write by occupying
+	// the target baseline.json path with a directory. `writeFileSync` will
+	// fail with EISDIR, which the gate's try/catch swallows by contract.
+	// This is a behavioral substitute for runtime mocking the export.
+	const baselineJsonAsDir = join(stageDir, "baseline.json")
+	mkdirSync(baselineJsonAsDir, { recursive: true })
+
+	// Tick 1.
+	const t1 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+	assert.strictEqual(
+		t1.action,
+		null,
+		"tick 1: action MUST be null on writeBaselineSync failure (no flood)",
+	)
+	assert.strictEqual(
+		t1.findings.length,
+		0,
+		"tick 1: zero findings on writeBaselineSync failure",
+	)
+
+	// Tick 2 under the same failure conditions: behavior MUST be identical.
+	// This proves the gate does not flip into a "re-establish silently every
+	// tick" loop that produces different output across ticks — graceful
+	// degradation, not silent thrash.
+	const t2 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+	assert.strictEqual(
+		t2.action,
+		t1.action,
+		"tick 2 action MUST match tick 1 (graceful degradation, no thrash)",
+	)
+	assert.strictEqual(
+		t2.findings.length,
+		t1.findings.length,
+		"tick 2 finding count MUST match tick 1 (graceful degradation)",
 	)
 })
 

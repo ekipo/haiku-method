@@ -415,7 +415,7 @@ export function rewindFromCompletionReview(
 /** Shared completion path used by every gate-pass site that used to
  *  call workflowIntentComplete + return intent_complete directly.
  *  Returns the correct action for the current opt-in/opt-out state:
- *    - skip_intent_completion_review = true → fire intent_complete
+ *    - intent_completion_review = false → fire intent_complete
  *    - otherwise → enter completion-review phase, open a gate_review
  *
  *  Pre-seals guard: verifies that every stage declared in

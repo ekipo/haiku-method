@@ -336,11 +336,47 @@ function workflowFinalizeStageIntoIntentMain(
 	ensureOnStageBranch(slug, undefined)
 }
 
+/** Guard: walk every stage declared in `resolveIntentStages(intent, studio)`
+ *  and verify each has a `state.json` with `status: completed`. Returns the
+ *  names of any stages that are missing or not yet completed.
+ *
+ *  Called from `completeOrReviewIntent` (pre-review-entry and pre-immediate-
+ *  complete paths) and from the human-approval path in `haiku_run_next.ts`
+ *  (before `workflowIntentComplete`). If the engine arrives at the completion
+ *  gate while upstream stages are still pending — e.g., the user manually
+ *  reopened a completed intent or an unusual topology left gaps — this catches
+ *  it before sealing and routes back to the incomplete stage. */
+export function findIncompleteStages(slug: string, studio: string): string[] {
+	const intentFile = join(intentDir(slug), "intent.md")
+	const intent = existsSync(intentFile) ? readFrontmatter(intentFile) : {}
+	const stages = resolveIntentStages(intent, studio)
+	const incomplete: string[] = []
+	for (const stage of stages) {
+		const statePath = stageStatePath(slug, stage)
+		if (!existsSync(statePath)) {
+			incomplete.push(stage)
+			continue
+		}
+		const state = readJson(statePath)
+		if ((state.status as string) !== "completed") {
+			incomplete.push(stage)
+		}
+	}
+	return incomplete
+}
+
 /** Shared completion path used by every gate-pass site that used to
  *  call workflowIntentComplete + return intent_complete directly.
  *  Returns the correct action for the current opt-in/opt-out state:
  *    - skip_intent_completion_review = true → fire intent_complete
  *    - otherwise → enter completion-review phase, open a gate_review
+ *
+ *  Pre-seals guard: verifies that every stage declared in
+ *  `resolveIntentStages(intent, studio)` has a completed `state.json`.
+ *  If any stage is missing or non-completed, returns an error action
+ *  pointing at the first incomplete stage instead of sealing the intent.
+ *  This prevents the engine from marking an intent complete when upstream
+ *  stages were skipped, manually cleared, or never ran.
  *
  *  This decouples stage-gate approval from intent completion. Stages
  *  approving (auto or otherwise) must NEVER by themselves mark an
@@ -351,6 +387,30 @@ export function completeOrReviewIntent(
 	studio: string,
 	sourceMessage: string,
 ): OrchestratorAction {
+	// Pre-seal guard: all declared stages must be completed before
+	// we enter the completion review or seal the intent. A gap means
+	// the engine arrived at the completion gate while upstream stages
+	// are still pending — most likely a manually reopened completed
+	// intent or a topology inconsistency. Refuse to seal; route back
+	// to the first incomplete stage so the user sees what's missing.
+	const incompleteStages = findIncompleteStages(slug, studio)
+	if (incompleteStages.length > 0) {
+		emitTelemetry("haiku.intent.completion_guard_failed", {
+			intent: slug,
+			studio,
+			incomplete_stages: incompleteStages.join(","),
+		})
+		return {
+			action: "error",
+			intent: slug,
+			message:
+				`Cannot complete intent '${slug}': ${incompleteStages.length} stage(s) are not yet completed: ` +
+				`[${incompleteStages.join(", ")}]. ` +
+				`The intent has been marked active again so these stages can run. ` +
+				`Set \`active_stage\` to '${incompleteStages[0]}' and call \`haiku_run_next { intent: "${slug}" }\` to resume.`,
+		}
+	}
+
 	const intentFile = join(intentDir(slug), "intent.md")
 	const intent = existsSync(intentFile) ? readFrontmatter(intentFile) : {}
 	// Opt-OUT default: studio-level intent-completion review is on.

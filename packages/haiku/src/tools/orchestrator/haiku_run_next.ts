@@ -38,6 +38,7 @@ import {
 	buildRunInstructions,
 	completeOrReviewIntent,
 	enrichActionWithPreview,
+	findIncompleteStages,
 	getElicitInput,
 	getOpenReviewAndWait,
 	isStagePreExecute,
@@ -332,6 +333,25 @@ export default defineTool({
 						const studioForCompletion =
 							(readFrontmatter(join(intentDir(slug), "intent.md"))
 								.studio as string) || ""
+						// Guard: all declared stages must be completed before sealing.
+						// This prevents the engine from marking an intent complete when
+						// the agent stopped calling haiku_run_next mid-workflow (e.g.,
+						// operations/security stages never ran because development's gate
+						// returned advance_stage and the agent never looped back).
+						const incompleteStages = findIncompleteStages(
+							slug,
+							studioForCompletion,
+						)
+						if (incompleteStages.length > 0) {
+							return text(
+								withInstructions({
+									action: "error",
+									intent: slug,
+									message: `Cannot complete intent '${slug}': the following stages have not completed: [${incompleteStages.join(", ")}]. Run those stages to completion before approving intent_completion.`,
+									incomplete_stages: incompleteStages,
+								}),
+							)
+						}
 						workflowIntentComplete(slug)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {

@@ -87,6 +87,7 @@ export {
 } from "./orchestrator/validators.js"
 export {
 	completeOrReviewIntent,
+	findIncompleteStages,
 	workflowAdvancePhase,
 	workflowAdvanceStage,
 	workflowCompleteStage,

@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 // Tests for drift-detection-gate.ts — pre-tick drift-detection gate.
 //
-// Coverage (23 scenarios from silent-filesystem-drop-detection.feature):
+// Coverage (24 scenarios from silent-filesystem-drop-detection.feature):
 //  1.  Designer replaces a stage output — modified finding emitted.
 //  2.  PO edits a deliverable — modified finding, correct SHAs, diff_unified non-null.
 //  3.  New knowledge file dropped — new-file-detected, binary PDF has no diff.
@@ -25,6 +25,7 @@
 // 20.  Full runWorkflowTick → drift-detection gate → manual_change_assessment short-circuit.
 // 21.  Intent-scope knowledge sidecar written at intent level; diff works after simulated stage transition.
 // 22.  Diff correctness: N→M line replacement keeps "c" as context, not as deleted+inserted.
+// 23.  Diff correctness: change followed by >CONTEXT unchanged lines — trim removes from END.
 
 import assert from "node:assert"
 import { createHash } from "node:crypto"
@@ -1113,6 +1114,61 @@ await test("diff for N→M line change does not include trailing unchanged lines
 	assert.ok(
 		contextLines.includes("c"),
 		`"c" must appear as a context line, not as a deleted/inserted line`,
+	)
+})
+
+// ── Scenario 23: diff correctness — trailingEqual > CONTEXT does not drop change ops ──
+
+console.log(
+	"\n=== Scenario 23: diff correctness — trailing-equal trim removes from END, not front ===",
+)
+
+await test("diff for change followed by >CONTEXT unchanged lines preserves the change ops", async () => {
+	// before = ["a","b","c","d","e","f"]  →  after = ["a","X","c","d","e","f"]
+	// trailingEqual = 4 ("c","d","e","f") — that's > CONTEXT (3).
+	// The old splicing bug: splice(0, length - excess) removes from FRONT,
+	// dropping delete("b") and insert("X") along with leading equal ops.
+	// The fix: splice(length - excess) removes from END (excess trailing equals).
+	const { intentDir, stage, artifactsDir } = makeIntentDir("s23")
+	const haikuRoot = makeHaikuRoot("s23")
+	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
+
+	const originalContent = "a\nb\nc\nd\ne\nf"
+	const newContent = "a\nX\nc\nd\ne\nf"
+	const relPath = `stages/${stage}/artifacts/spec.md`
+	const absPath = join(artifactsDir, "spec.md")
+
+	writeFileSync(absPath, originalContent)
+	await writeBaselineForStage(intentDir, stage, {
+		[relPath]: makeBaselineEntry(relPath, originalContent),
+		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
+	})
+
+	writeFileSync(absPath, newContent)
+	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+
+	assert.strictEqual(result.action, "manual_change_assessment")
+	const finding = result.findings.find((f) => f.path === relPath)
+	assert.ok(finding, "finding should be present")
+	assert.ok(finding.diff_unified !== null, "diff_unified must be non-null")
+
+	const diffLines = finding.diff_unified.split("\n")
+	const deletedLines = diffLines
+		.filter((l) => l.startsWith("-") && !l.startsWith("---"))
+		.map((l) => l.slice(1))
+	const insertedLines = diffLines
+		.filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+		.map((l) => l.slice(1))
+
+	assert.deepStrictEqual(
+		deletedLines,
+		["b"],
+		`deleted lines should be ["b"] — bug drops change when trailingEqual > CONTEXT`,
+	)
+	assert.deepStrictEqual(
+		insertedLines,
+		["X"],
+		`inserted lines should be ["X"] — bug drops change when trailingEqual > CONTEXT`,
 	)
 })
 

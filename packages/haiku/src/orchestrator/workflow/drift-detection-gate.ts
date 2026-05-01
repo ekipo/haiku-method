@@ -242,8 +242,8 @@ function generateUnifiedDiff(
 				// If we've accumulated more than 2*CONTEXT equal lines since the
 				// last change, close the hunk (keep only CONTEXT trailing lines).
 				if (trailingEqual > 2 * CONTEXT) {
-					// Trim to keep only CONTEXT trailing equal lines.
-					hunk.ops.splice(0, hunk.ops.length - CONTEXT)
+					// Trim excess trailing equal ops from the END, keeping CONTEXT.
+					hunk.ops.splice(hunk.ops.length - (trailingEqual - CONTEXT))
 					hunks.push(hunk)
 					hunk = null
 					trailingEqual = 0
@@ -274,9 +274,9 @@ function generateUnifiedDiff(
 		}
 	}
 	if (hunk !== null) {
-		// Trim trailing equal ops beyond CONTEXT.
+		// Trim trailing equal ops beyond CONTEXT (remove excess from the END).
 		if (trailingEqual > CONTEXT) {
-			hunk.ops.splice(0, hunk.ops.length - (trailingEqual - CONTEXT))
+			hunk.ops.splice(hunk.ops.length - (trailingEqual - CONTEXT))
 		}
 		hunks.push(hunk)
 	}

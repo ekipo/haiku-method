@@ -4,7 +4,7 @@
 // Coverage (24 scenarios from silent-filesystem-drop-detection.feature):
 //  1.  Designer replaces a stage output — modified finding emitted.
 //  2.  PO edits a deliverable — modified finding, correct SHAs, diff_unified non-null.
-//  3.  New knowledge file dropped — new-file-detected, binary PDF has no diff.
+//  3.  New file dropped on disk — silently auto-baselined (no finding); fires only on next-tick change.
 //  4.  outputs/ alias: canonical pathRel is artifacts/, absPath points to outputs/ on disk.
 //  5.  Multiple files changed in one tick — one action, multiple findings (or OOM synthetic).
 //  6.  Zero changes since last baseline — no action emitted.
@@ -254,15 +254,15 @@ await test("modified finding includes correct SHAs for text files", async () => 
 	)
 })
 
-console.log("\n=== Scenario 3: New knowledge file (binary PDF) ===")
+console.log("\n=== Scenario 3: New file dropped — silently auto-baselined ===")
 
-await test("new-file-detected with is_binary=true and diff_unified=null for binary file", async () => {
+await test("file present on disk but absent from baseline is silently auto-added (no finding, no action)", async () => {
 	const { intentDir, stage, artifactsDir } = makeIntentDir("s03")
 	const haikuRoot = makeHaikuRoot("s03")
 	const knowledgeDir = join(intentDir, "knowledge")
 	mkdirSync(knowledgeDir, { recursive: true })
 
-	// Add anchor so OOM doesn't fire on 1 new file / 1 baseline entry.
+	// Add anchor so the surface isn't single-file (avoids edge-case ratios).
 	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
 
 	// Establish a baseline with just the anchor.
@@ -270,22 +270,53 @@ await test("new-file-detected with is_binary=true and diff_unified=null for bina
 		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
 	})
 
-	// Drop a "PDF" (binary with null bytes) — not in baseline.
+	// Drop a "PDF" (binary with null bytes) — not in baseline. With the
+	// post-2026-05-01 gate contract, an unrecorded path means sha was null;
+	// the gate silently establishes a baseline entry instead of firing.
 	const pdfContent = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x00, 0x00])
 	writeFileSync(join(knowledgeDir, "market-research.pdf"), pdfContent)
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	assert.strictEqual(result.action, "manual_change_assessment")
-	const finding = result.findings.find(
-		(f) => f.path === "knowledge/market-research.pdf",
-	)
-	assert.ok(finding, "should have a finding for knowledge/market-research.pdf")
-	assert.strictEqual(finding.change_kind, "new-file-detected")
-	assert.strictEqual(finding.before_sha256, null)
-	assert.ok(finding.after_sha256 !== null)
-	assert.strictEqual(finding.is_binary, true)
-	assert.strictEqual(finding.diff_unified, null)
+	assert.strictEqual(result.action, null, "no dispatch for previously-unseen file")
+	assert.strictEqual(result.findings.length, 0, "no findings for previously-unseen file")
+
+	// Baseline now contains the file — next-tick changes WILL fire.
+	const baseline = await readBaseline(intentDir, stage)
+	const entry = baseline.entries.get("knowledge/market-research.pdf")
+	assert.ok(entry, "PDF should now be tracked in baseline")
+	assert.strictEqual(entry.is_binary, true)
+	assert.strictEqual(entry.tracking_class, "knowledge")
+})
+
+await test("auto-added file fires a modified finding on the NEXT tick when it actually changes", async () => {
+	const { intentDir, stage, artifactsDir } = makeIntentDir("s03b")
+	const haikuRoot = makeHaikuRoot("s03b")
+	const newPath = `stages/${stage}/artifacts/late-deliverable.html`
+	const initial = "<html>v1</html>"
+	const updated = "<html>v2 — replaced</html>"
+
+	// Anchor + baseline that does NOT include the new file.
+	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
+	await writeBaselineForStage(intentDir, stage, {
+		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
+	})
+
+	// Tick 1: file appears on disk → silently established, no fire.
+	writeFileSync(join(intentDir, newPath), initial)
+	const t1 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+	assert.strictEqual(t1.action, null)
+	assert.strictEqual(t1.findings.length, 0)
+
+	// Tick 2: contents change → modified finding (sha was set, now differs).
+	writeFileSync(join(intentDir, newPath), updated)
+	const t2 = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+	assert.strictEqual(t2.action, "manual_change_assessment")
+	const finding = t2.findings.find((f) => f.path === newPath)
+	assert.ok(finding, "should fire on second-tick change")
+	assert.strictEqual(finding.change_kind, "modified")
+	assert.strictEqual(finding.before_sha256, sha256(initial))
+	assert.strictEqual(finding.after_sha256, sha256(updated))
 })
 
 console.log(

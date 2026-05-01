@@ -102,7 +102,6 @@ export interface DriftGateCtx {
 // ── Diff generation ────────────────────────────────────────────────────────
 
 const MAX_DIFF_LINES = 200
-const NEW_FILE_BINARY_THRESHOLD = 256 * 1024 // 256 KB
 
 /** Retrieve the "before" file content from the content sidecar and produce
  *  a unified diff against the current file content. Returns null when the
@@ -326,33 +325,6 @@ function generateUnifiedDiff(
 	return lines
 }
 
-/** Build a new-file diff payload (+++only) for a text file under the size threshold. */
-function buildNewFileDiff(absPath: string, pathRel: string): string | null {
-	try {
-		const buf = readFileSync(absPath)
-		if (buf.length > NEW_FILE_BINARY_THRESHOLD) return null
-		const content = buf.toString("utf-8")
-		const fileLines = content.split("\n")
-		const header = [
-			`--- /dev/null`,
-			`+++ b/${pathRel}`,
-			`@@ -0,0 +1,${fileLines.length} @@`,
-		]
-		const body = fileLines.map((l) => `+${l}`)
-		const full = [...header, ...body]
-		const truncated =
-			full.length > MAX_DIFF_LINES
-				? [
-						...full.slice(0, MAX_DIFF_LINES),
-						`... (truncated, full diff at ${pathRel})`,
-					]
-				: full
-		return truncated.join("\n")
-	} catch {
-		return null
-	}
-}
-
 // ── State.json stamping ────────────────────────────────────────────────────
 
 /** Stamp `drift_baseline_established_at` in the stage's state.json when the
@@ -479,18 +451,24 @@ export function runDriftDetectionGate(
 	// Stale marker paths — collected for async removal after the loop.
 	const staleMarkerPaths: string[] = []
 
+	// Baseline-dirty flag — set when we silently auto-add previously-unseen
+	// files. Persisted at end of scan so subsequent ticks see them as known.
+	let baselineDirty = false
+
 	for (const entry of surface) {
 		surfacePaths.add(entry.pathRel)
 
 		let currentSha: string
 		let currentBytes: number
 		let currentBinary: boolean
+		let currentMtimeNs: number
 
 		try {
 			currentSha = computeFileSha256Sync(entry.absPath)
 			const st = statSync(entry.absPath)
 			currentBytes = st.size
 			currentBinary = isBinarySync(entry.absPath)
+			currentMtimeNs = Math.round(st.mtimeMs * 1_000_000)
 		} catch {
 			// File disappeared between enumeration and hashing — treated as
 			// deleted in the baseline-entry check below.
@@ -500,24 +478,25 @@ export function runDriftDetectionGate(
 		const baselineEntry = baseline.entries.get(entry.pathRel)
 
 		if (baselineEntry === undefined) {
-			// New file not in baseline (AC-FS2 / DATA-CONTRACTS.md §3.1).
-			const diffUnified = currentBinary
-				? null
-				: buildNewFileDiff(entry.absPath, entry.pathRel)
-
-			findings.push({
+			// File present on disk but no baseline entry — sha was effectively
+			// null in our records. Per the gate contract (only previously-known
+			// SHAs that change become drift findings), silently establish a
+			// baseline entry and continue. This prevents existing intents from
+			// flooding with synthetic out-of-band findings the first time a
+			// freshly-added portion of the tracked surface is observed.
+			baseline.entries.set(entry.pathRel, {
 				path: entry.pathRel,
-				change_kind: "new-file-detected",
+				sha256: currentSha,
+				bytes: currentBytes,
+				mtime_ns: currentMtimeNs,
 				is_binary: currentBinary,
-				diff_unified: diffUnified,
-				before_sha256: null,
-				after_sha256: currentSha,
-				before_bytes: null,
-				after_bytes: currentBytes,
-				tracking_class: entry.trackingClass,
+				author_class: "agent",
+				acknowledged_at: new Date().toISOString(),
+				acknowledged_via: "baseline-init",
 				stage: entry.stageOwner,
-				context_unit: null,
+				tracking_class: entry.trackingClass,
 			})
+			baselineDirty = true
 			continue
 		}
 
@@ -610,6 +589,17 @@ export function runDriftDetectionGate(
 			// Non-fatal: the stale markers will be detected again on the next
 			// tick. The marker store write is best-effort here — the dispatch
 			// has already been recorded for the agent to act on.
+		}
+	}
+
+	// 7b. Persist any silent auto-adds from step 7 so the next tick sees them
+	//     as known and we don't re-add them on every tick. Best-effort — a
+	//     write failure here just means the next tick repeats the work.
+	if (baselineDirty) {
+		try {
+			writeBaselineSync(intentDir, activeStage, baseline)
+		} catch {
+			// Non-fatal.
 		}
 	}
 

@@ -684,7 +684,7 @@ function scanOneIntent(
 			field: "mode",
 			severity: "error",
 			message: "Missing mode field",
-			fix: "Set `mode` to 'continuous' or 'discrete'",
+			fix: "Set `mode` to 'continuous', 'discrete', or 'autopilot'",
 		})
 	}
 

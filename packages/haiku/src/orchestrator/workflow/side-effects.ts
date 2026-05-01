@@ -345,7 +345,14 @@ function workflowFinalizeStageIntoIntentMain(
  *  (before `workflowIntentComplete`). If the engine arrives at the completion
  *  gate while upstream stages are still pending — e.g., the user manually
  *  reopened a completed intent or an unusual topology left gaps — this catches
- *  it before sealing and routes back to the incomplete stage. */
+ *  it before sealing and routes back to the incomplete stage.
+ *
+ *  Composite intents (studio === "composite") deliberately resolve to an empty
+ *  stages list here — there is no `plugin/studios/composite/STUDIO.md` because
+ *  composite topology is per-intent (`intent.composite`). The composite handler
+ *  performs its own completion check (`allComplete`) over `compositeState`
+ *  before calling `completeOrReviewIntent`, so the no-op is safe and intentional
+ *  rather than a missing guard. */
 export function findIncompleteStages(slug: string, studio: string): string[] {
 	const intentFile = join(intentDir(slug), "intent.md")
 	const intent = existsSync(intentFile) ? readFrontmatter(intentFile) : {}

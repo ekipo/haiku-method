@@ -10,8 +10,8 @@ Run the full H·AI·K·U lifecycle autonomously from description to delivery. Au
 ## Process
 
 1. **If no active intent exists**, create one with `/haiku:start`, passing `mode: autopilot` to `haiku_intent_create`.
-2. **For an existing intent**, set the mode field: `haiku_intent_set { intent: "<slug>", field: "mode", value: "autopilot" }`. Do NOT set a separate `autopilot: true` boolean — that is a deprecated pattern.
-3. **Optional: skip the final intent review** by setting `skip_intent_completion_review: true` on intent.md frontmatter via `haiku_intent_set`. Do NOT set this unless the user explicitly wants truly headless completion; the completion review is the bookend that prevents silent intent-completion on stage-gate pass.
+2. **For an existing intent**, update the `mode:` line in `.haiku/intents/<slug>/intent.md` frontmatter to `mode: autopilot` via `haiku_human_write` (intent.md is a workflow-managed file; generic Edit/Write are blocked by the PreToolUse hook). Do NOT set a separate `autopilot: true` boolean — that is a deprecated pattern.
+3. **Optional: skip the final intent review** by setting `skip_intent_completion_review: true` on intent.md frontmatter via the same `haiku_human_write` path. Do NOT set this unless the user explicitly wants truly headless completion; the completion review is the bookend that prevents silent intent-completion on stage-gate pass.
 4. **Drive the loop** by calling `haiku_run_next { intent: "<slug>" }`. Repeat on every return. When a subagent returns, re-call `haiku_run_next` to advance.
 
 ## What still pauses autopilot

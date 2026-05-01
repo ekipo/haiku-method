@@ -17,7 +17,7 @@ import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
-import { getStageIterationCount, readJson } from "../../state-tools.js"
+import { getStageIterationCount, readJson, writeJson } from "../../state-tools.js"
 import { writeActionPromptFile } from "../../subagent-prompt-file.js"
 import { resolveIntentStages } from "../studio.js"
 import { type DerivedState, deriveCurrentState } from "./derive-state.js"
@@ -30,6 +30,7 @@ import { preTickConsistency } from "./pre-tick.js"
 import type { StateName } from "./types.js"
 import {
 	checkUpstreamReconciliation,
+	computeCorpusFingerprint,
 	type ReconciliationFinding,
 } from "./upstream-reconciliation.js"
 
@@ -290,8 +291,61 @@ function maybeUpstreamReconciliationGate(
 	}
 	if (priorStages.length === 0) return null
 
+	// Fingerprint short-circuit. Compare a SHA256 of the upstream corpus
+	// against the value last stamped on this stage's state.json.
+	//
+	//   - stored is null/undefined → silently establish: stamp the current
+	//     fingerprint and skip the detector pass entirely. This is the
+	//     migration / first-run path: existing intents that predate the
+	//     reconciliation gate (or this stage's first elaborate) will not
+	//     be flooded with findings about pre-existing upstream drift.
+	//   - stored equals current → corpus unchanged since last successful
+	//     scan or acknowledgment, skip the detector pass.
+	//   - stored differs → fall through to detectors below; if they emit
+	//     findings, fire the gate. If they emit none, stamp the new
+	//     fingerprint silently.
+	const currentFingerprint = computeCorpusFingerprint(slug, priorStages, root)
+	const stageStateFile = root
+		? join(root, "intents", slug, "stages", currentStage, "state.json")
+		: join(intentDirPath, "stages", currentStage, "state.json")
+	const storedFingerprint =
+		typeof stageState.upstream_reconciliation_fingerprint === "string"
+			? stageState.upstream_reconciliation_fingerprint
+			: null
+
+	const stampFingerprint = (fp: string | null): void => {
+		if (fp === null) return
+		// Mutate the in-memory stageState first so downstream handlers
+		// (e.g. the elaborate handler, which writes stageState back to
+		// state.json) carry the fingerprint forward instead of dropping
+		// it on a subsequent serialization. The on-disk write is a
+		// belt-and-suspenders second step in case the tick short-circuits
+		// before any other writer flushes state.json.
+		stageState.upstream_reconciliation_fingerprint = fp
+		try {
+			const ss = readJson(stageStateFile) as Record<string, unknown>
+			ss.upstream_reconciliation_fingerprint = fp
+			writeJson(stageStateFile, ss)
+		} catch {
+			// Non-fatal: next tick re-stamps on the next opportunity.
+		}
+	}
+
+	if (storedFingerprint === null) {
+		stampFingerprint(currentFingerprint)
+		return null
+	}
+	if (currentFingerprint !== null && storedFingerprint === currentFingerprint) {
+		return null
+	}
+
 	const result = checkUpstreamReconciliation(slug, priorStages, root)
-	if (!result || result.findings.length === 0) return null
+	if (!result || result.findings.length === 0) {
+		// Corpus changed but is now consistent — silently update the
+		// fingerprint so future ticks see the new clean state.
+		stampFingerprint(currentFingerprint)
+		return null
+	}
 
 	const body = renderReconciliationPrompt(slug, currentStage, result.findings)
 	let promptFile: string | null = null

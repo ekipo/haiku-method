@@ -88,9 +88,18 @@ export function preTickConsistency(
 		const incomplete = findIncompleteStages(slug, studio, root)
 		if (incomplete.length > 0) {
 			rewindFromCompletionReview(slug, incomplete[0], root)
-			gitCommitState(
-				`haiku: rewind ${slug} from completion-review — ${incomplete.length} stage(s) still pending`,
-			)
+			// gitCommitState walks up from cwd to find the git repo and
+			// commits there. Under test fixtures (root passed as a
+			// tmpdir override) the resolved repo is the parent project
+			// — running a commit there would scoop up whatever's dirty
+			// in the real working tree. Skip the commit when the caller
+			// passed an explicit root; the rewind is still observable
+			// on disk via the frontmatter changes.
+			if (!root) {
+				gitCommitState(
+					`haiku: rewind ${slug} from completion-review — ${incomplete.length} stage(s) still pending`,
+				)
+			}
 			emitTelemetry("haiku.workflow.completion_review_rewound", {
 				intent: slug,
 				incomplete_stages: incomplete.join(","),

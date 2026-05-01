@@ -22,8 +22,8 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { runWorkflowTick } = await import(
-	"../src/orchestrator/workflow/run-tick.ts"
+const { preTickConsistency } = await import(
+	"../src/orchestrator/workflow/pre-tick.ts"
 )
 const { rewindFromCompletionReview, completeOrReviewIntent } = await import(
 	"../src/orchestrator/workflow/side-effects.ts"
@@ -163,14 +163,11 @@ test("stale awaiting_completion_review with incomplete stages → rewinds before
 			development: completed("development"),
 		},
 	)
-	const result = runWorkflowTick("stuck", haikuRoot)
+	preTickConsistency("stuck", haikuRoot)
 	const fm = readIntent()
 	cleanup()
-	assert.ok(result, "tick returned an action")
-	// After rewind, derive-state sees active_stage=operations + no
-	// state.json → start_stage. We don't assert the exact emitted
-	// action shape (depends on studio gates / git availability under
-	// test fixtures); we DO assert the rewind happened on disk.
+	// preTickConsistency returns null on a silent rewind — the rewind
+	// effect is observed on disk, not in the return value.
 	assert.strictEqual(fm.status, "active")
 	assert.strictEqual(fm.active_stage, "operations")
 	assert.strictEqual(fm.phase || "", "")
@@ -199,7 +196,7 @@ test("awaiting_completion_review with all stages complete → no rewind", () => 
 			security: completed("security"),
 		},
 	)
-	runWorkflowTick("healthy", haikuRoot)
+	preTickConsistency("healthy", haikuRoot)
 	const fm = readIntent()
 	cleanup()
 	// Healthy intent — phase + markers should still be intact.
@@ -224,7 +221,7 @@ test("active phase (not awaiting_completion_review) → no rewind even with gaps
 			development: { stage: "development", status: "active", phase: "execute", started_at: "2026-04-30T00:00:00Z" },
 		},
 	)
-	runWorkflowTick("midflight", haikuRoot)
+	preTickConsistency("midflight", haikuRoot)
 	const fm = readIntent()
 	cleanup()
 	// Mid-flight intent — phase is "execute", not the stale-marker phase.

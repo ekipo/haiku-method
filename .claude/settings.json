@@ -5,15 +5,14 @@
     "HAIKU_AUTO_UPDATE": "0"
   },
   "enabledPlugins": {
-    "haiku@haiku": true,
     "core@han": true,
     "bushido@han": true
   },
   "extraKnownMarketplaces": {
-    "haiku": {
+    "haiku-dev": {
       "source": {
         "source": "directory",
-        "path": "./dev"
+        "path": "/Users/jwaldrip/dev/src/github.com/gigsmart/haiku-method/.claude/worktrees/linear-scribbling-scott"
       },
       "autoUpdate": false
     },

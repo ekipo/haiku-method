@@ -64,8 +64,8 @@ export const orchestratorToolDefs = [
 				mode: {
 					type: "string",
 					description:
-						"Execution mode: continuous (stages auto-advance) or discrete (pause between stages). Defaults to continuous.",
-					enum: ["continuous", "discrete"],
+						"Execution mode: continuous (stages auto-advance), discrete (pause between stages for external PR/MR review), or autopilot (like continuous but promotes `ask` gates to `auto` — no human stage-gate pauses). Defaults to continuous.",
+					enum: ["continuous", "discrete", "autopilot"],
 				},
 				stages: {
 					type: "array",

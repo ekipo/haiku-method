@@ -8443,9 +8443,9 @@ export function handleStateTool(
 				out += `- Active Stage: ${data.active_stage || "none"}\n`
 				out += `- Mode: ${data.mode || "interactive"}\n`
 
-				const isDiscrete =
-					(data.mode as string) === "discrete" ||
-					(data.mode as string) === "hybrid"
+				// `discrete-hybrid` is a virtual/derived state — never stored on
+				// intent.md. The only stored discrete mode is `"discrete"`.
+				const isDiscrete = (data.mode as string) === "discrete"
 
 				const stagesPath = join(intentsDir, slug, "stages")
 				if (existsSync(stagesPath)) {

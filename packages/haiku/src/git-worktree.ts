@@ -696,7 +696,8 @@ export function mergeStageBranchIntoMain(
 }
 
 /**
- * Consolidate discrete stage branches into haiku/{slug}/main for hybrid mode.
+ * Consolidate discrete stage branches into haiku/{slug}/main.
+ * Used for orphan discrete intents that have per-stage branches but no main.
  * Creates the main branch from the last stage branch.
  * Returns the main branch name.
  */

@@ -103,9 +103,10 @@ export interface ManualChangeAssessmentCtx {
 	 *  unique tick_id the classify tool can validate for freshness. */
 	readonly tickCounter: number
 	/** Intent operating mode — copied through to the action so the SPA
-	 *  drift-assessment view can render mode-aware context. Values per
-	 *  DATA-CONTRACTS.md §2.3: continuous, discrete, hybrid, or any
-	 *  caller-specified string (interactive/pickup/autopilot in tests). */
+	 *  drift-assessment view can render mode-aware context. Stored values:
+	 *  `continuous`, `discrete`, `autopilot`. `discrete-hybrid` is a
+	 *  derived/virtual state never stored on intent.md. Tests may pass
+	 *  additional strings (e.g. "interactive", "pickup"). */
 	readonly mode: string
 }
 

@@ -508,15 +508,25 @@ const emit: WorkflowHandler = (ctx) => {
 	}
 
 	const rawReviewType = resolveStageReview(studio, currentStage)
-	const autopilot = intent.autopilot === true
 	const intentMode = (intent.mode as string) || "continuous"
-	// Note: `hybrid` mode intentionally does NOT inherit discrete's
-	// external-review coercion. `state-tools.ts:7836` (dashboard branch
-	// listing) treats hybrid as discrete-shaped for branch topology, but
-	// the gate handler treats them differently because hybrid is "discrete
-	// where it matters, continuous elsewhere" — per-stage PRs aren't a
-	// universal requirement. If hybrid ever needs gate enforcement, add
-	// it here explicitly rather than redefining `isDiscrete`.
+	// `autopilot` is one of the three stored intent modes (discrete |
+	// continuous | autopilot). It is NOT a separate boolean field —
+	// derive it purely from `intent.mode`. Legacy intent.md files that
+	// still carry an `autopilot: true` boolean must be migrated to
+	// `mode: autopilot` (remove the boolean, set the mode field).
+	// In autopilot mode the gate
+	// handler promotes `ask` gates to `auto`, letting the workflow
+	// advance without human intervention. External gates and `await`
+	// gates still block — they require real external signals.
+	//
+	// `discrete-hybrid` is a DERIVED/VIRTUAL state (not stored). It
+	// represents continuous mode where some stages need discrete-shaped
+	// treatment (e.g., stages with external gates declared). It is NOT
+	// a settable mode value. If the engine ever needs to compute
+	// discrete-hybrid behavior, it should derive it from
+	// `intentMode === "continuous" && <some per-stage condition>` rather
+	// than reading a stored field.
+	const autopilot = intentMode === "autopilot"
 	const isDiscrete = intentMode === "discrete"
 
 	// Discrete-mode contract: every stage gate MUST open an external

@@ -5,13 +5,13 @@ description: Full autonomous workflow — elaborate, plan, build, review, and de
 
 # Autopilot
 
-Run the full H·AI·K·U lifecycle autonomously from description to delivery. Autopilot is an intent-level flag (not a mode) — it tells the workflow engine to promote `ask` review gates to `auto`, so the lifecycle advances without human intervention on stage gates. External gates and the intent-completion review still pause (structural signals the workflow engine can't synthesize).
+Run the full H·AI·K·U lifecycle autonomously from description to delivery. Autopilot is one of the three intent modes (`discrete | continuous | autopilot`). It tells the workflow engine to promote `ask` review gates to `auto`, so the lifecycle advances without human intervention on stage gates. External gates and the intent-completion review still pause (structural signals the workflow engine can't synthesize).
 
 ## Process
 
-1. **If no active intent exists**, create one with `/haiku:start`.
-2. **Enable autopilot** by direct-editing `intent.md` frontmatter to set `autopilot: true`. Leave `mode` as-is (`continuous` / `discrete` / `hybrid`) — autopilot is an independent dimension from mode.
-3. **Optional: skip the final intent review** by setting `skip_intent_completion_review: true` on intent.md frontmatter. Do NOT set this unless the user explicitly wants truly headless completion; the completion review is the bookend that prevents silent intent-completion on stage-gate pass.
+1. **If no active intent exists**, create one with `/haiku:start`, passing `mode: autopilot` to `haiku_intent_create`.
+2. **For an existing intent**, set the mode field: `haiku_intent_set { intent: "<slug>", field: "mode", value: "autopilot" }`. Do NOT set a separate `autopilot: true` boolean — that is a deprecated pattern.
+3. **Optional: skip the final intent review** by setting `skip_intent_completion_review: true` on intent.md frontmatter via `haiku_intent_set`. Do NOT set this unless the user explicitly wants truly headless completion; the completion review is the bookend that prevents silent intent-completion on stage-gate pass.
 4. **Drive the loop** by calling `haiku_run_next { intent: "<slug>" }`. Repeat on every return. When a subagent returns, re-call `haiku_run_next` to advance.
 
 ## What still pauses autopilot
@@ -31,5 +31,5 @@ Run the full H·AI·K·U lifecycle autonomously from description to delivery. Au
 
 ## Combined with other skills
 
-- `/haiku:quick` + autopilot: edit `stages: [<one>]` AND `autopilot: true`. Single-stage, no pauses except external/completion gates.
+- `/haiku:quick` + autopilot: set `stages: [<one>]` AND `mode: autopilot`. Single-stage, no pauses except external/completion gates.
 - `/haiku:revisit` while in autopilot: the revisit action itself pauses autopilot until the user confirms the revisit target.

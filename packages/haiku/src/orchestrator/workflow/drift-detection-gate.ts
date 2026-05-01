@@ -49,7 +49,7 @@ import {
 	findOpenMarker,
 	isStaleMarker,
 	readMarkers,
-	removeMarker,
+	removeMarkersSync,
 } from "./drift-markers.js"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -598,11 +598,19 @@ export function runDriftDetectionGate(
 		})
 	}
 
-	// Remove stale markers (fire-and-forget, non-blocking).
-	for (const pathRel of staleMarkerPaths) {
-		removeMarker(intentDir, pathRel).catch(() => {
-			// Non-fatal: the stale marker will be detected again on the next tick.
-		})
+	// Remove stale markers in one synchronous batch write. The earlier
+	// fire-and-forget loop raced with subsequent ticks: rapid successive
+	// runs would re-detect the same stale marker before the async removal
+	// landed and dispatch a duplicate `manual_change_assessment` for the
+	// same file. Sync + dedup eliminates both windows.
+	if (staleMarkerPaths.length > 0) {
+		try {
+			removeMarkersSync(intentDir, staleMarkerPaths)
+		} catch {
+			// Non-fatal: the stale markers will be detected again on the next
+			// tick. The marker store write is best-effort here — the dispatch
+			// has already been recorded for the agent to act on.
+		}
 	}
 
 	// 8. Check for baseline entries whose files no longer exist (AC-EE2).

@@ -11,5 +11,5 @@
  * directly; this file exists for output-tracking continuity only.
  */
 
-export { StageReview } from "./stage/StageReview"
 export type { StageReviewProps } from "./stage/StageReview"
+export { StageReview } from "./stage/StageReview"

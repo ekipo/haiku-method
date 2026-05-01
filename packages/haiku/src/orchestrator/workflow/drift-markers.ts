@@ -23,7 +23,14 @@
 // (plus the existing zod already in packages/haiku).
 
 import { randomBytes } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs"
 import { rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { z } from "zod"
@@ -200,6 +207,37 @@ export async function writeMarkers(
 	}
 }
 
+/** Synchronous mirror of `writeMarkers` — atomic tempfile + renameSync into
+ *  place. Used by the synchronous gate context (see `removeMarkerSync` /
+ *  `removeMarkersSync`) to avoid fire-and-forget races where rapid successive
+ *  ticks re-detect the same stale marker before the async removal completes. */
+export function writeMarkersSync(intentDir: string, store: MarkerStore): void {
+	const targetPath = markersPath(intentDir)
+	const targetDir = dirname(targetPath)
+
+	mkdirSync(targetDir, { recursive: true })
+
+	const diskObj = { markers: store.markers }
+	const json = `${JSON.stringify(diskObj, null, 2)}\n`
+
+	const tmpPath = join(
+		targetDir,
+		`.drift-markers-${process.pid}-${randomBytes(6).toString("hex")}.json.tmp`,
+	)
+
+	try {
+		writeFileSync(tmpPath, json, "utf-8")
+		renameSync(tmpPath, targetPath)
+	} catch (err) {
+		try {
+			unlinkSync(tmpPath)
+		} catch {
+			/* tempfile already gone or never created */
+		}
+		throw err
+	}
+}
+
 // ── Append ─────────────────────────────────────────────────────────────────
 
 /** Read → validate → append → write.
@@ -345,4 +383,23 @@ export async function removeMarker(
 		return
 	}
 	await writeMarkers(intentDir, { markers: filtered })
+}
+
+/** Synchronous batch-remove of open markers for the given paths. Single
+ *  read + single atomic write — preferred over fire-and-forget calls to
+ *  `removeMarker` from the synchronous gate, which raced with subsequent
+ *  ticks and re-emitted duplicate `manual_change_assessment` dispatches
+ *  for the same file. No-op if no open marker matches any provided path. */
+export function removeMarkersSync(
+	intentDir: string,
+	pathRels: readonly string[],
+): void {
+	if (pathRels.length === 0) return
+	const targetPaths = new Set(pathRels)
+	const store = readMarkers(intentDir)
+	const filtered = store.markers.filter(
+		(m) => !(targetPaths.has(m.path) && m.cleared_at === null),
+	)
+	if (filtered.length === store.markers.length) return
+	writeMarkersSync(intentDir, { markers: filtered })
 }

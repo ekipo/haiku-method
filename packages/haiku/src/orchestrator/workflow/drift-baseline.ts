@@ -457,12 +457,31 @@ export function updateBaselineEntry(
 
 // ── Sync helpers for use in synchronous gate context ──────────────────────
 
-/** Synchronous SHA-256 computation. Reads the full file into a buffer.
- *  Only used by the drift-detection gate which runs in a synchronous
- *  tick context. For async callers prefer `computeFileSha256`. */
+/** Chunk size for the streaming sync SHA-256 read. 64 KiB matches Node's
+ *  default high-water mark for fs streams and keeps per-file memory
+ *  bounded regardless of artifact size. */
+const SHA256_SYNC_CHUNK_BYTES = 64 * 1024
+
+/** Synchronous SHA-256 computation. Streams the file in fixed-size chunks
+ *  (`SHA256_SYNC_CHUNK_BYTES`) via openSync/readSync so memory use stays
+ *  bounded even on multi-MB artifacts (the drift-detection gate hashes
+ *  every tracked file on every tick — image-heavy stages would otherwise
+ *  load 50+ MB binaries fully into memory each pass). For async callers
+ *  prefer the streaming `computeFileSha256`. */
 export function computeFileSha256Sync(absolutePath: string): string {
-	const buf = readFileSync(absolutePath)
-	return createHash("sha256").update(buf).digest("hex")
+	const hash = createHash("sha256")
+	const buf = Buffer.allocUnsafe(SHA256_SYNC_CHUNK_BYTES)
+	const fd = openSync(absolutePath, "r")
+	try {
+		while (true) {
+			const bytesRead = readSync(fd, buf, 0, SHA256_SYNC_CHUNK_BYTES, null)
+			if (bytesRead === 0) break
+			hash.update(bytesRead === buf.length ? buf : buf.subarray(0, bytesRead))
+		}
+	} finally {
+		closeSync(fd)
+	}
+	return hash.digest("hex")
 }
 
 /** Synchronous binary-detection heuristic. Mirror of the async `isBinary`

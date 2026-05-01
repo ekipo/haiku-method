@@ -36,7 +36,9 @@ const {
 	isStaleMarker,
 	readMarkers,
 	removeMarker,
+	removeMarkersSync,
 	writeMarkers,
+	writeMarkersSync,
 } = await import("../src/orchestrator/workflow/drift-markers.ts")
 
 let passed = 0
@@ -572,6 +574,103 @@ await test("removeMarker is a no-op when no open marker exists for the path", as
 	assert.strictEqual(threw, false, "removeMarker should not throw")
 	const store = readMarkers(intentDir)
 	assert.strictEqual(store.markers.length, 1, "closed marker should remain")
+})
+
+console.log("\n=== removeMarkersSync ===")
+
+await test("removeMarkersSync batch-removes open markers for multiple paths in one write", async () => {
+	const intentDir = makeDir("remove-sync-batch")
+	const openA = makeMarker({
+		path: "stages/design/artifacts/a.html",
+		cleared_at: null,
+		created_by_assessment_id: "AS-A1",
+	})
+	const openB = makeMarker({
+		path: "stages/design/artifacts/b.html",
+		cleared_at: null,
+		created_by_assessment_id: "AS-B1",
+	})
+	const openC = makeMarker({
+		path: "stages/design/artifacts/c.html",
+		cleared_at: null,
+		created_by_assessment_id: "AS-C1",
+	})
+	await writeMarkers(intentDir, { markers: [openA, openB, openC] })
+
+	removeMarkersSync(intentDir, [
+		"stages/design/artifacts/a.html",
+		"stages/design/artifacts/c.html",
+	])
+
+	const store = readMarkers(intentDir)
+	const remaining = store.markers.map((m) => m.path)
+	assert.deepStrictEqual(
+		remaining.sort(),
+		["stages/design/artifacts/b.html"],
+		"only path B should remain open after batch removal",
+	)
+})
+
+await test("removeMarkersSync no-op for empty input", () => {
+	const intentDir = makeDir("remove-sync-empty")
+	const open = makeMarker({
+		cleared_at: null,
+		created_by_assessment_id: "AS-X",
+	})
+	writeMarkersSync(intentDir, { markers: [open] })
+
+	removeMarkersSync(intentDir, [])
+
+	const store = readMarkers(intentDir)
+	assert.strictEqual(
+		store.markers.length,
+		1,
+		"no markers should be removed on empty input",
+	)
+})
+
+await test("removeMarkersSync no-op when no path matches", () => {
+	const intentDir = makeDir("remove-sync-nomatch")
+	const open = makeMarker({
+		path: "stages/design/artifacts/exists.html",
+		cleared_at: null,
+		created_by_assessment_id: "AS-Y",
+	})
+	writeMarkersSync(intentDir, { markers: [open] })
+
+	removeMarkersSync(intentDir, ["stages/design/artifacts/missing.html"])
+
+	const store = readMarkers(intentDir)
+	assert.strictEqual(
+		store.markers.length,
+		1,
+		"non-matching path should leave store unchanged",
+	)
+})
+
+await test("removeMarkersSync preserves closed markers for the same path", () => {
+	const intentDir = makeDir("remove-sync-closed")
+	const path = "stages/design/artifacts/hero.html"
+	const openM = makeMarker({
+		path,
+		cleared_at: null,
+		created_by_assessment_id: "AS-OPEN",
+	})
+	const closedM = makeMarker({
+		path,
+		cleared_at: "2026-04-28T11:00:00Z",
+		resolved_sha: "m".repeat(64),
+		created_by_assessment_id: "AS-CLOSED",
+	})
+	writeMarkersSync(intentDir, { markers: [openM, closedM] })
+
+	removeMarkersSync(intentDir, [path])
+
+	const store = readMarkers(intentDir)
+	const open = store.markers.filter((m) => m.cleared_at === null)
+	const closed = store.markers.filter((m) => m.cleared_at !== null)
+	assert.strictEqual(open.length, 0, "open marker should be removed")
+	assert.strictEqual(closed.length, 1, "closed marker should be preserved")
 })
 
 // ── Cleanup + summary ──────────────────────────────────────────────────────

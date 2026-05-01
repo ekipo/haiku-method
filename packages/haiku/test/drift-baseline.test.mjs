@@ -38,6 +38,7 @@ const {
 	BaselineCorruptError,
 	canonicalisePath,
 	computeFileSha256,
+	computeFileSha256Sync,
 	enumerateTrackedSurface,
 	isBinary,
 	readBaseline,
@@ -540,6 +541,45 @@ test("returns new map with existing entry updated; does not mutate input", () =>
 		baseline.entries.get(original.path)?.sha256,
 		"a".repeat(64),
 	)
+})
+
+test("computeFileSha256Sync streams large files in fixed-size chunks; matches whole-file digest", async () => {
+	// Build a payload larger than the 64 KiB chunk size to verify the
+	// streaming loop concatenates chunks correctly. Use a deterministic
+	// repeating pattern so the expected digest is stable.
+	const chunkBytes = 64 * 1024
+	const payloadSize = chunkBytes * 3 + 137 // 3 full chunks + a partial tail
+	const pattern = Buffer.from(
+		"the quick brown fox jumps over the lazy dog\n",
+		"utf-8",
+	)
+	const payload = Buffer.alloc(payloadSize)
+	for (let i = 0; i < payloadSize; i++) {
+		payload[i] = pattern[i % pattern.length]
+	}
+
+	const filePath = join(tmp, "sha256-stream-fixture.bin")
+	writeFileSync(filePath, payload)
+
+	const expected = createHash("sha256").update(payload).digest("hex")
+	const actual = computeFileSha256Sync(filePath)
+	assert.strictEqual(
+		actual,
+		expected,
+		"sync streaming digest must match whole-file digest",
+	)
+
+	// Cross-check: the async streaming counterpart returns the same value
+	// for the same payload (round-trip equivalence).
+	const asyncDigest = await computeFileSha256(filePath)
+	assert.strictEqual(asyncDigest, expected, "async/sync digests must agree")
+})
+
+test("computeFileSha256Sync handles empty files", () => {
+	const filePath = join(tmp, "sha256-empty.bin")
+	writeFileSync(filePath, Buffer.alloc(0))
+	const expected = createHash("sha256").update(Buffer.alloc(0)).digest("hex")
+	assert.strictEqual(computeFileSha256Sync(filePath), expected)
 })
 
 // ── Cleanup + summary ──────────────────────────────────────────────────────

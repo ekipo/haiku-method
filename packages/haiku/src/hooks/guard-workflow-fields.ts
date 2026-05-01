@@ -31,7 +31,7 @@ function out(s: string): void {
 }
 
 interface WorkflowPathClassification {
-	kind: "unit" | "feedback" | "intent" | "stage_state" | null
+	kind: "unit" | "feedback" | "intent" | "stage_state" | "settings" | null
 	intent?: string
 	stage?: string
 	name?: string // unit name or feedback id (without .md)
@@ -69,6 +69,12 @@ function classifyPath(absPath: string): WorkflowPathClassification {
 	}
 	if (/\.haiku\/intents\/[^/]+\/stages\/[^/]+\/state\.json$/.test(absPath)) {
 		return { kind: "stage_state" }
+	}
+	// `.haiku/settings.yml` (project root config) — and anchor on the
+	// trailing segment to avoid false positives on `.haiku/intents/<x>/settings.yml`
+	// or unrelated paths that happen to contain "settings.yml".
+	if (/(?:^|\/)\.haiku\/settings\.yml$/.test(absPath)) {
+		return { kind: "settings" }
 	}
 	return { kind: null }
 }
@@ -138,6 +144,19 @@ function redirectMessage(
 			`is workflow engine-internal — every legitimate write happens via haiku_run_next or a ` +
 			`dedicated MCP tool. Hand-editing breaks the integrity checksum and the ` +
 			`forward-only lifecycle invariants.`
+		)
+	}
+	if (cls.kind === "settings") {
+		const tool =
+			op === "read"
+				? `haiku_settings_get { field: "..." }`
+				: `haiku_settings_set { field: "...", value: ... }`
+		return (
+			`BLOCKED: Cannot ${op} .haiku/settings.yml via generic ${toolName}. Settings ` +
+			`are schema-managed against plugin/schemas/settings.schema.json — use the MCP tool instead:\n` +
+			`  ${tool}\n` +
+			`Generic file access skips schema validation and can drop settings into a shape ` +
+			`the engine refuses to load.`
 		)
 	}
 	return ""

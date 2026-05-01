@@ -353,13 +353,20 @@ function workflowFinalizeStageIntoIntentMain(
  *  performs its own completion check (`allComplete`) over `compositeState`
  *  before calling `completeOrReviewIntent`, so the no-op is safe and intentional
  *  rather than a missing guard. */
-export function findIncompleteStages(slug: string, studio: string): string[] {
-	const intentFile = join(intentDir(slug), "intent.md")
+export function findIncompleteStages(
+	slug: string,
+	studio: string,
+	root?: string,
+): string[] {
+	const iDir = root ? join(root, "intents", slug) : intentDir(slug)
+	const intentFile = join(iDir, "intent.md")
 	const intent = existsSync(intentFile) ? readFrontmatter(intentFile) : {}
 	const stages = resolveIntentStages(intent, studio)
 	const incomplete: string[] = []
 	for (const stage of stages) {
-		const statePath = stageStatePath(slug, stage)
+		const statePath = root
+			? join(iDir, "stages", stage, "state.json")
+			: stageStatePath(slug, stage)
 		if (!existsSync(statePath)) {
 			incomplete.push(stage)
 			continue
@@ -372,6 +379,39 @@ export function findIncompleteStages(slug: string, studio: string): string[] {
 	return incomplete
 }
 
+/** Roll back an intent that's stuck in completion-review phase with
+ *  incomplete stages still on disk. Called from `completeOrReviewIntent`
+ *  (when the guard fails on a fresh approach) and from `pre-tick`
+ *  (when a stale completion-review marker is detected before any handler
+ *  runs). Idempotent — calling it on a healthy intent is a no-op.
+ *
+ *  Resets every workflow-tracked completion field plus `status` and
+ *  `active_stage`, then re-seals the integrity checksum. The first
+ *  incomplete stage becomes the new `active_stage` so the next tick
+ *  routes through `start_stage` instead of looping back into
+ *  `awaiting_completion_review`. */
+export function rewindFromCompletionReview(
+	slug: string,
+	firstIncomplete: string,
+	root?: string,
+): void {
+	const iDir = root ? join(root, "intents", slug) : intentDir(slug)
+	const intentFile = join(iDir, "intent.md")
+	if (!existsSync(intentFile)) return
+	setFrontmatterField(intentFile, "status", "active")
+	setFrontmatterField(intentFile, "active_stage", firstIncomplete)
+	setFrontmatterField(intentFile, "phase", "")
+	setFrontmatterField(intentFile, "completed_at", "")
+	setFrontmatterField(intentFile, "completion_review_entered_at", "")
+	setFrontmatterField(intentFile, "completion_review_dispatched", false)
+	setFrontmatterField(intentFile, "completion_review_skipped", false)
+	setFrontmatterField(intentFile, "completion_review_dispatched_at", "")
+	// sealIntentState always reads from findHaikuRoot() — no-op under
+	// test fixtures rooted in tmpdir. That's fine; the integrity seal
+	// only matters for hookless harnesses in production deployments.
+	sealIntentState(slug)
+}
+
 /** Shared completion path used by every gate-pass site that used to
  *  call workflowIntentComplete + return intent_complete directly.
  *  Returns the correct action for the current opt-in/opt-out state:
@@ -382,8 +422,9 @@ export function findIncompleteStages(slug: string, studio: string): string[] {
  *  `resolveIntentStages(intent, studio)` has a completed `state.json`.
  *  If any stage is missing or non-completed, returns an error action
  *  pointing at the first incomplete stage instead of sealing the intent.
- *  This prevents the engine from marking an intent complete when upstream
- *  stages were skipped, manually cleared, or never ran.
+ *  Also rewinds the completion-review marker fields so the next tick
+ *  routes through `start_stage` for the first incomplete stage instead
+ *  of looping back into `awaiting_completion_review`.
  *
  *  This decouples stage-gate approval from intent completion. Stages
  *  approving (auto or otherwise) must NEVER by themselves mark an
@@ -402,6 +443,7 @@ export function completeOrReviewIntent(
 	// to the first incomplete stage so the user sees what's missing.
 	const incompleteStages = findIncompleteStages(slug, studio)
 	if (incompleteStages.length > 0) {
+		rewindFromCompletionReview(slug, incompleteStages[0])
 		emitTelemetry("haiku.intent.completion_guard_failed", {
 			intent: slug,
 			studio,
@@ -413,8 +455,8 @@ export function completeOrReviewIntent(
 			message:
 				`Cannot complete intent '${slug}': ${incompleteStages.length} stage(s) are not yet completed: ` +
 				`[${incompleteStages.join(", ")}]. ` +
-				`The intent has been marked active again so these stages can run. ` +
-				`Set \`active_stage\` to '${incompleteStages[0]}' and call \`haiku_run_next { intent: "${slug}" }\` to resume.`,
+				`Reset active_stage to '${incompleteStages[0]}' and cleared completion-review markers. ` +
+				`Call \`haiku_run_next { intent: "${slug}" }\` to resume.`,
 		}
 	}
 

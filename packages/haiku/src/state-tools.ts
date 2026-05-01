@@ -3176,6 +3176,182 @@ export const CREATE_TIME_FB_FIELDS = [
 	"inline_anchor",
 ] as const
 
+// ── Intent frontmatter — SCHEMA IS THE SSOT ───────────────────────────────
+//
+// Mirrors plugin/schemas/intent.schema.json. AJV-validated when an agent
+// calls haiku_intent_set; the `propertyNames.not.enum` list rejects
+// engine-only fields the workflow engine owns (status, active_stage,
+// phase, completion_review_*, completed_at, etc).
+//
+// This is parallel to UNIT_FRONTMATTER_SCHEMA — same SSOT pattern.
+
+export const INTENT_FRONTMATTER_SCHEMA = {
+	type: "object",
+	properties: {
+		title: { type: "string", minLength: 1 },
+		mode: {
+			type: "string",
+			enum: ["continuous", "discrete", "autopilot", "discrete-hybrid"],
+		},
+		skip_stages: { type: "array", items: { type: "string" } },
+		intent_completion_review: { type: "boolean" },
+		// `studio` is set on creation by haiku_select_studio and is
+		// immutable thereafter — accepted by AJV (so tests building
+		// fixtures don't fail) but rejected by the haiku_intent_set
+		// handler with a dedicated `intent_field_immutable` code.
+		studio: { type: "string" },
+	},
+	propertyNames: {
+		not: {
+			enum: [
+				// Engine-managed lifecycle fields
+				"status",
+				"active_stage",
+				"phase",
+				"started_at",
+				"completed_at",
+				"created_at",
+				// Completion-review state machine
+				"completion_review_dispatched",
+				"completion_review_skipped",
+				"completion_review_entered_at",
+				"completion_review_dispatched_at",
+				// Engine-derived collections
+				"stages",
+				"composite",
+				"intent_reviewed",
+				// Archive lifecycle (toggle via haiku_intent_archive / _unarchive)
+				"archived",
+				"archived_at",
+				// Parent-link (creation-time only)
+				"follows",
+				// Legacy alias for mode
+				"autopilot",
+			],
+		},
+	},
+	additionalProperties: true,
+}
+
+const validateIntentSchema = ajv.compile(INTENT_FRONTMATTER_SCHEMA)
+
+export const AGENT_AUTHORABLE_INTENT_FIELDS = Object.keys(
+	INTENT_FRONTMATTER_SCHEMA.properties,
+) as ReadonlyArray<string>
+
+export const FSM_DRIVEN_INTENT_FIELDS = INTENT_FRONTMATTER_SCHEMA.propertyNames
+	.not.enum as ReadonlyArray<string>
+
+const INTENT_IMMUTABLE_FIELDS: ReadonlyArray<string> = ["studio"]
+
+// ── Stage state.json — SCHEMA IS THE SSOT ─────────────────────────────────
+//
+// Mirrors plugin/schemas/stage.schema.json. Stage state is entirely
+// engine-managed — there are no agent-authorable fields. The schema
+// exists so haiku_stage_set can reject every call with a clear
+// `stage_field_engine_only` code instead of silently accepting writes
+// that bypass workflow lifecycle invariants. The handler validates
+// structure before writing so future engine-internal callers (or
+// careful manual recovery flows) get type-safety.
+
+export const STAGE_STATE_SCHEMA = {
+	type: "object",
+	properties: {
+		stage: { type: "string" },
+		status: {
+			type: "string",
+			enum: ["pending", "active", "completed", "blocked"],
+		},
+		phase: {
+			type: "string",
+			enum: ["", "elaborate", "execute", "review", "gate"],
+		},
+		started_at: { type: ["string", "null"] },
+		completed_at: { type: ["string", "null"] },
+		gate_entered_at: { type: ["string", "null"] },
+		gate_outcome: { type: ["string", "null"] },
+		visits: { type: "integer", minimum: 0 },
+		iterations: { type: "array" },
+		elaboration_turns: { type: "integer", minimum: 0 },
+		decision_log: { type: "array" },
+	},
+	additionalProperties: true,
+}
+
+const validateStageSchema = ajv.compile(STAGE_STATE_SCHEMA)
+
+export const STAGE_STATE_FIELDS = Object.keys(
+	STAGE_STATE_SCHEMA.properties,
+) as ReadonlyArray<string>
+
+// ── Settings.yml — schema loaded from plugin/schemas/settings.schema.json ─
+//
+// settings.schema.json uses `$ref: "providers/<name>.schema.json"` to
+// pull in per-provider config shapes. AJV's compiler resolves refs by
+// $id, so all referenced schemas have to be added BEFORE compile.
+// `validateSettingsCandidate` lazy-loads everything in plugin/schemas/
+// (settings + providers + state) on first call and reuses the compiled
+// validator on subsequent calls.
+
+import { readdirSync as _readdirSyncForSchema } from "node:fs"
+
+let _validateSettingsCandidate: ((data: unknown) => boolean) | null = null
+let _validateSettingsErrors: (() => unknown[]) | null = null
+function validateSettingsCandidate(data: unknown): boolean {
+	if (!_validateSettingsCandidate) {
+		// Build a fresh AJV instance keyed on the provider $refs the
+		// settings schema declares. Reusing the package-global `ajv`
+		// would pollute that instance with provider schemas every
+		// other validator already compiles fine without.
+		const settingsAjv = new Ajv({
+			allErrors: true,
+			strict: false,
+			// Refs resolve relative to the file location, not the $id —
+			// the settings.schema.json $id is a public URL but the refs
+			// are filesystem-relative. addSchema with key=filename lets
+			// AJV match them.
+		})
+		const pluginRoot = resolvePluginRoot()
+		const providersDir = join(pluginRoot, "schemas", "providers")
+		// Settings schema $id is `https://haiku.dev/schemas/haiku-settings.schema.json`,
+		// and refs are `providers/<name>.schema.json` (relative). AJV
+		// resolves them against the parent $id, producing
+		// `https://haiku.dev/schemas/providers/<name>.schema.json`.
+		// Provider schemas declare a different $id
+		// (`https://haikumethod.ai/...`), so we have to register them
+		// under the URI the resolver will look up. Drop the inner $id
+		// so AJV doesn't refuse the registration as a duplicate.
+		if (existsSync(providersDir)) {
+			const SETTINGS_BASE = "https://haiku.dev/schemas/"
+			for (const f of _readdirSyncForSchema(providersDir)) {
+				if (!f.endsWith(".schema.json")) continue
+				try {
+					const sub = JSON.parse(
+						readFileSync(join(providersDir, f), "utf8"),
+					) as Record<string, unknown>
+					sub.$id = `${SETTINGS_BASE}providers/${f}`
+					settingsAjv.addSchema(sub)
+				} catch {
+					/* skip malformed schemas — non-fatal */
+				}
+			}
+		}
+		const settingsPath = join(pluginRoot, "schemas", "settings.schema.json")
+		const settingsSchema: Record<string, unknown> = existsSync(settingsPath)
+			? JSON.parse(readFileSync(settingsPath, "utf8"))
+			: { type: "object", additionalProperties: true }
+		const validator = settingsAjv.compile(settingsSchema)
+		_validateSettingsCandidate = validator as unknown as (
+			d: unknown,
+		) => boolean
+		_validateSettingsErrors = () => validator.errors as unknown[]
+	}
+	return _validateSettingsCandidate(data)
+}
+function settingsValidationErrors(): unknown[] {
+	return _validateSettingsErrors ? _validateSettingsErrors() : []
+}
+
 // ── Output schema fragments (reused across tool defs) ─────────────────────
 //
 // Per MCP spec 2025-06-18 §Tool Result, when a tool declares an
@@ -5836,6 +6012,98 @@ Forbidden FM fields (workflow-driven, mutating these returns \`fsm_field_forbidd
 			required: ["found", "field"],
 		},
 	},
+	{
+		name: "haiku_settings_set",
+		description:
+			"Set a top-level field in .haiku/settings.yml. Validated against plugin/schemas/settings.schema.json. Pass `null` to delete a field. Use this instead of editing the file directly — Edit/Write/MultiEdit on .haiku/settings.yml is denied by the workflow-fields hook.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				field: {
+					type: "string",
+					description:
+						"Top-level field name (e.g. 'studio', 'mockup_format', 'visual_review'). Nested paths are not supported — pass the whole top-level object to replace it.",
+				},
+				value: {
+					type: ["string", "array", "number", "boolean", "null", "object"],
+					description:
+						"New value. Must validate against the field's declared shape in settings.schema.json. Pass null to delete the field.",
+				},
+			},
+			required: ["field", "value"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				field: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_intent_set",
+		description: `Set a frontmatter field on an intent's intent.md. Validated against INTENT_FRONTMATTER_SCHEMA. Agent-authorable fields: ${AGENT_AUTHORABLE_INTENT_FIELDS.join(", ")} (note 'studio' is immutable post-creation). Engine-only fields (${FSM_DRIVEN_INTENT_FIELDS.join(", ")}) are rejected — those are mutated by the workflow engine itself. Use this instead of editing intent.md directly — Edit/Write/MultiEdit on intent.md is denied by the workflow-fields hook.`,
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				field: {
+					type: "string",
+					description: `Frontmatter field name. Allowed: ${AGENT_AUTHORABLE_INTENT_FIELDS.filter((f) => !INTENT_IMMUTABLE_FIELDS.includes(f)).join(", ")}.`,
+				},
+				value: {
+					type: ["string", "array", "number", "boolean", "null", "object"],
+					description:
+						"New value. Must match the field's declared type in INTENT_FRONTMATTER_SCHEMA. Mismatches return `intent_field_type_mismatch`.",
+				},
+			},
+			required: ["intent", "field", "value"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				intent: { type: "string" },
+				field: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
+	{
+		name: "haiku_stage_set",
+		description:
+			"Set a field on a stage's state.json. Engine-internal — every field in STAGE_STATE_SCHEMA is workflow-managed (status, phase, started_at, completed_at, gate_entered_at, gate_outcome, visits, iterations, etc). Agent calls are rejected with `stage_field_engine_only`. Reserved for future engine-internal routing and operator break-glass paths.",
+		inputSchema: {
+			type: "object" as const,
+			properties: {
+				intent: { type: "string" },
+				stage: { type: "string" },
+				field: {
+					type: "string",
+					description: `Stage state field. Every field is engine-managed; agent calls are rejected. Schema fields: ${STAGE_STATE_FIELDS.join(", ")}.`,
+				},
+				value: {
+					type: ["string", "array", "number", "boolean", "null", "object"],
+					description: "New value. Must match the field's declared type.",
+				},
+			},
+			required: ["intent", "stage", "field", "value"],
+		},
+		outputSchema: {
+			type: "object",
+			properties: {
+				ok: { type: "boolean" },
+				intent: { type: "string" },
+				stage: { type: "string" },
+				field: { type: "string" },
+				message: { type: "string" },
+				error: { type: "string" },
+			},
+		},
+	},
 	// Aggregate / report tools
 	{
 		name: "haiku_dashboard",
@@ -8419,6 +8687,162 @@ export function handleStateTool(
 				field,
 				value: val == null ? null : (val as unknown),
 			})
+		}
+
+		case "haiku_settings_set": {
+			const field = args.field as string
+			const value = args.value as unknown
+			const errOut = (error: string, message: string) =>
+				reply({ error, field, message }, { isError: true })
+			if (!field || typeof field !== "string") {
+				return errOut("settings_field_required", "`field` is required")
+			}
+			let settingsPath = ""
+			try {
+				settingsPath = join(findHaikuRoot(), "settings.yml")
+			} catch (err) {
+				return errOut(
+					"haiku_root_not_found",
+					`No .haiku/ directory found: ${(err as Error).message}`,
+				)
+			}
+			const settings: Record<string, unknown> = existsSync(settingsPath)
+				? parseYaml(readFileSync(settingsPath, "utf8"))
+				: {}
+			// Validate the post-write shape against settings.schema.json.
+			// Build the candidate object, run AJV, refuse the write on
+			// failure. AJV reports the first error; we surface it
+			// verbatim so the caller can correct.
+			const candidate = { ...settings }
+			if (value === null || value === undefined) {
+				delete candidate[field]
+			} else {
+				candidate[field] = value
+			}
+			if (!validateSettingsCandidate(candidate)) {
+				const first = (
+					settingsValidationErrors() as Array<{
+						instancePath?: string
+						message?: string
+					}>
+				)[0]
+				return errOut(
+					"settings_field_validation_failed",
+					`Field '${field}' fails settings.schema.json validation: ${first?.instancePath || "(root)"} ${first?.message || "invalid"}.`,
+				)
+			}
+			// Write — gray-matter's bundled js-yaml engine handles
+			// stringification consistently with how the file is read.
+			const yamlEngine = (matter as unknown as { engines: { yaml: { stringify: (v: unknown) => string } } }).engines.yaml
+			const yamlOut = yamlEngine.stringify(candidate)
+			writeFileSync(settingsPath, yamlOut)
+			return reply({
+				ok: true,
+				field,
+				message:
+					value === null || value === undefined
+						? `Deleted '${field}' from .haiku/settings.yml`
+						: `Set '${field}' in .haiku/settings.yml`,
+			})
+		}
+
+		case "haiku_intent_set": {
+			const slug = args.intent as string
+			const field = args.field as string
+			const value = args.value as unknown
+			const errOut = (error: string, message: string) =>
+				reply({ error, intent: slug, field, message }, { isError: true })
+			if (!slug) return errOut("intent_required", "`intent` is required")
+			if (!field || typeof field !== "string")
+				return errOut("intent_field_required", "`field` is required")
+
+			// Reject FSM-driven fields up front with a stable code.
+			if ((FSM_DRIVEN_INTENT_FIELDS as readonly string[]).includes(field)) {
+				return errOut(
+					"intent_field_engine_only",
+					`Field '${field}' is workflow engine-managed — agents cannot set it. Engine-only fields: ${FSM_DRIVEN_INTENT_FIELDS.join(", ")}.`,
+				)
+			}
+			// Reject immutable fields with a dedicated code so callers
+			// can distinguish "this field exists but you can't change
+			// it" from "this field doesn't exist".
+			if (INTENT_IMMUTABLE_FIELDS.includes(field)) {
+				return errOut(
+					"intent_field_immutable",
+					`Field '${field}' is immutable after creation.`,
+				)
+			}
+			// Reject unknown fields.
+			if (!(AGENT_AUTHORABLE_INTENT_FIELDS as readonly string[]).includes(field)) {
+				return errOut(
+					"intent_field_unknown",
+					`Field '${field}' is not in INTENT_FRONTMATTER_SCHEMA. Allowed: ${AGENT_AUTHORABLE_INTENT_FIELDS.filter((f) => !INTENT_IMMUTABLE_FIELDS.includes(f)).join(", ")}.`,
+				)
+			}
+
+			let intentFile = ""
+			try {
+				intentFile = join(intentDir(slug), "intent.md")
+			} catch (err) {
+				return errOut(
+					"haiku_root_not_found",
+					`Could not resolve intent dir: ${(err as Error).message}`,
+				)
+			}
+			if (!existsSync(intentFile)) {
+				return errOut(
+					"intent_not_found",
+					`Intent '${slug}' not found at ${intentFile}.`,
+				)
+			}
+
+			// Validate the candidate field+value against the schema.
+			// AJV is run against `{[field]: value}` so a single-field
+			// validation echoes the exact AJV error path.
+			const candidate: Record<string, unknown> = {
+				[field]: value,
+			}
+			if (!validateIntentSchema(candidate)) {
+				const first = validateIntentSchema.errors?.[0]
+				return errOut(
+					"intent_field_type_mismatch",
+					`Field '${field}' fails INTENT_FRONTMATTER_SCHEMA validation: ${first?.instancePath || "(root)"} ${first?.message || "invalid"}.`,
+				)
+			}
+
+			setFrontmatterField(intentFile, field, value)
+			gitCommitState(`haiku: intent ${slug} set ${field} via haiku_intent_set`)
+			return reply({
+				ok: true,
+				intent: slug,
+				field,
+				message: `Set intent.${field} on '${slug}'.`,
+			})
+		}
+
+		case "haiku_stage_set": {
+			const slug = args.intent as string
+			const stage = args.stage as string
+			const field = args.field as string
+			void args.value
+			const errOut = (error: string, message: string) =>
+				reply(
+					{ error, intent: slug, stage, field, message },
+					{ isError: true },
+				)
+			if (!slug) return errOut("intent_required", "`intent` is required")
+			if (!stage) return errOut("stage_required", "`stage` is required")
+			if (!field || typeof field !== "string")
+				return errOut("stage_field_required", "`field` is required")
+
+			// Every field on stage state.json is engine-managed. Agents
+			// reach this case only when something has gone wrong (typo,
+			// stale instructions). Reject with a clear code so the
+			// caller routes through the proper workflow tool.
+			return errOut(
+				"stage_field_engine_only",
+				`Stage state.json is workflow engine-managed — agents cannot set fields directly. Stage fields are mutated by haiku_run_next ticks (start, advance phase, complete) and lifecycle tools (haiku_unit_advance_hat, haiku_feedback_advance_hat). To force a stage transition manually, use /haiku:repair or /haiku:revisit. Field '${field}' on stage '${stage}' of intent '${slug}' was not written.`,
+			)
 		}
 
 		// ── Dashboard ──

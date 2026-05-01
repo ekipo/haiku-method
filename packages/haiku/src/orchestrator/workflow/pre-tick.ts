@@ -37,6 +37,7 @@ import {
 	writeJson,
 } from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
+import { findIncompleteStages, rewindFromCompletionReview } from "./side-effects.js"
 
 function readFm(filePath: string): Record<string, unknown> {
 	const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
@@ -64,7 +65,7 @@ export function preTickConsistency(
 	const intentFile = join(iDir, "intent.md")
 	if (!existsSync(intentFile)) return null
 
-	const intent = readFm(intentFile)
+	let intent = readFm(intentFile)
 	const studio = (intent.studio as string) || ""
 	if (!studio) return null
 	if (intent.composite) return null
@@ -74,6 +75,32 @@ export function preTickConsistency(
 
 	const allStudioStages = resolveStudioStages(studio)
 	if (allStudioStages.length === 0) return null
+
+	// Stale completion-review recovery: an earlier tick (or pre-guard
+	// build) may have set `phase: awaiting_completion_review` while
+	// real stages were still incomplete. Without this rewind, every
+	// subsequent tick routes to the intent-completion handler and the
+	// `findIncompleteStages` guard fires the same error in a loop —
+	// the engine never gets a chance to actually run the missing
+	// stages. Detect that shape and reset before derive-state runs.
+	const stalePhases = ["awaiting_completion_review", "intent_completion"]
+	if (stalePhases.includes((intent.phase as string) || "")) {
+		const incomplete = findIncompleteStages(slug, studio, root)
+		if (incomplete.length > 0) {
+			rewindFromCompletionReview(slug, incomplete[0], root)
+			gitCommitState(
+				`haiku: rewind ${slug} from completion-review — ${incomplete.length} stage(s) still pending`,
+			)
+			emitTelemetry("haiku.workflow.completion_review_rewound", {
+				intent: slug,
+				incomplete_stages: incomplete.join(","),
+			})
+			// Re-read intent.md so the rest of pre-tick sees the
+			// post-rewind frontmatter (active_stage moved to the first
+			// incomplete stage, phase + completion_review_* cleared).
+			intent = readFm(intentFile)
+		}
+	}
 
 	const activeStage = (intent.active_stage as string) || ""
 	const currentStage = activeStage || studioStages[0]

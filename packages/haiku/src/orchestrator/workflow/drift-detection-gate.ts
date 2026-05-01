@@ -151,7 +151,53 @@ function buildUnifiedDiff(
 	}
 }
 
-/** Naive unified diff generator with 3 lines of context.
+/** Diff operation: equal, delete, or insert. */
+type DiffOp =
+	| { type: "equal"; bi: number; ai: number }
+	| { type: "delete"; bi: number }
+	| { type: "insert"; ai: number }
+
+/** Compute LCS-based edit sequence via standard DP table.
+ *  Returns a sequence of equal/delete/insert ops.
+ *  O(N*M) space — capped by the caller to avoid pathological inputs. */
+function lcsEditScript(before: string[], after: string[]): DiffOp[] {
+	const N = before.length
+	const M = after.length
+	// Build LCS lengths table.
+	const dp: number[][] = Array.from({ length: N + 1 }, () =>
+		new Array(M + 1).fill(0),
+	)
+	for (let i = 1; i <= N; i++) {
+		for (let j = 1; j <= M; j++) {
+			if (before[i - 1] === after[j - 1]) {
+				dp[i][j] = dp[i - 1][j - 1] + 1
+			} else {
+				dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+			}
+		}
+	}
+	// Backtrack to produce ops.
+	const ops: DiffOp[] = []
+	let i = N
+	let j = M
+	while (i > 0 || j > 0) {
+		if (i > 0 && j > 0 && before[i - 1] === after[j - 1]) {
+			ops.push({ type: "equal", bi: i - 1, ai: j - 1 })
+			i--
+			j--
+		} else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+			ops.push({ type: "insert", ai: j - 1 })
+			j--
+		} else {
+			ops.push({ type: "delete", bi: i - 1 })
+			i--
+		}
+	}
+	ops.reverse()
+	return ops
+}
+
+/** LCS-based unified diff generator with 3 lines of context.
  *  Produces a readable diff suitable for agent classification.
  *  Returns empty array when there are no differences. */
 function generateUnifiedDiff(
@@ -160,83 +206,120 @@ function generateUnifiedDiff(
 	path: string,
 ): string[] {
 	const CONTEXT = 3
-	const lines: string[] = []
+	const MAX_LCS_CELLS = 200_000 // ~200 k cells ≈ 447×447 lines each side
 
-	// Find differing positions.
-	const changes: Array<{
-		bi: number
-		ai: number
-		bLines: string[]
-		aLines: string[]
-	}> = []
-	let bi = 0
-	let ai = 0
-
-	while (bi < before.length || ai < after.length) {
-		if (bi < before.length && ai < after.length && before[bi] === after[ai]) {
-			bi++
-			ai++
-			continue
-		}
-		// Start of a difference block.
-		const bStart = bi
-		const aStart = ai
-		let bEnd = bi
-		let aEnd = ai
-		// Advance until we find a common line or exhaust both.
-		while (
-			(bEnd < before.length || aEnd < after.length) &&
-			(bEnd >= before.length ||
-				aEnd >= after.length ||
-				before[bEnd] !== after[aEnd])
-		) {
-			if (bEnd < before.length) bEnd++
-			if (aEnd < after.length) aEnd++
-		}
-		changes.push({
-			bi: bStart,
-			ai: aStart,
-			bLines: before.slice(bStart, bEnd),
-			aLines: after.slice(aStart, aEnd),
-		})
-		bi = bEnd
-		ai = aEnd
+	// Fall back to a simple full-replace diff for very large files to avoid
+	// O(N*M) memory blow-up. This is intentionally conservative.
+	let ops: DiffOp[]
+	if (before.length * after.length > MAX_LCS_CELLS) {
+		// Simple fallback: treat the whole file as replaced.
+		ops = [
+			...before.map((_, bi) => ({ type: "delete" as const, bi })),
+			...after.map((_, ai) => ({ type: "insert" as const, ai })),
+		]
+	} else {
+		ops = lcsEditScript(before, after)
 	}
 
-	if (changes.length === 0) return []
+	// Check if there are any changes at all.
+	const hasChanges = ops.some((op) => op.type !== "equal")
+	if (!hasChanges) return []
 
+	// Group ops into hunks (runs of non-equal ops, each padded with CONTEXT equal
+	// lines on either side, with adjacent hunks merged when their context windows
+	// overlap).
+	type Hunk = { ops: DiffOp[]; bStart: number; aStart: number }
+	const hunks: Hunk[] = []
+	let hunk: Hunk | null = null
+	// Track trailing equal-op count to trim excess context from a closed hunk.
+	let trailingEqual = 0
+
+	for (const op of ops) {
+		if (op.type === "equal") {
+			if (hunk !== null) {
+				hunk.ops.push(op)
+				trailingEqual++
+				// If we've accumulated more than 2*CONTEXT equal lines since the
+				// last change, close the hunk (keep only CONTEXT trailing lines).
+				if (trailingEqual > 2 * CONTEXT) {
+					// Trim to keep only CONTEXT trailing equal lines.
+					hunk.ops.splice(0, hunk.ops.length - CONTEXT)
+					hunks.push(hunk)
+					hunk = null
+					trailingEqual = 0
+				}
+			}
+			// Outside a hunk: track for leading context.
+			// We don't buffer pre-hunk ops here; we reconstruct from indices below.
+		} else {
+			trailingEqual = 0
+			if (hunk === null) {
+				hunk = { ops: [], bStart: 0, aStart: 0 }
+				// Back-fill up to CONTEXT leading equal ops.
+				const bIdx = op.type === "delete" ? op.bi : -1
+				const aIdx = op.type === "insert" ? op.ai : -1
+				// Determine where we are in before/after.
+				const leadBi = bIdx >= 0 ? bIdx : aIdx >= 0 ? aIdx : 0
+				const leadAi = aIdx >= 0 ? aIdx : bIdx >= 0 ? bIdx : 0
+				const leadStart = Math.max(0, Math.min(leadBi, leadAi) - CONTEXT)
+				hunk.bStart = Math.max(0, leadBi - CONTEXT)
+				hunk.aStart = Math.max(0, leadAi - CONTEXT)
+				for (let k = leadStart; k < Math.min(leadBi, leadAi); k++) {
+					if (k < before.length && k < after.length) {
+						hunk.ops.push({ type: "equal", bi: k, ai: k })
+					}
+				}
+			}
+			hunk.ops.push(op)
+		}
+	}
+	if (hunk !== null) {
+		// Trim trailing equal ops beyond CONTEXT.
+		if (trailingEqual > CONTEXT) {
+			hunk.ops.splice(0, hunk.ops.length - (trailingEqual - CONTEXT))
+		}
+		hunks.push(hunk)
+	}
+
+	if (hunks.length === 0) return []
+
+	const lines: string[] = []
 	lines.push(`--- a/${path}`)
 	lines.push(`+++ b/${path}`)
 
-	for (const change of changes) {
-		const ctxBefore = Math.max(0, change.bi - CONTEXT)
-		const ctxAfter = Math.min(
-			before.length,
-			change.bi + change.bLines.length + CONTEXT,
+	for (const h of hunks) {
+		// Count old/new lines in hunk for @@ header.
+		let oldCount = 0
+		let newCount = 0
+		let oldStart = -1
+		let newStart = -1
+		for (const op of h.ops) {
+			if (op.type === "equal") {
+				if (oldStart < 0) oldStart = op.bi
+				if (newStart < 0) newStart = op.ai
+				oldCount++
+				newCount++
+			} else if (op.type === "delete") {
+				if (oldStart < 0) oldStart = op.bi
+				oldCount++
+			} else {
+				if (newStart < 0) newStart = op.ai
+				newCount++
+			}
+		}
+		if (oldStart < 0) oldStart = 0
+		if (newStart < 0) newStart = 0
+		lines.push(
+			`@@ -${oldStart + 1},${oldCount} +${newStart + 1},${newCount} @@`,
 		)
-		const ctxABefore = Math.max(0, change.ai - CONTEXT)
-		const ctxAAfter = Math.min(
-			after.length,
-			change.ai + change.aLines.length + CONTEXT,
-		)
-
-		const oldStart = ctxBefore + 1
-		const oldCount = ctxAfter - ctxBefore
-		const newStart = ctxABefore + 1
-		const newCount = ctxAAfter - ctxABefore
-
-		lines.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`)
-		for (let i = ctxBefore; i < change.bi; i++) {
-			lines.push(` ${before[i] ?? ""}`)
-		}
-		for (const l of change.bLines) {
-			lines.push(`-${l}`)
-		}
-		for (const l of change.aLines) {
-			lines.push(`+${l}`)
-		}
-		for (let i = change.bi + change.bLines.length; i < ctxAfter; i++) {
-			lines.push(` ${before[i] ?? ""}`)
+		for (const op of h.ops) {
+			if (op.type === "equal") {
+				lines.push(` ${before[op.bi] ?? ""}`)
+			} else if (op.type === "delete") {
+				lines.push(`-${before[op.bi] ?? ""}`)
+			} else {
+				lines.push(`+${after[op.ai] ?? ""}`)
+			}
 		}
 	}
 

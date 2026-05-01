@@ -713,6 +713,23 @@ export function isDriftDetectionDisabled(haikuRoot: string): boolean {
 	}
 }
 
+/** Return all stage directory names present on disk for an intent.
+ *  Returns an empty array when the stages/ directory doesn't exist.
+ *
+ *  Extracted here so `haiku_human_write.ts` and `haiku_baseline_init.ts`
+ *  share one implementation alongside the other shared drift helpers. */
+export function getIntentStages(intentDir: string): string[] {
+	const stagesDir = join(intentDir, "stages")
+	if (!existsSync(stagesDir)) return []
+	try {
+		return readdirSync(stagesDir, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => e.name)
+	} catch {
+		return []
+	}
+}
+
 /** Read the action log for a specific tick synchronously.
  *  Returns an empty array when the file doesn't exist.
  *  Silently skips malformed lines. */

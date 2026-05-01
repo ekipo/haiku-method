@@ -18,13 +18,7 @@
 //   - ACCEPTANCE-CRITERIA.md AC-AB1, AC-AB2, AC-TA1–AC-TA4, AC-ALIAS1/2
 
 import { createHash, randomBytes } from "node:crypto"
-import {
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-} from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import matter from "gray-matter"
@@ -32,6 +26,7 @@ import { appendActionLogEntry } from "../../orchestrator/workflow/action-log.js"
 import {
 	canonicalisePath,
 	getCurrentTickCounter,
+	getIntentStages,
 	isDriftDetectionDisabled,
 } from "../../orchestrator/workflow/drift-baseline.js"
 import {
@@ -45,19 +40,6 @@ import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
 // ── Internal helpers ───────────────────────────────────────────────────────
-
-/** Return all stage directory names present on disk for an intent. */
-function getIntentStages(intentDir: string): string[] {
-	const stagesDir = join(intentDir, "stages")
-	if (!existsSync(stagesDir)) return []
-	try {
-		return readdirSync(stagesDir, { withFileTypes: true })
-			.filter((e) => e.isDirectory())
-			.map((e) => e.name)
-	} catch {
-		return []
-	}
-}
 
 /** Detect whether human_write_require_rationale is set to true in
  *  .haiku/settings.yml. Returns false when absent or not true. */

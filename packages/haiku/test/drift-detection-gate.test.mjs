@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 // Tests for drift-detection-gate.ts — pre-tick drift-detection gate.
 //
-// Coverage (22 scenarios from silent-filesystem-drop-detection.feature):
+// Coverage (23 scenarios from silent-filesystem-drop-detection.feature):
 //  1.  Designer replaces a stage output — modified finding emitted.
 //  2.  PO edits a deliverable — modified finding, correct SHAs, diff_unified non-null.
 //  3.  New knowledge file dropped — new-file-detected, binary PDF has no diff.
@@ -23,6 +23,8 @@
 // 18.  Files outside tracked surface are not detected (README.md at intent root).
 // 19.  files inside units/ are ignored (not in tracked surface).
 // 20.  Full runWorkflowTick → drift-detection gate → manual_change_assessment short-circuit.
+// 21.  Intent-scope knowledge sidecar written at intent level; diff works after simulated stage transition.
+// 22.  Diff correctness: N→M line replacement keeps "c" as context, not as deleted+inserted.
 
 import assert from "node:assert"
 import { createHash } from "node:crypto"
@@ -1058,6 +1060,59 @@ await test("intent-scope knowledge sidecar written at intent level; diff works a
 	assert.ok(
 		finding.diff_unified !== null,
 		"diff_unified should be non-null — intent-level sidecar must survive stage transition",
+	)
+})
+
+// ── Scenario 22: diff correctness — N→M line change does not pull unchanged trailing lines ──
+
+console.log(
+	"\n=== Scenario 22: diff correctness — N→M replacement stays within hunk boundary ===",
+)
+
+await test("diff for N→M line change does not include trailing unchanged lines in the hunk", async () => {
+	// before = ["a", "b", "c"]  →  after = ["a", "x", "y", "z", "c"]
+	// Correct: hunk deletes "b", inserts "x","y","z"; "a" and "c" are context.
+	// Buggy old algo: bLines=["b","c"], aLines=["x","y","z","c"] — "c" pulled in.
+	const { intentDir, stage, artifactsDir } = makeIntentDir("s22")
+	const haikuRoot = makeHaikuRoot("s22")
+	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
+
+	const originalContent = "a\nb\nc"
+	const newContent = "a\nx\ny\nz\nc"
+	const relPath = `stages/${stage}/artifacts/spec.md`
+	const absPath = join(artifactsDir, "spec.md")
+
+	writeFileSync(absPath, originalContent)
+	await writeBaselineForStage(intentDir, stage, {
+		[relPath]: makeBaselineEntry(relPath, originalContent),
+		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
+	})
+
+	writeFileSync(absPath, newContent)
+	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
+
+	assert.strictEqual(result.action, "manual_change_assessment")
+	const finding = result.findings.find((f) => f.path === relPath)
+	assert.ok(finding, "finding should be present")
+	assert.ok(finding.diff_unified !== null, "diff_unified must be non-null")
+
+	const diffLines = finding.diff_unified.split("\n")
+	// The deleted line should be exactly "b" (not "b" and "c").
+	const deletedLines = diffLines
+		.filter((l) => l.startsWith("-") && !l.startsWith("---"))
+		.map((l) => l.slice(1))
+	assert.deepStrictEqual(
+		deletedLines,
+		["b"],
+		`deleted lines should be ["b"] only — old algo pulled in "c" as well`,
+	)
+	// The trailing context line "c" must appear as a context line (space prefix).
+	const contextLines = diffLines
+		.filter((l) => l.startsWith(" "))
+		.map((l) => l.slice(1))
+	assert.ok(
+		contextLines.includes("c"),
+		`"c" must appear as a context line, not as a deleted/inserted line`,
 	)
 })
 

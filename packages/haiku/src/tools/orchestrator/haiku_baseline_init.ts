@@ -21,7 +21,7 @@
 // No new external dependencies — uses node:crypto, node:fs/promises, node:path
 // (already required by drift-baseline.ts) and existing gray-matter.
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import matter from "gray-matter"
 import {
@@ -30,6 +30,7 @@ import {
 	canonicalisePath,
 	computeFileSha256,
 	enumerateTrackedSurface,
+	getIntentStages,
 	isBinary,
 	isDriftDetectionDisabled,
 	readBaseline,
@@ -41,19 +42,6 @@ import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
 // ── Internal helpers ───────────────────────────────────────────────────────
-
-/** Return all stage directory names present on disk for an intent. */
-function getIntentStages(intentDir: string): string[] {
-	const stagesDir = join(intentDir, "stages")
-	if (!existsSync(stagesDir)) return []
-	try {
-		return readdirSync(stagesDir, { withFileTypes: true })
-			.filter((e) => e.isDirectory())
-			.map((e) => e.name)
-	} catch {
-		return []
-	}
-}
 
 /** Check whether a path relative to the intent directory is inside the
  *  tracked surface (same allow-list as haiku_human_write). Returns

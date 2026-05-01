@@ -78,14 +78,6 @@ function getUploadMaxBytes(): number {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Compute SHA-256 of a file by reading it from disk. */
-function _computeSha256FromPath(absPath: string): string {
-	const hash = createHash("sha256")
-	const data = readFileSync(absPath)
-	hash.update(data)
-	return hash.digest("hex")
-}
-
 /** Return true when a stage's state.json marks it as completed/sealed. */
 function isStageSealed(intentSlug: string, stage: string): boolean {
 	try {

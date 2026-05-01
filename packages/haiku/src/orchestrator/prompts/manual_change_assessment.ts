@@ -8,13 +8,18 @@
 // Action shape (emitted by drift-detection-gate.ts):
 //   { action: "manual_change_assessment", findings: DriftFinding[], slug: string }
 //
-// Classification options per finding:
-//   A. Accept the change — call haiku_baseline_init to re-baseline (acknowledges as human-implicit).
-//   B. Reject / revert the change — restore the prior file; baseline stays.
-//   C. Surface as feedback — create a feedback item via haiku_feedback; a
-//      pending-assessment marker is written automatically.
-//   D. Trigger a revisit — call haiku_feedback_move to relocate the finding
-//      to an earlier stage; marker is written.
+// Classification protocol: agent calls `haiku_classify_drift` with one
+// classification per finding. The four outcomes are:
+//   - `ignore` — accept the change; baseline updates immediately.
+//   - `inline-fix` — absorb into the current bolt; baseline updates immediately.
+//   - `surface-as-feedback` — create a feedback item; baseline holds (pending
+//     marker) until the feedback reaches a terminal state.
+//   - `trigger-revisit` — revisit the owning stage; baseline holds until the
+//     revisit completes. Not legal for current-stage findings.
+//
+// The OOM path (`is_baseline_oom: true`) bypasses per-finding classification
+// and tells the agent to call `haiku_baseline_init` to re-establish the whole
+// surface against the current worktree.
 
 import { definePromptBuilder } from "./define.js"
 
@@ -122,26 +127,16 @@ export default definePromptBuilder(({ slug, action }) => {
 		"",
 		findingBlocks,
 		"",
-		"### Classification options",
+		"### Classification protocol",
 		"",
-		"For each finding, choose one of:",
+		"Classify EVERY finding by calling `haiku_classify_drift` with one classification per finding. The four valid outcomes are:",
 		"",
-		"**A. Accept the change** — the human edit is intentional and should be incorporated.",
-		"  - Call `haiku_baseline_init` to re-baseline all tracked files.",
-		"  - This acknowledges all current on-disk content and clears pending-assessment markers.",
+		"- `ignore` — change observed, accept it; baseline updates immediately.",
+		"- `inline-fix` — absorb the change into the current bolt; baseline updates immediately.",
+		"- `surface-as-feedback` — open a feedback item; baseline holds (pending-marker written) until the feedback reaches a terminal state (`closed` or `rejected`).",
+		"- `trigger-revisit` — revisit the owning stage; baseline holds until the revisit completes. Not legal for current-stage findings.",
 		"",
-		"**B. Revert the change** — the human edit should be discarded.",
-		"  - Restore the prior file content from the baseline SHA (via `git checkout` or manually).",
-		"  - The baseline entry remains unchanged; no marker is written.",
-		"",
-		"**C. Surface as feedback** — the change should be reviewed in the feedback loop.",
-		"  - Call `haiku_feedback` to create a feedback item describing the finding.",
-		"  - A pending-assessment marker is written automatically.",
-		"  - The gate will suppress re-detection of this file until the feedback reaches a terminal state.",
-		"",
-		"**D. Trigger a revisit** — the change is relevant to an earlier stage.",
-		"  - Call `haiku_feedback_move` to relocate the finding to the appropriate stage.",
-		"  - The pre-tick triage gate will revisit the earlier stage on the next tick.",
+		"Per-finding allowed outcomes are listed in the action's `legal_outcomes` map — each finding accepts only the outcomes whose key is its `path`. Pick from that subset.",
 		"",
 		`When every finding is classified, call \`haiku_run_next { intent: "${slug}" }\`.`,
 	].join("\n")

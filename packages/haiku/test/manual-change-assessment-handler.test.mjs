@@ -267,6 +267,39 @@ test("instructions mention haiku_classify_drift", () => {
 	)
 })
 
+test("prompt body references haiku_classify_drift (no stale tool list)", async () => {
+	const { default: promptBuilder } = await import(
+		"../src/orchestrator/prompts/manual_change_assessment.ts"
+	)
+	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
+	const body = promptBuilder({
+		slug: action.intent_slug,
+		studio: "software",
+		action,
+		dir: "/tmp/haiku-prompt-body-test",
+	})
+	assert.ok(body !== null, "prompt body must be non-null for normal findings")
+	assert.ok(
+		body.includes("haiku_classify_drift"),
+		"prompt body must reference haiku_classify_drift",
+	)
+	// Reject the stale tool list — these names belonged to the pre-classify
+	// protocol and would silently bypass haiku_classify_drift if the agent
+	// followed them.
+	assert.ok(
+		!body.includes("haiku_baseline_init") || body.includes("is_baseline_oom"),
+		"prompt body must not direct the agent to call haiku_baseline_init outside the OOM path",
+	)
+	assert.ok(
+		!body.includes("Call `haiku_feedback`"),
+		"prompt body must not direct the agent to call haiku_feedback directly",
+	)
+	assert.ok(
+		!body.includes("Call `haiku_feedback_move`"),
+		"prompt body must not direct the agent to call haiku_feedback_move directly",
+	)
+})
+
 test("instructions mention all four outcome strings", () => {
 	const action = buildManualChangeAssessmentAction(makeCtx(), [makeFinding()])
 	assert.ok(action.instructions.includes("ignore"))

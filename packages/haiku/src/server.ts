@@ -7,12 +7,6 @@ import {
 	ListPromptsRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js"
-import {
-	execNewBinary,
-	hasPendingUpdate,
-	startUpdateChecker,
-	stopUpdateChecker,
-} from "./auto-update.js"
 import { stripWildcardAllowedOrigins } from "./config.js"
 import { stopHttpServer } from "./http.js"
 import { flush as flushSentry, reportError } from "./sentry.js"
@@ -295,21 +289,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
 		throw err
 	}
 
-	// After the response is written, check if we should yield to a new binary.
-	// setImmediate ensures the MCP SDK flushes the response first.
-	if (hasPendingUpdate()) {
-		setImmediate(() => {
-			console.error(
-				"[haiku] Pending update detected — hot-swapping after response",
-			)
-			stopUpdateChecker()
-			server
-				.close()
-				.then(() => execNewBinary())
-				.catch((err) => console.error("[haiku] Hot-swap failed:", err))
-		})
-	}
-
 	return result
 })
 
@@ -337,23 +316,19 @@ async function main() {
 		? ""
 		: ` (harness: ${getCapabilities().displayName})`
 	console.error(`H·AI·K·U Review MCP server running on stdio${harnessInfo}`)
-
-	// Start background auto-update checker after the server is live
-	startUpdateChecker()
 }
 
 // Graceful shutdown
 //
 // Order matters here:
-//   1. Stop the background update checker so it can't start new work.
-//   2. Close the MCP stdio `Server` so we stop accepting new MCP calls.
-//   3. Close the Fastify HTTP+WebSocket server so in-flight feedback/
+//   1. Close the MCP stdio `Server` so we stop accepting new MCP calls.
+//   2. Close the Fastify HTTP+WebSocket server so in-flight feedback/
 //      revisit/review requests get to finish and WS clients see a
 //      clean `1001 Going Away` (via `stopHttpServer` → per-session
 //      `closeSessionConnection`) instead of a TCP RST. Fastify's
 //      `close()` drains pending requests before releasing the socket.
-//   4. Flush Sentry so any errors surfaced during (2)/(3) get reported.
-//   5. `process.exit(0)`.
+//   3. Flush Sentry so any errors surfaced during (1)/(2) get reported.
+//   4. `process.exit(0)`.
 //
 // We guard against a hung shutdown with a hard timeout — if any phase
 // stalls for more than SHUTDOWN_TIMEOUT_MS we fall back to a forced
@@ -372,7 +347,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
 	}, SHUTDOWN_TIMEOUT_MS)
 	hardExit.unref()
 	try {
-		stopUpdateChecker()
 		await server.close()
 		await stopHttpServer()
 		await flushSentry()

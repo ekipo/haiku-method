@@ -22,7 +22,6 @@ import {
 } from "@haiku/shared/frontmatter"
 import { Ajv } from "ajv"
 import matter from "gray-matter"
-import { getPendingVersion, hasPendingUpdate } from "./auto-update.js"
 import { features, resolvePluginRoot } from "./config.js"
 // workflow-fields module retained for state-integrity sealing; no direct imports
 // needed here since the completion-only guard is narrow to status/completed.
@@ -10808,11 +10807,6 @@ export function handleStateTool(
 				mcp_version: MCP_VERSION,
 				plugin_version: getPluginVersion(),
 			}
-			const pending = getPendingVersion()
-			if (pending) info.pending_update = pending
-			if (hasPendingUpdate())
-				info.update_note =
-					"A new version has been downloaded and will activate on the next tool call."
 			return reply(info)
 		}
 

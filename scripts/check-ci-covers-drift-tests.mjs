@@ -11,7 +11,7 @@
 // disappear or are excluded from the run-all.mjs discovery filter.
 //
 // Usage: node scripts/check-ci-covers-drift-tests.mjs
-// Exit code: 0 = all four present + discoverable, 1 = at least one gap.
+// Exit code: 0 = all four present + discoverable + non-empty, 1 = gap.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
@@ -80,6 +80,33 @@ if (existsSync(testDir)) {
 	}
 }
 
+// 4. Each required file must contain at least one runnable assertion.
+//    Symptom-vs-cause guard: a present-but-empty file (or one whose
+//    body has been commented out / converted entirely to skip()) would
+//    still pass steps 1–3 but cover nothing. Fail loud if any of the
+//    four files has zero `assert.` calls — that's the only signal that
+//    the contract is actually being exercised inside run-all.mjs.
+//
+//    `assert.` was chosen over a more permissive substring match
+//    because every drift / reconciliation test in the suite uses
+//    node:assert (`import assert from "node:assert"`) for its
+//    contract checks. If a future test moves to a different library,
+//    this guard will fail and force an explicit update — that is
+//    the correct SRE behaviour, not a false positive.
+const ASSERT_PATTERN = /\bassert\s*[\.\(]/
+for (const f of REQUIRED_FILES) {
+	const full = join(testDir, f)
+	if (!existsSync(full)) continue // already counted in step 1
+	const src = readFileSync(full, "utf8")
+	const matches = src.match(new RegExp(ASSERT_PATTERN.source, "g")) || []
+	if (matches.length === 0) {
+		lines.push(`  ✗ NO ASSERTIONS in ${f} (file present but empty?)`)
+		failures++
+	} else {
+		lines.push(`  ✓ ${matches.length} assertion(s) in ${f}`)
+	}
+}
+
 console.log("CI drift-test coverage check")
 console.log("─".repeat(60))
 for (const l of lines) console.log(l)
@@ -102,6 +129,6 @@ if (failures > 0) {
 }
 
 console.log(
-	`\nOK: all ${REQUIRED_FILES.length} drift-test files present + discoverable by run-all.mjs.`,
+	`\nOK: all ${REQUIRED_FILES.length} drift-test files present, discoverable by run-all.mjs, and contain runnable assertions.`,
 )
 process.exit(0)

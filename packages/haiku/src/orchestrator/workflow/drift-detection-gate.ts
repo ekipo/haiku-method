@@ -51,6 +51,34 @@ import {
 	readMarkers,
 	removeMarkersSync,
 } from "./drift-markers.js"
+import { emitTelemetry } from "../../telemetry.js"
+
+// ── Telemetry helpers ──────────────────────────────────────────────────────
+//
+// The four golden signals (latency / traffic / errors / saturation) plus a
+// runtime PII guarantee live on top of `emitTelemetry` from telemetry.ts.
+// `gateAttrs(ctx)` produces the correlation triple {intent_slug, stage,
+// tick_iteration} that every emit in this file MUST spread into its
+// attribute object — without it, downstream consumers can't tie an event
+// back to the intent + stage + tick that produced it.
+
+/** Correlation-ID triple emitted on every drift-gate event. */
+function gateAttrs(ctx: DriftGateCtx): Record<string, string> {
+	return {
+		intent_slug: ctx.intentSlug,
+		stage: ctx.activeStage,
+		tick_iteration: String(ctx.tickCounter),
+	}
+}
+
+/** Elapsed milliseconds between a process.hrtime.bigint() reading and now. */
+function elapsedMs(startedNs: bigint): string {
+	const deltaNs = process.hrtime.bigint() - startedNs
+	// Bigint → number with millisecond precision. Safe for any realistic
+	// drift-gate duration (< ~285 thousand years before Number loses ms-level
+	// precision).
+	return String(Number(deltaNs / 1_000n) / 1_000)
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -368,14 +396,37 @@ export function runDriftDetectionGate(
 	ctx: DriftGateCtx,
 ): DriftDetectionGateResult {
 	const { intentDir, activeStage, haikuRoot, tickCounter } = ctx
+	const startedNs = process.hrtime.bigint()
 
 	// 1. Kill-switch: if disabled, the gate is a complete no-op (AC-G1-KS).
 	if (isDriftDetectionDisabled(haikuRoot)) {
+		emitTelemetry("haiku.drift.gate.kill_switch_hit", { ...gateAttrs(ctx) })
 		return { findings: [], baselineEstablished: false, action: null }
 	}
 
+	// Traffic signal — every (non-killed) drift-gate tick increments this.
+	emitTelemetry("haiku.drift.gate.tick", { ...gateAttrs(ctx) })
+
 	// 2. Read pending-assessment markers (non-fatal on missing/corrupt).
 	const markerStore = readMarkers(intentDir)
+	// Saturation — marker-store size, both the open subset (drives the
+	// runbook's "stuck assessments" check) and the total (drives the
+	// "marker-file growth unbounded" check).
+	{
+		const total = markerStore.markers.length
+		let open = 0
+		for (const m of markerStore.markers) {
+			if (m.cleared_at === null) open++
+		}
+		emitTelemetry("haiku.drift.markers.open_count", {
+			...gateAttrs(ctx),
+			open_count: String(open),
+		})
+		emitTelemetry("haiku.drift.markers.total_count", {
+			...gateAttrs(ctx),
+			total_count: String(total),
+		})
+	}
 
 	// 3. Read the baseline. null → establish mode. Corrupt → error.
 	let baseline: Baseline | null
@@ -383,6 +434,16 @@ export function runDriftDetectionGate(
 		baseline = readBaseline(intentDir, activeStage)
 	} catch (err) {
 		// BaselineCorruptError (ARCHITECTURE.md §8.2 / AC-EE4).
+		emitTelemetry("haiku.drift.baseline.corrupt", {
+			...gateAttrs(ctx),
+			error: err instanceof Error ? err.message : String(err),
+		})
+		// Latency signal even on the error path so dashboards see the cost.
+		emitTelemetry("haiku.drift.gate.duration_ms", {
+			...gateAttrs(ctx),
+			duration_ms: elapsedMs(startedNs),
+			outcome: "baseline_corrupt",
+		})
 		const msg =
 			err instanceof Error
 				? err.message
@@ -398,6 +459,10 @@ export function runDriftDetectionGate(
 
 	// 4. Enumerate the tracked surface.
 	const surface = enumerateTrackedSurface(intentDir, activeStage)
+	emitTelemetry("haiku.drift.surface.size", {
+		...gateAttrs(ctx),
+		file_count: String(surface.length),
+	})
 
 	// 5. Establish mode (AC-G8 / ARCHITECTURE.md §3.4).
 	if (baseline === null) {
@@ -432,12 +497,38 @@ export function runDriftDetectionGate(
 		const newBaseline: Baseline = { entries: newEntries }
 		try {
 			writeBaselineSync(intentDir, activeStage, newBaseline)
-		} catch {
-			// Write failure during establish — continue (gate retries next tick).
+		} catch (err) {
+			// Errors signal — emit BEFORE rethrow so the failure is visible
+			// even when the rethrow gets swallowed at a higher layer. The
+			// rethrow itself is intentional: silently continuing on baseline
+			// write failure (the prior behaviour) hid OOM, ENOSPC, and
+			// permission errors that the runbook now needs to surface.
+			emitTelemetry("haiku.drift.baseline.write_failed", {
+				...gateAttrs(ctx),
+				error: err instanceof Error ? err.message : String(err),
+				site: "establish",
+			})
+			emitTelemetry("haiku.drift.gate.duration_ms", {
+				...gateAttrs(ctx),
+				duration_ms: elapsedMs(startedNs),
+				outcome: "establish_write_failed",
+			})
+			throw err
 		}
 
 		stampBaselineEstablished(intentDir, activeStage)
 
+		// Traffic / lifecycle: this is the silent-establish path
+		// (first-tick on an existing intent or after a baseline reset).
+		emitTelemetry("haiku.drift.baseline.established", {
+			...gateAttrs(ctx),
+			file_count: String(newEntries.size),
+		})
+		emitTelemetry("haiku.drift.gate.duration_ms", {
+			...gateAttrs(ctx),
+			duration_ms: elapsedMs(startedNs),
+			outcome: "established",
+		})
 		return { findings: [], baselineEstablished: true, action: null }
 	}
 
@@ -450,6 +541,10 @@ export function runDriftDetectionGate(
 
 	// Stale marker paths — collected for async removal after the loop.
 	const staleMarkerPaths: string[] = []
+
+	// Counters drive saturation telemetry at scan end.
+	let silentAutoAddCount = 0
+	let suppressedByMarkerCount = 0
 
 	// Baseline-dirty flag — set when we silently auto-add previously-unseen
 	// files. Persisted at end of scan so subsequent ticks see them as known.
@@ -497,6 +592,7 @@ export function runDriftDetectionGate(
 				tracking_class: entry.trackingClass,
 			})
 			baselineDirty = true
+			silentAutoAddCount++
 			continue
 		}
 
@@ -536,6 +632,7 @@ export function runDriftDetectionGate(
 				// Fall through to emit a fresh finding.
 			} else {
 				// Marker is current — suppress (AC-SF2).
+				suppressedByMarkerCount++
 				continue
 			}
 		}
@@ -583,6 +680,10 @@ export function runDriftDetectionGate(
 	// landed and dispatch a duplicate `manual_change_assessment` for the
 	// same file. Sync + dedup eliminates both windows.
 	if (staleMarkerPaths.length > 0) {
+		emitTelemetry("haiku.drift.markers.stale_removed", {
+			...gateAttrs(ctx),
+			removed_count: String(staleMarkerPaths.length),
+		})
 		try {
 			removeMarkersSync(intentDir, staleMarkerPaths)
 		} catch {
@@ -593,14 +694,41 @@ export function runDriftDetectionGate(
 	}
 
 	// 7b. Persist any silent auto-adds from step 7 so the next tick sees them
-	//     as known and we don't re-add them on every tick. Best-effort — a
-	//     write failure here just means the next tick repeats the work.
+	//     as known and we don't re-add them on every tick. The post-write
+	//     site MUST surface its failure (errors-signal contract) — silent
+	//     swallow here previously hid disk-full / permission errors that
+	//     the operations runbook needs to alarm on.
 	if (baselineDirty) {
 		try {
 			writeBaselineSync(intentDir, activeStage, baseline)
-		} catch {
-			// Non-fatal.
+		} catch (err) {
+			emitTelemetry("haiku.drift.baseline.write_failed", {
+				...gateAttrs(ctx),
+				error: err instanceof Error ? err.message : String(err),
+				site: "post-write",
+			})
+			emitTelemetry("haiku.drift.gate.duration_ms", {
+				...gateAttrs(ctx),
+				duration_ms: elapsedMs(startedNs),
+				outcome: "post_write_failed",
+			})
+			throw err
 		}
+	}
+
+	// Saturation: silent auto-adds (signals "agent backfilling baseline" —
+	// a runaway count is a signal we picked up a new dir we shouldn't have).
+	if (silentAutoAddCount > 0) {
+		emitTelemetry("haiku.drift.silent_auto_add.count", {
+			...gateAttrs(ctx),
+			count: String(silentAutoAddCount),
+		})
+	}
+	if (suppressedByMarkerCount > 0) {
+		emitTelemetry("haiku.drift.markers.suppressed_count", {
+			...gateAttrs(ctx),
+			count: String(suppressedByMarkerCount),
+		})
 	}
 
 	// 8. Check for baseline entries whose files no longer exist (AC-EE2).
@@ -648,6 +776,21 @@ export function runDriftDetectionGate(
 			context_unit: null,
 			is_baseline_oom: true,
 		}
+		emitTelemetry("haiku.drift.baseline.oom_synthetic", {
+			...gateAttrs(ctx),
+			raw_findings_count: String(findings.length),
+			effective_surface_size: String(effectiveSurfaceSize),
+		})
+		emitTelemetry("haiku.drift.findings.count", {
+			...gateAttrs(ctx),
+			count: "1",
+			synthetic: "true",
+		})
+		emitTelemetry("haiku.drift.gate.duration_ms", {
+			...gateAttrs(ctx),
+			duration_ms: elapsedMs(startedNs),
+			outcome: "oom_synthetic",
+		})
 		return {
 			findings: [syntheticFinding],
 			baselineEstablished: false,
@@ -655,10 +798,26 @@ export function runDriftDetectionGate(
 		}
 	}
 
+	emitTelemetry("haiku.drift.findings.count", {
+		...gateAttrs(ctx),
+		count: String(findings.length),
+		synthetic: "false",
+	})
+
 	if (findings.length === 0) {
+		emitTelemetry("haiku.drift.gate.duration_ms", {
+			...gateAttrs(ctx),
+			duration_ms: elapsedMs(startedNs),
+			outcome: "clean",
+		})
 		return { findings: [], baselineEstablished: false, action: null }
 	}
 
+	emitTelemetry("haiku.drift.gate.duration_ms", {
+		...gateAttrs(ctx),
+		duration_ms: elapsedMs(startedNs),
+		outcome: "findings",
+	})
 	return {
 		findings,
 		baselineEstablished: false,

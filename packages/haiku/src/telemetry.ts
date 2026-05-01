@@ -311,8 +311,67 @@ if (ENABLED && EXPORTER_SENDS && !PROTOCOL_SENDS) {
 
 const WILL_SEND = ENABLED && EXPORTER_SENDS && PROTOCOL_SENDS
 
+// ── Runtime PII deny-list ─────────────────────────────────────────────────
+//
+// Every key in this set is stripped from `attributes` before the event is
+// serialised. This is a runtime safety net on top of the static-grep CI gate
+// (`pii-grep-gate-runs`) so a future refactor that introduces a new emit site
+// with a body-shaped attribute can't silently exfiltrate user content. Path-
+// shaped attributes (`file_path`, `relpath`) are intentionally NOT in the
+// deny list — they describe the workflow-managed surface, which is opaque
+// to PII by definition. SHA-256 digests (`before_sha256`, `after_sha256`)
+// are likewise permitted.
+//
+// Semantics: STRIP (not throw). Throwing would either crash a hot path that
+// emitTelemetry promises is fire-and-forget, or — worse — be wrapped in a
+// generic try/catch and swallowed silently. Stripping with a one-shot stderr
+// warning per key keeps the contract intact while flagging the violation
+// loudly enough that the next PR review or CI log scan will catch it.
+const PII_DENY_KEYS: ReadonlySet<string> = new Set([
+	"diff_unified",
+	"excerpt",
+	"file_content",
+	"file_body",
+	"user_email",
+	"user_name",
+	"message_body",
+	"finding_body",
+	"fb_body",
+	"content",
+])
+
+/** Public read-only view for tests and callers that need to assert the set. */
+export function getPiiDenyKeys(): ReadonlySet<string> {
+	return PII_DENY_KEYS
+}
+
+const piiWarnedKeys = new Set<string>()
+
+function sanitizeAttributes(
+	eventName: string,
+	attributes: Record<string, string>,
+): Record<string, string> {
+	let stripped: Record<string, string> | null = null
+	for (const key of Object.keys(attributes)) {
+		if (!PII_DENY_KEYS.has(key)) continue
+		if (stripped === null) stripped = { ...attributes }
+		delete stripped[key]
+		if (!piiWarnedKeys.has(key)) {
+			piiWarnedKeys.add(key)
+			console.error(
+				`[haiku/telemetry] PII deny-list stripped attribute "${key}" from event "${eventName}". ` +
+					`Body-shaped values must not be telemetry attributes — emit a hash, byte count, or path instead.`,
+			)
+		}
+	}
+	return stripped ?? attributes
+}
+
 /**
  * Emit a telemetry event. Fire-and-forget — never blocks, never throws.
+ *
+ * Attribute keys in `PII_DENY_KEYS` (see `getPiiDenyKeys()`) are stripped
+ * before the event is serialised — see the runtime PII gate above.
  */
 export function emitTelemetry(
 	eventName: string,
@@ -320,10 +379,12 @@ export function emitTelemetry(
 ): void {
 	if (!WILL_SEND) return
 
+	const safeAttrs = sanitizeAttributes(eventName, attributes)
+
 	const timeNanos = `${Date.now()}000000`
 	const logAttrs = [
 		{ key: "event.name", value: { stringValue: eventName } },
-		...Object.entries(attributes).map(([k, v]) => ({
+		...Object.entries(safeAttrs).map(([k, v]) => ({
 			key: k,
 			value: { stringValue: v },
 		})),
@@ -382,4 +443,7 @@ export const __test = {
 	resolveOtelHeadersHelperPath,
 	loadClaudeCodeSettings,
 	resetHelperCache,
+	sanitizeAttributes,
+	piiDenyKeys: PII_DENY_KEYS,
+	resetPiiWarnings: () => piiWarnedKeys.clear(),
 }

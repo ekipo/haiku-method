@@ -13,9 +13,9 @@
     "haiku": {
       "source": {
         "source": "directory",
-        "path": "."
+        "path": "./dev"
       },
-      "autoUpdate": true
+      "autoUpdate": false
     },
     "han": {
       "source": {

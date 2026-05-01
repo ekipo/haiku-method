@@ -477,6 +477,7 @@ export function ReviewPage({
 							intentTitle={session.intent?.title}
 							gateBadges={gateBadges}
 							gateType={session.gate_type}
+							approveAction={session.approve_action}
 							getAnnotations={getAnnotations}
 							adHoc={isAdHoc}
 							onFeedbackItemClick={(id) => setHighlightFeedbackId(id)}
@@ -684,8 +685,7 @@ function StageScopedContent({
 	// All feedback for this intent+stage (fetched once per stage).
 	const { items: stageFeedback } = useFeedback(intentSlug, stageName)
 
-	const isUnitReview = session.review_type === "unit" && !!session.target
-	if (isUnitReview || !stageName) {
+	if (!stageName) {
 		return (
 			<ArtifactsPane
 				session={session}

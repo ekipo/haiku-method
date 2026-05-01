@@ -11,10 +11,7 @@
     {
       "name": "haiku",
       "description": "H·AI·K·U (DEV)",
-      "source": {
-        "source": "path",
-        "path": "../../plugin"
-      }
+      "source": "./plugin"
     }
   ]
 }

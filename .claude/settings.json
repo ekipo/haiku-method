@@ -6,7 +6,8 @@
   },
   "enabledPlugins": {
     "core@han": true,
-    "bushido@han": true
+    "bushido@han": true,
+    "haiku@haiku-dev": true
   },
   "extraKnownMarketplaces": {
     "haiku-dev": {
@@ -14,7 +15,7 @@
         "source": "directory",
         "path": "./dev"
       },
-      "autoUpdate": false
+      "autoUpdate": true
     },
     "han": {
       "source": {

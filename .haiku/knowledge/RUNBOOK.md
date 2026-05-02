@@ -549,7 +549,7 @@ mount -o remount,rw <mount-point>
 
 **Symptom:** Alert `pii-deny-list-strip` fires. Stderr from MCP shows `[haiku/telemetry] PII deny-list stripped attribute "<key>" from event "<name>"`. Backend metric `pii.deny.strip` (scraped from stderr) is non-zero.
 
-**Cause:** A code path attempted to emit a body-shaped attribute (`diff_unified`, `excerpt`, `*_body`, `content`, etc.) into telemetry. Runtime gate caught it; static CI gate (`pii-grep-gate-runs`) did not.
+**Cause:** A code path attempted to emit a body-shaped attribute (`diff_unified`, `excerpt`, `*_body`, `content`, etc.) or a credential-shaped attribute (`password`, `token`, `api_key`, `authorization`, `bearer`, `secret`, `cookie`, `private_key`, etc.) into telemetry. Runtime gate caught it; static CI gate (`pii-grep-gate-runs`) did not. Deny-list match is case-insensitive — `Authorization`, `API_KEY`, `Token` are caught equivalently to their lower-case canonical forms.
 
 **Diagnose (specific commands):**
 
@@ -569,18 +569,29 @@ node -e 'import("./packages/haiku/src/telemetry.ts").then(t => console.log([...t
 **Remediate (specific commands):**
 
 ```bash
-# Fix the emit site: replace body-shaped attribute with a hash, byte
-# count, or path. Example diff:
+# Fix the emit site: replace the body- or credential-shaped attribute
+# with a hash, byte count, or path. Example diffs:
 #   - { diff_unified: diffText }
 #   + { diff_bytes: String(Buffer.byteLength(diffText, "utf8")) }
 #
+#   - { authorization: req.headers.authorization }
+#   + { auth_scheme: req.headers.authorization?.split(" ")[0] ?? "none" }
+#
+#   - { token: ctx.session.token }
+#   + { token_sha256: sha256Hex(ctx.session.token).slice(0, 12) }
+#
 # Then add the offending key to the static CI gate so it can never
-# reach runtime again:
+# reach runtime again. Mirror it into BOTH the runtime PII_DENY_KEYS
+# in packages/haiku/src/telemetry.ts AND the schema-key denied set
+# in packages/haiku/test/telemetry-otel.test.mjs:
+$EDITOR packages/haiku/src/telemetry.ts
 $EDITOR packages/haiku/test/telemetry-otel.test.mjs
-# (add to the PII deny-list assertion)
+# (add the lower-case canonical form — sanitizeAttributes case-folds at
+# match time, so `Authorization` / `API_KEY` / `Token` are caught by
+# the lower-case entries.)
 ```
 
-**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident: stop telemetry export (`HAIKU_TELEMETRY_DISABLE=1`), page security, and audit the OTLP backend's last 24h of events for the leaked keys.
+**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident: stop telemetry export (`HAIKU_TELEMETRY_DISABLE=1`), page security, and audit the OTLP backend's last 24h of events for the leaked keys. Credential-shaped keys (`password`, `token`, `api_key`, `authorization`, `bearer`, `secret`) escalate immediately regardless of count — assume the credential was sent over the wire and rotate it.
 
 **Rollback:** Telemetry events are append-only and may be in the backend already. If a leak is confirmed, contact the OTLP backend admin to purge events matching the offending keys; revert the regressing PR.
 

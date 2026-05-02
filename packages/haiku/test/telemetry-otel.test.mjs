@@ -484,6 +484,42 @@ await withEnv({}, (t) => {
 		}
 	})
 
+	test("PII deny: deny set contains credential-shaped keys", () => {
+		// Credential-shaped keys mirror the body-shaped concern: a future
+		// emit site that grabs `req.headers.authorization` as `auth_header`
+		// or `ctx.session.token` as `token` would silently leak a credential
+		// through OTLP. These are the canonical (case-folded) entries.
+		const required = [
+			"password",
+			"passwd",
+			"pwd",
+			"token",
+			"access_token",
+			"refresh_token",
+			"id_token",
+			"bearer_token",
+			"bearer",
+			"api_key",
+			"apikey",
+			"api-key",
+			"authorization",
+			"auth_header",
+			"auth",
+			"secret",
+			"client_secret",
+			"signing_secret",
+			"credential",
+			"credentials",
+			"session_id",
+			"cookie",
+			"private_key",
+			"pem",
+		]
+		for (const key of required) {
+			assert.ok(t.piiDenyKeys.has(key), `expected "${key}" in deny list`)
+		}
+	})
+
 	test("PII deny: path-shaped keys are NOT in the deny list", () => {
 		// Path attributes describe the workflow-managed surface and are
 		// opaque to PII. Stripping them would break correlation.
@@ -550,6 +586,45 @@ await withEnv({}, (t) => {
 		// Reference equality is the cheap signal that the path bypassed
 		// the copy — confirming "no-strip" doesn't allocate.
 		assert.strictEqual(cleaned, input)
+	})
+
+	test("PII deny: sanitizeAttributes strips credential-shaped keys", () => {
+		t.resetPiiWarnings()
+		const origErr = console.error
+		console.error = () => {}
+		try {
+			const cleaned = t.sanitizeAttributes("test.event", {
+				intent_slug: "demo",
+				token: "ya29.A0AfH6SMB...",
+				api_key: "sk-live-...",
+				authorization: "Bearer abc.def.ghi",
+				password: "hunter2",
+			})
+			assert.deepStrictEqual(cleaned, { intent_slug: "demo" })
+		} finally {
+			console.error = origErr
+		}
+	})
+
+	test("PII deny: sanitizeAttributes is case-insensitive", () => {
+		// HTTP header names and env-var conventions routinely use mixed case.
+		// `Authorization`, `API_KEY`, `Token` must strip equivalently to their
+		// lower-case canonical forms.
+		t.resetPiiWarnings()
+		const origErr = console.error
+		console.error = () => {}
+		try {
+			const cleaned = t.sanitizeAttributes("test.event", {
+				intent_slug: "demo",
+				Authorization: "Bearer abc",
+				API_KEY: "sk-live-...",
+				Token: "ya29...",
+				PASSWORD: "hunter2",
+			})
+			assert.deepStrictEqual(cleaned, { intent_slug: "demo" })
+		} finally {
+			console.error = origErr
+		}
 	})
 
 	test("PII deny: warning fires once per key, not per call", () => {
@@ -730,8 +805,12 @@ await withEnv({}, (t) => {
 		}
 		// And no schema may declare a key that lives in the PII deny list.
 		// This is the static counterpart to the runtime sanitiser: even
-		// the documented schema can't accidentally pin a body-shaped key.
+		// the documented schema can't accidentally pin a body-shaped or
+		// credential-shaped key. Comparison is case-folded to mirror
+		// `sanitizeAttributes` (HTTP header / env-var conventions use
+		// mixed case and an exact-match would let `Authorization` through).
 		const denied = new Set([
+			// Body / content-shaped
 			"diff_unified",
 			"excerpt",
 			"file_content",
@@ -742,11 +821,36 @@ await withEnv({}, (t) => {
 			"finding_body",
 			"fb_body",
 			"content",
+			// Credential-shaped
+			"password",
+			"passwd",
+			"pwd",
+			"token",
+			"access_token",
+			"refresh_token",
+			"id_token",
+			"bearer_token",
+			"bearer",
+			"api_key",
+			"apikey",
+			"api-key",
+			"authorization",
+			"auth_header",
+			"auth",
+			"secret",
+			"client_secret",
+			"signing_secret",
+			"credential",
+			"credentials",
+			"session_id",
+			"cookie",
+			"private_key",
+			"pem",
 		])
 		for (const [name, keys] of Object.entries(SCHEMAS)) {
 			for (const key of keys) {
 				assert.ok(
-					!denied.has(key),
+					!denied.has(key.toLowerCase()),
 					`${name} declares deny-listed key "${key}"`,
 				)
 			}

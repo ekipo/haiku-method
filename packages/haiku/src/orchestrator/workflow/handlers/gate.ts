@@ -510,10 +510,16 @@ const emit: WorkflowHandler = (ctx) => {
 	const rawReviewType = resolveStageReview(studio, currentStage)
 	const intentMode = (intent.mode as string) || "continuous"
 	// `autopilot` is one of the three stored intent modes (discrete |
-	// continuous | autopilot). It is NOT a separate boolean field —
-	// derive it purely from `intent.mode`. Legacy intent.md files that
-	// still carry an `autopilot: true` boolean must be migrated to
-	// `mode: autopilot` (remove the boolean, set the mode field).
+	// continuous | autopilot). The canonical home is `intent.mode`.
+	//
+	// Backward-compat: older intent.md files carry a separate `autopilot:
+	// true` boolean alongside `mode: continuous` (or no mode at all).
+	// Honor the legacy boolean as a fallback so existing intents keep
+	// running in autopilot semantics until they're migrated. Without this
+	// fallback, a long-lived intent with the boolean+continuous shape
+	// pops local-review gates (the ask-promotion path silently turns off)
+	// even though the user authored the intent expecting autopilot.
+	//
 	// In autopilot mode the gate
 	// handler promotes `ask` gates to `auto`, letting the workflow
 	// advance without human intervention. External gates and `await`
@@ -526,7 +532,8 @@ const emit: WorkflowHandler = (ctx) => {
 	// discrete-hybrid behavior, it should derive it from
 	// `intentMode === "continuous" && <some per-stage condition>` rather
 	// than reading a stored field.
-	const autopilot = intentMode === "autopilot"
+	const autopilot =
+		intentMode === "autopilot" || intent.autopilot === true
 	const isDiscrete = intentMode === "discrete"
 
 	// Discrete-mode contract: every stage gate MUST open an external
@@ -555,8 +562,21 @@ const emit: WorkflowHandler = (ctx) => {
 		coercedReviewType =
 			rawReviewType === "auto" ? "external" : `${rawReviewType},external`
 	}
-	const reviewType =
-		autopilot && coercedReviewType === "ask" ? "auto" : coercedReviewType
+	// Autopilot promotion: drop `ask` from any review-type spec so
+	// the workflow advances without human review. Both shapes need
+	// handling — bare `ask` and compound forms like `external,ask` or
+	// `ask,external`. For compound forms, strip the `ask` segment and
+	// keep the rest (e.g. `external,ask` → `external`); a pure `ask`
+	// becomes `auto`. External and `await` gates still block — autopilot
+	// can't fake real external signals.
+	let reviewType = coercedReviewType
+	if (autopilot) {
+		const segments = coercedReviewType
+			.split(",")
+			.map((t) => t.trim())
+			.filter((t) => t !== "ask")
+		reviewType = segments.length === 0 ? "auto" : segments.join(",")
+	}
 	const stageIdx = studioStages.indexOf(currentStage)
 	const nextStage =
 		stageIdx < studioStages.length - 1 ? studioStages[stageIdx + 1] : null

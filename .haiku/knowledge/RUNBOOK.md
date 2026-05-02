@@ -610,9 +610,9 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 - Single intent flapping: see `drift-gate-baseline-corrupt` runbook above.
 - FS-wide: see `drift-gate-write-failed` runbook above.
 
-**Escalation:** Fast-burn that doesn't clear within 30 min → consider engaging kill switch to stop the budget bleed while you investigate (`HAIKU_DRIFT_GATE_DISABLED=1`).
+**Escalation:** Fast-burn that doesn't clear within 30 min → engage the kill-switch to stop the budget bleed while you investigate. Add `drift_detection: false` to `.haiku/settings.yml` (see scenario 2 / `kill-switch-engaged`).
 
-**Rollback:** Re-enable the gate (`unset HAIKU_DRIFT_GATE_DISABLED`) once the underlying cause is fixed and `gate.tick` events resume cleanly for 1h.
+**Rollback:** Re-enable the gate by removing the `drift_detection: false` line from `.haiku/settings.yml` (or setting it to `true`) once the underlying cause is fixed and `gate.tick` events resume cleanly for 1h.
 
 ## drift-gate-latency-high
 
@@ -699,30 +699,37 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 
 **Symptom:** Alert `kill-switch-engaged` fires. Event `haiku.drift.gate.kill_switch_hit` shows non-zero count.
 
-**Cause:** `HAIKU_DRIFT_GATE_DISABLED=1` (or equivalent) is set in the MCP environment. Detection is OFF.
+**Cause:** `drift_detection: false` is set in `.haiku/settings.yml`. The setting is read by `isDriftDetectionDisabled(haikuRoot)` in `packages/haiku/src/orchestrator/workflow/drift-baseline.ts:723` — the first check inside `runDriftDetectionGate`. Detection is OFF.
 
 **Diagnose:**
 
 ```bash
 # 1. Confirm the kill switch is set
-env | grep HAIKU_DRIFT
+grep -E '^drift_detection:' .haiku/settings.yml
+# Expected output when engaged: drift_detection: false
+#
 # 2. Check who set it and when
-#    `git log` on the dotenv / launcher script that exports it.
+git log -p -- .haiku/settings.yml | grep -A1 -B1 drift_detection
 ```
 
 **Remediate:**
 
 ```bash
-# When the underlying cause is resolved:
-unset HAIKU_DRIFT_GATE_DISABLED
-# Or remove the export from the launcher.
-# Restart MCP. Next tick should emit haiku.drift.gate.tick instead of
-# kill_switch_hit.
+# When the underlying cause is resolved, remove the line (or flip to true):
+#   Edit .haiku/settings.yml and either delete the `drift_detection: false`
+#   line or change it to `drift_detection: true`. The default (line absent)
+#   is enabled.
+#
+# No MCP restart is required — isDriftDetectionDisabled re-reads
+# settings.yml on every gate invocation. The next tick should emit
+# haiku.drift.gate.tick instead of kill_switch_hit.
 ```
+
+**Scope clause (CRITICAL):** `drift_detection: false` disables only the per-stage drift-detection gate. It does NOT silence the upstream-reconciliation gate. See scenario 2 for the full scope description and the companion `haiku_reconciliation_acknowledge` path.
 
 **Escalation:** If the kill switch has been on for >24h without a follow-up issue tracking the resolution, file an issue and tag the person who set it. Long-running kill switches mask other problems.
 
-**Rollback:** Re-engage the kill switch if a regression appears immediately after re-enabling.
+**Rollback:** Re-engage the kill-switch (re-add `drift_detection: false` to `.haiku/settings.yml`) if a regression appears immediately after re-enabling.
 
 ## assessments-stuck
 

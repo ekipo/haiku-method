@@ -1500,54 +1500,111 @@ export function mergeUnitWorktree(
 		// "branch already used by worktree"). Otherwise use a temp worktree
 		// so we don't disturb whatever branch the user happens to be on.
 		//
-		// Conflict handling: the unit .md file under stages/<stage>/units/
-		// routinely conflicts because the workflow engine writes iteration/hat state to
-		// it from the stage-branch side while the unit branch carries a
-		// frozen-at-fork copy. For those files only, take the stage side
-		// (the live workflow engine state) — the unit worktree has no business mutating
-		// its own state file. Non-unit-md conflicts still surface as real
-		// conflicts the agent must resolve.
+		// State-overwrite handling (engine-owned files always take stage side):
+		// the unit branch carries frozen-at-fork copies of stage state files
+		// — `stages/<stage>/units/<unit>.md`, `stages/<stage>/state.json`,
+		// `stages/<stage>/baseline.json`. When git merges and there's no
+		// conflict marker (because, say, the unit branch never touched them
+		// after fork), git silently takes one side or the other based on
+		// 3-way merge math, and we've seen the unit-branch's stale state.json
+		// overwrite the stage's advanced state.json — regressing phase from
+		// `review` back to `elaborate`. To prevent that, we use
+		// `git merge --no-commit --no-ff` to stage the merge without committing,
+		// then force-checkout the engine-owned files to "ours" (the stage
+		// side, which is the authoritative live workflow engine state), then
+		// commit. This makes state regression impossible regardless of
+		// whether git would have flagged a conflict.
+		//
+		// True conflicts on agent-authored content (e.g. an artifact file
+		// edited differently on both sides) still surface as unresolved
+		// `--diff-filter=U` paths, and the merge fails loudly so the caller
+		// can return a structured `merge_conflict` action listing them.
 		const onStageBranch = getCurrentBranch() === stageBranch
+		const engineOwnedRelPaths = [
+			`.haiku/intents/${slug}/stages/${stage}/units/${unit}.md`,
+			`.haiku/intents/${slug}/stages/${stage}/state.json`,
+			`.haiku/intents/${slug}/stages/${stage}/baseline.json`,
+		]
 		const mergeHere = (cwd?: string) => {
+			const gitC = (cwd ? ["-C", cwd] : []) as string[]
 			const mergeArgs = [
 				"git",
-				...(cwd ? ["-C", cwd] : []),
+				...gitC,
 				"merge",
 				unitBranch,
-				"--no-edit",
-				"-m",
-				`haiku: merge ${unit} into ${stage}`,
+				"--no-commit",
+				"--no-ff",
 			]
+			let mergeErr: unknown = null
 			try {
 				run(mergeArgs)
 			} catch (err) {
-				const unitMdRel = `.haiku/intents/${slug}/stages/${stage}/units/${unit}.md`
-				const conflicts = tryRun([
-					"git",
-					...(cwd ? ["-C", cwd] : []),
-					"diff",
-					"--name-only",
-					"--diff-filter=U",
-				])
-					.split("\n")
-					.filter(Boolean)
-				// Only auto-resolve the unit-md conflict. Any other conflict
-				// is real — abort and surface.
-				const nonUnitMd = conflicts.filter((p) => p !== unitMdRel)
-				if (conflicts.length > 0 && nonUnitMd.length === 0) {
-					run([
-						"git",
-						...(cwd ? ["-C", cwd] : []),
-						"checkout",
-						"--ours",
-						unitMdRel,
-					])
-					run(["git", ...(cwd ? ["-C", cwd] : []), "add", unitMdRel])
-					run(["git", ...(cwd ? ["-C", cwd] : []), "commit", "--no-edit"])
-				} else {
-					throw err
-				}
+				mergeErr = err
 			}
+
+			// Always force engine-owned files back to stage ("ours") side
+			// before committing — independent of whether they appear in the
+			// conflict list. This closes the silent-overwrite path that bit
+			// us when the unit branch's frozen state.json overwrote the
+			// stage's advanced state.json on a conflict-free merge.
+			for (const relPath of engineOwnedRelPaths) {
+				// `checkout --ours` is a no-op when the path doesn't exist
+				// in the merge result; tryRun swallows that.
+				tryRun(["git", ...gitC, "checkout", "--ours", "--", relPath])
+				tryRun(["git", ...gitC, "add", "--", relPath])
+			}
+
+			// If git refused the merge before applying it (e.g. dirty
+			// working tree on the parent), `git status` will report no
+			// in-progress merge — re-throw the original error so the
+			// caller can classify it.
+			const inProgress = tryRun([
+				"git",
+				...gitC,
+				"rev-parse",
+				"--quiet",
+				"--verify",
+				"MERGE_HEAD",
+			])
+			if (!inProgress) {
+				if (mergeErr) throw mergeErr
+				// No in-progress merge AND no error — already up-to-date.
+				return
+			}
+
+			// After auto-resolving engine-owned paths, look for remaining
+			// real conflicts. Any unmerged path that isn't engine-owned is
+			// agent-authored content the workflow engine cannot resolve;
+			// surface it as a real conflict.
+			const conflicts = tryRun([
+				"git",
+				...gitC,
+				"diff",
+				"--name-only",
+				"--diff-filter=U",
+			])
+				.split("\n")
+				.filter(Boolean)
+			const realConflicts = conflicts.filter(
+				(p) => !engineOwnedRelPaths.includes(p),
+			)
+			if (realConflicts.length > 0) {
+				const e = new Error(
+					`merge_conflict: real conflicts on agent-authored content require resolution: ${realConflicts.join(", ")}`,
+				)
+				;(e as unknown as { conflictPaths: string[] }).conflictPaths =
+					realConflicts
+				throw e
+			}
+
+			run([
+				"git",
+				...gitC,
+				"commit",
+				"--no-edit",
+				"-m",
+				`haiku: merge ${unit} into ${stage}`,
+			])
 		}
 		if (onStageBranch) {
 			mergeHere()

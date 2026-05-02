@@ -7665,15 +7665,56 @@ export function handleStateTool(
 						intentSlug,
 						args.unit as string,
 					)
+					// Try to extract structured conflict paths the engine
+					// surfaced. The error message contains the literal prefix
+					// `merge_conflict: real conflicts on agent-authored
+					// content require resolution: <comma-separated paths>`
+					// when mergeUnitWorktree classified the failure as a real
+					// conflict (not dirty-tree, not other git error).
+					const conflictMatch = mergeResult.message.match(
+						/^merge_conflict: real conflicts on agent-authored content require resolution: (.+)$/m,
+					)
+					const conflictPaths = conflictMatch
+						? conflictMatch[1].split(",").map((p) => p.trim()).filter(Boolean)
+						: []
+
+					if (conflictPaths.length > 0) {
+						// True content conflicts — agent must resolve.
+						// Queue them on the stage's pending-merges file so
+						// haiku_run_next surfaces them in priority order if
+						// multiple unit merges fail in the same wave.
+						return reply(
+							{
+								action: "resolve_merge_conflicts",
+								status: "completed_pending_merge_resolution",
+								intent: args.intent,
+								unit: args.unit,
+								stage: advStage,
+								unit_branch: `haiku/${intentSlug}/${args.unit}`,
+								stage_branch: parentBranchName,
+								conflict_paths: conflictPaths,
+								worktree: worktreePath,
+								message: `Unit ${args.unit} completed its hat sequence, but merging into ${parentBranchName} produced real content conflicts on ${conflictPaths.length} file(s): ${conflictPaths.join(", ")}. The merge is left in-progress — resolve each conflicted file (the workflow engine cannot — they contain agent-authored content), \`git add\` the resolved files, \`git commit\` to complete the merge, then call \`haiku_run_next { intent: "${intentSlug}" }\`. If multiple units in this wave have pending merges, the engine will queue them and surface the next one after this is resolved.`,
+							},
+							{ isError: true },
+						)
+					}
+
+					// Other failure mode (dirty parent worktree, git
+					// machinery error, etc.). Engine cannot auto-recover;
+					// surface to agent with the actual git output.
 					return reply(
 						{
-							action: "merge_conflict",
+							action: "merge_failed",
 							status: "completed_merge_failed",
 							intent: args.intent,
 							unit: args.unit,
+							stage: advStage,
+							unit_branch: `haiku/${intentSlug}/${args.unit}`,
+							stage_branch: parentBranchName,
 							worktree: worktreePath,
 							error: mergeResult.message,
-							message: `Unit completed but merge to parent branch failed: ${mergeResult.message}. RESOLVE: cd to the parent branch (\`git checkout ${parentBranchName}\`), merge manually (\`git merge haiku/${intentSlug}/${args.unit} --no-edit\`), resolve any conflicts, then commit and push. If you cannot resolve, ask the user for help.`,
+							message: `Unit ${args.unit} completed its hat sequence, but the workflow engine could not merge into ${parentBranchName}. Git output: ${mergeResult.message}. Most common cause: the stage branch's primary worktree has uncommitted engine writes from concurrent dispatch. Inspect with \`git status\` on ${parentBranchName}; commit any engine-owned dirty files (state.json, units/*.md, baseline.json), then call \`haiku_run_next { intent: "${intentSlug}" }\` so the engine retries the merge.`,
 						},
 						{ isError: true },
 					)

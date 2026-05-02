@@ -1,20 +1,43 @@
 // orchestrator/workflow/handlers/review.ts — Emit for the `review` state.
 //
-// Owns the review-phase emission chain at orchestrator.ts:3343-3379.
-// Sub-cases handled:
+// Owns the two-phase review sequence:
 //
+//   Phase 1 — Spec gate (when spec-gate agents exist):
+//     If spec_review_dispatched is not set → emit `spec_review` action with
+//     only `spec_gate: true` agents. Advances to gate phase so the fix loop
+//     can handle any spec findings before quality review fires.
+//
+//   Phase 2 — Quality review:
+//     After spec gate clears (spec_review_dispatched is set and no open spec
+//     findings), run the full quality review layer (all non-spec-gate agents).
+//     gate.ts resets to the review phase when spec is done but
+//     quality_review_dispatched is still unset.
+//
+//   Legacy (no spec-gate agents):
+//     Straight to quality review — backwards compatible with stages that
+//     don't declare any spec-gate agents.
+//
+// Sub-cases handled once in quality-review mode:
 //   1. Output validation (defense-in-depth) → outputs_missing
 //   2. Quality gates fail → fix_quality_gates (stays in review)
 //   3. Quality gates pass → workflowAdvancePhase to gate, emit review
-//      (agent runs adversarial review agents next tick)
 //
-// Side effect: workflowAdvancePhase to gate when gates pass.
+// Side effects:
+//   - state.json: spec_review_dispatched, quality_review_dispatched flags
+//   - workflowAdvancePhase to gate on spec_review dispatch and on quality dispatch
 
 import {
 	runQualityGates,
 	validateStageOutputs,
 	workflowAdvancePhase,
 } from "../../../orchestrator.js"
+import {
+	gitCommitState,
+	readJson,
+	stageStatePath,
+	writeJson,
+} from "../../../state-tools.js"
+import { readSpecGateAgentPaths } from "../../../studio-reader.js"
 import type { WorkflowHandler } from "./_types.js"
 
 const emit: WorkflowHandler = (ctx) => {
@@ -25,6 +48,32 @@ const emit: WorkflowHandler = (ctx) => {
 	if (!currentStage) return null
 	if (ctx.currentPhase !== "review") return null
 
+	const specAgentPaths = readSpecGateAgentPaths(studio, currentStage)
+	const hasSpecAgents = Object.keys(specAgentPaths).length > 0
+	const specReviewDispatched = ctx.stageState.spec_review_dispatched === true
+	const qualityReviewDispatched =
+		ctx.stageState.quality_review_dispatched === true
+
+	// Phase 1: dispatch spec-gate agents first (when they exist and haven't run yet).
+	if (hasSpecAgents && !specReviewDispatched) {
+		const statePath = stageStatePath(slug, currentStage)
+		const stateData = readJson(statePath)
+		stateData.spec_review_dispatched = true
+		writeJson(statePath, stateData)
+		// Advance to gate so the fix loop can handle spec findings on the next tick.
+		workflowAdvancePhase(slug, currentStage, "gate")
+		gitCommitState(`haiku: spec_review dispatch in ${currentStage}`)
+		return {
+			action: "spec_review",
+			intent: slug,
+			studio,
+			stage: currentStage,
+			message: `Spec conformance gate for stage '${currentStage}' — runs before quality review to verify collective spec delivery.`,
+		}
+	}
+
+	// Phase 2: quality review (spec gate done or no spec agents).
+	// Validate outputs and run quality gates before emitting.
 	const reviewOutputCheck = validateStageOutputs(slug, currentStage, studio)
 	if (reviewOutputCheck) return reviewOutputCheck
 
@@ -42,6 +91,15 @@ const emit: WorkflowHandler = (ctx) => {
 				)
 				.join("\n\n")}`,
 		}
+	}
+
+	// Mark quality review dispatched so the gate handler knows not to reset
+	// to review phase again after quality findings are resolved.
+	if (hasSpecAgents && !qualityReviewDispatched) {
+		const statePath = stageStatePath(slug, currentStage)
+		const stateData = readJson(statePath)
+		stateData.quality_review_dispatched = true
+		writeJson(statePath, stateData)
 	}
 
 	workflowAdvancePhase(slug, currentStage, "gate")

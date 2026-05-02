@@ -46,6 +46,7 @@ import outputs_missing from "./outputs_missing.js"
 import pre_review from "./pre_review.js"
 import pre_review_waiting from "./pre_review_waiting.js"
 import review from "./review.js"
+import spec_review from "./spec_review.js"
 import review_fix from "./review_fix.js"
 import revise_unit_specs from "./revise_unit_specs.js"
 import revisited from "./revisited.js"
@@ -97,6 +98,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["pre_review", pre_review],
 	["pre_review_waiting", pre_review_waiting],
 	["review", review],
+	["spec_review", spec_review],
 	["review_fix", review_fix],
 	["revise_unit_specs", revise_unit_specs],
 	["revisited", revisited],

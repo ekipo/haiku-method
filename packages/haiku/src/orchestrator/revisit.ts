@@ -325,6 +325,10 @@ export function revisitCurrentStage(
 	stageState.pre_review_skipped_no_agents = false
 	stageState.pre_review_reviewers_acknowledged = false
 	stageState.pre_review_reviewers_acknowledged_at = null
+	// Reset spec/quality review flags so the revisit re-runs both review
+	// phases against the updated implementation.
+	stageState.spec_review_dispatched = false
+	stageState.quality_review_dispatched = false
 	writeJson(path, stageState)
 
 	uncompleteIntent(slug, intentFile)

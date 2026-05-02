@@ -125,6 +125,7 @@ export interface OrchestratorAction {
  */
 const FILE_BACKED_ACTIONS: ReadonlySet<string> = new Set<string>([
 	"pre_review",
+	"spec_review",
 	"review",
 	"review_fix",
 	"gate_review",

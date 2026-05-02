@@ -580,7 +580,35 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 # (add to the PII deny-list assertion)
 ```
 
-**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident: stop telemetry export (`HAIKU_TELEMETRY_DISABLE=1`), page security, and audit the OTLP backend's last 24h of events for the leaked keys.
+**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident. Execute the leak-stop procedure in this order, then page security and audit the OTLP backend's last 24h of events for the leaked keys.
+
+```bash
+# 1. Stop new export at the source (belt-and-suspenders: kill both the
+#    enable flag AND the endpoint so a stray restart can't re-export).
+#    There is no single-env runtime kill — telemetry is gated by
+#    `features.telemetry = flag("CLAUDE_CODE_ENABLE_TELEMETRY", false)`
+#    in packages/haiku/src/config.ts:140 and the OTLP endpoint resolves
+#    via OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+#    in packages/haiku/src/telemetry.ts:59-66. WILL_SEND
+#    (telemetry.ts:312) requires both to be true.
+unset CLAUDE_CODE_ENABLE_TELEMETRY  # or: export CLAUDE_CODE_ENABLE_TELEMETRY=false
+unset OTEL_EXPORTER_OTLP_ENDPOINT
+unset OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+
+# 2. Restart the MCP server so the new env is read. config.ts captures
+#    `features.telemetry` at module import; a hot reload will not pick
+#    it up.
+#    (Operator-specific — invoke whatever supervisor restarts the haiku
+#    MCP process: systemctl, pm2, launchctl, or kill + relaunch.)
+
+# 3. Verify export has stopped. Confirm zero `haiku.drift.gate.tick`
+#    events arrive at the OTLP backend within 60s of restart.
+#    (Backend-specific — query whatever backend the OTLP endpoint
+#    pointed at: e.g. for Loki, `count_over_time({event="haiku.drift.gate.tick"}[1m])`
+#    must drop to 0.)
+```
+
+If the operator cannot confirm zero events within 60s, do NOT assume mitigation is in place — escalate to security immediately and treat the OTLP backend as actively receiving leaked data until proven otherwise.
 
 **Rollback:** Telemetry events are append-only and may be in the backend already. If a leak is confirmed, contact the OTLP backend admin to purge events matching the offending keys; revert the regressing PR.
 

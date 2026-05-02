@@ -158,9 +158,11 @@ alerts:
     severity: ticket
     title: Drift gate kill-switch engaged
     cause: >
-      `HAIKU_DRIFT_GATE_DISABLED=1` or equivalent triggered the kill
-      switch path. Detection is OFF — this is intentional but should
-      not stay on indefinitely.
+      `drift_detection: false` is set in `.haiku/settings.yml` (read by
+      `isDriftDetectionDisabled` in
+      `packages/haiku/src/orchestrator/workflow/drift-baseline.ts:723`).
+      Detection is OFF — this is intentional but should not stay on
+      indefinitely.
     fires_when: |
       sum by (intent_slug, stage) (rate(haiku.drift.gate.kill_switch_hit[1h])) > 0
     runbook: .haiku/knowledge/RUNBOOK.md#kill-switch-engaged

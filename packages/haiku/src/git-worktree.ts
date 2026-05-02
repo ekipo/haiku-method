@@ -654,9 +654,23 @@ export function mergeStageBranchForward(
 
 /**
  * Merge a completed stage branch back into the intent hub branch
- * (`haiku/{slug}/main`) using a temporary worktree — the MCP's checkout is
- * never touched. Called when a stage is approved and the next stage is
- * about to start (or at intent completion for the final stage).
+ * (`haiku/{slug}/main`). Called when a stage is approved and the next stage
+ * is about to start (or at intent completion for the final stage).
+ *
+ * Worktree strategy (handles all three primary-checkout positions):
+ *
+ *   - Primary already on intent-main → merge in-place. A temp-worktree
+ *     attempt would fail with "branch already used by worktree."
+ *   - Primary on the completing stage branch → switch primary to intent-main
+ *     first (auto-committing engine-owned dirty files if needed), then merge
+ *     in-place. This is the steady-state workflow position when stage work
+ *     just finished, and is the post-stage transition the user sees.
+ *   - Primary anywhere else → use a temp worktree on intent-main so the
+ *     primary's checkout is undisturbed.
+ *
+ * Without this branch matrix, the function trips git's "already used by
+ * worktree" guard whenever the primary is on intent-main, leaving the stage
+ * stuck mid-completion.
  */
 export function mergeStageBranchIntoMain(
 	slug: string,
@@ -665,23 +679,63 @@ export function mergeStageBranchIntoMain(
 	if (!isGitRepo()) return { success: true, message: "no git" }
 	const stageBranch = `haiku/${slug}/${stage}`
 	const mainBranch = `haiku/${slug}/main`
+	const mergeMessage = `haiku: merge stage ${stage} into main`
 
 	try {
 		run(["git", "rev-parse", "--verify", stageBranch])
 		run(["git", "rev-parse", "--verify", mainBranch])
 
-		withTempWorktree(mainBranch, (tmpPath) => {
+		const current = getCurrentBranch()
+
+		const mergeInPrimary = (): void => {
 			run([
 				"git",
-				"-C",
-				tmpPath,
 				"merge",
 				stageBranch,
 				"--no-edit",
 				"-m",
-				`haiku: merge stage ${stage} into main`,
+				mergeMessage,
 			])
-		})
+		}
+
+		if (current === mainBranch) {
+			// Primary already on the target. Merge here.
+			mergeInPrimary()
+		} else if (current === stageBranch) {
+			// Primary on the stage branch — the steady-state position for
+			// in-progress stage work. Switch primary to intent-main, then merge.
+			// Auto-commit any engine-owned dirty files first so the checkout
+			// doesn't refuse with "would be overwritten."
+			autoCommitDirtyTree(stageBranch)
+			try {
+				run(["git", "checkout", mainBranch])
+			} catch (checkoutErr) {
+				const raw =
+					checkoutErr instanceof Error
+						? checkoutErr.message
+						: String(checkoutErr)
+				return {
+					success: false,
+					message: `cannot switch primary worktree from '${stageBranch}' to '${mainBranch}' for stage merge: ${raw}`,
+				}
+			}
+			mergeInPrimary()
+		} else {
+			// Primary on something else (foreign branch, mainline, etc.) —
+			// don't disturb it. Use a temp worktree.
+			withTempWorktree(mainBranch, (tmpPath) => {
+				run([
+					"git",
+					"-C",
+					tmpPath,
+					"merge",
+					stageBranch,
+					"--no-edit",
+					"-m",
+					mergeMessage,
+				])
+			})
+		}
 
 		return {
 			success: true,

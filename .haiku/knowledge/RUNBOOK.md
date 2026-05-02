@@ -274,49 +274,54 @@ The fix lives upstream of operations: file an issue with the offending finding's
 
 SLOs are defined against the **agent-perceived contract** of the drift-detection feature. The user is the agent driving the workflow; "healthy" means an `haiku_run_next` tick passes through both gates without the agent paying for false positives, slow ticks, or write failures it cannot resolve. Every SLO has an explicit error budget — an SLO without a budget is a wish.
 
-The measurement window for every SLO below is **a rolling 7-day window over `haiku.drift.gate.tick` events** unless stated otherwise. Each SLO carries the consumed-budget alert at 50% (warn) and 100% (page) — the universal rollback for any blown budget is the kill-switch (scenario 2) plus `haiku_reconciliation_acknowledge` per stage.
+> **Source of truth.** The machine-readable SLO definitions live in [`deploy/operations/drift-detection-slos.yaml`](../../deploy/operations/drift-detection-slos.yaml) and the burn-rate alerts that reference them in [`deploy/operations/drift-detection-alerts.yaml`](../../deploy/operations/drift-detection-alerts.yaml). The slos.yaml header explicitly declares itself the source of truth (line 14). This runbook section restates each SLO in operator-friendly prose; **if this prose contradicts slos.yaml, slos.yaml is right and this section is wrong** — file feedback to resync rather than treating the runbook as authoritative. The tables below cite the exact `slos.yaml` SLO name (`name:` field) and the alert IDs from `alerts.yaml` so an operator paged at 3am can answer "is this within budget?" by reading one canonical pair of files.
+>
+> Window, percentile, threshold, severity, and per-intent vs. aggregate scoping are inherited from slos.yaml. The universal rollback for any blown budget is the kill-switch (scenario 2) plus `haiku_reconciliation_acknowledge` per stage.
 
 ### Healthy baseline (define healthy first)
 
 A "healthy" tick has all of:
 
-1. `haiku.drift.gate.duration_ms` ≤ 500ms (p99 ≤ 1500ms).
+1. `haiku.drift.gate.duration_ms` p95 ≤ 500ms (matches `drift-gate-latency-p95` SLO; tail beyond p95 is in budget so long as the burn-rate alert does not fire).
 2. `haiku.drift.findings.count == 0` OR every emitted finding lands an assessment record on disk (`haiku.drift.assessments.count` increases by exactly the number of dispatched findings within one tick).
 3. No `haiku.drift.baseline.corrupt`, `haiku.drift.baseline.write_failed`, `haiku.reconciliation.fingerprint.write_failed`, or `haiku.drift.clear_marker_failed` events emitted.
 4. `haiku.drift.markers.open_count` is monotonically non-increasing across ticks for the same intent unless a new finding is dispatched on that tick.
-5. `haiku.reconciliation.fingerprint.duration_ms` ≤ 2000ms (the reconciliation pass enumerates the corpus; it is allowed more headroom than the per-tick drift gate).
+5. `haiku.reconciliation.fingerprint.duration_ms` p95 ≤ 750ms (matches `reconciliation-fingerprint-latency-p95` SLO; corpus enumeration is heavier than per-tick drift but still inside the same hot path).
 6. The fingerprint short-circuits: `haiku.reconciliation.fingerprint.matched` is the dominant emit; `.drifted` is rare and explicable.
 
 Anything outside this envelope is unhealthy and is the cause one of the SLOs below pages on.
 
 ### SLO 1 — Gate availability
 
-**Target.** ≥ 99.5% of `haiku.drift.gate.tick` events complete without an error emit on the same tick. Error emits in scope: `haiku.drift.baseline.corrupt`, `haiku.drift.baseline.write_failed`, `haiku.drift.clear_marker_failed`. Error budget: 0.5% of ticks per rolling 7-day window per intent.
+**slos.yaml name:** `drift-gate-availability` · **Window:** rolling 28d · **Scope:** aggregate across all intents on the host (per the SLI queries in slos.yaml — denominator is `count(haiku.drift.gate.tick)` across the service, not per intent).
+
+**Target.** ≥ 99.5% of `haiku.drift.gate.tick` events complete without an error emit on the same tick. Error emits in scope (per slos.yaml SLI): `haiku.drift.baseline.corrupt`, `haiku.drift.baseline.write_failed`. Error budget: **0.5% of 28 days = 201.6 minutes** of broken-gate time per rolling 28-day window.
+
+> Note: `haiku.drift.clear_marker_failed` is alerted on directly (see `drift-clear-marker-failed` in alerts.yaml when present, or Scenario 10) but is not part of the availability SLI numerator in slos.yaml. If you believe it should be, file feedback against slos.yaml — do not silently retune the runbook.
 
 **Why this metric.** Alerting on `haiku.drift.baseline.write_failed` directly is alerting on a symptom. Alerting on the **rate of error emits per tick** is alerting on the *cause* the agent cares about: the gate as a whole stopped delivering its contract. A single write-failed event is in budget; sustained write-failed events burn it.
 
-**Burn-rate alerts.**
-- 2% budget burned in 1 hour → page (10x burn rate, multi-window).
-- 5% budget burned in 6 hours → page (1x burn rate, multi-window).
-- 50% budget consumed in window → warn the on-call channel.
-- 100% budget consumed → page; engage the kill-switch (scenario 2) immediately to stop the burn while diagnosing.
+**Burn-rate alerts** (defined in alerts.yaml; multi-window multi-burn-rate per Google SRE Workbook).
+- `drift-availability-fast-burn` (severity: **page**) — fires when 1h burn × 14.4 AND 6h burn × 6 both exceed threshold. Active outage of the gate.
+- `drift-availability-slow-burn` (severity: **ticket**) — fires when 6h burn × 6 AND 24h burn × 1 both exceed threshold. Steady leak; investigate within the week.
+- Single-event pages: `drift-baseline-corrupt`, `drift-baseline-write-failed`, `reconciliation-write-failed` (cause-based pages independent of SLO burn — every active intent on the host is at risk).
 
 **Rollback.** Kill-switch silences the gate and stops error emits. Acknowledged stages bypass reconciliation. No customer-visible impact during rollback because the workflow continues without drift detection.
 
 ### SLO 2 — Gate latency
 
-**Target.** p99 of `haiku.drift.gate.duration_ms` ≤ 1500ms over a rolling 7-day window per intent. p50 ≤ 500ms.
+**slos.yaml name:** `drift-gate-latency-p95` · **Window:** rolling 7d · **Scope:** aggregate (denominator is `count(haiku.drift.gate.duration_ms)` across the service).
 
-**Why this metric.** The drift gate sits in the synchronous tick hot path. Slow ticks make the agent feel slow regardless of whether anything is wrong with detection. Latency is the SLO the *user of the gate* (the orchestrator) experiences.
+**Target.** ≥ 95% of `haiku.drift.gate.duration_ms` samples are < 500ms over a rolling 7-day window. Equivalent statement: **p95 ≤ 500ms over 7d**.
 
-**Burn-rate alerts.**
-- p99 > 1500ms for ≥ 5 minutes on any single intent → warn.
-- p99 > 3000ms for ≥ 5 minutes on any single intent → page.
-- p50 > 1000ms for ≥ 30 minutes → page (the median is the floor; if it is high, the tail is catastrophic).
+**Why this metric.** The drift gate sits in the synchronous tick hot path. Slow ticks make the agent feel slow regardless of whether anything is wrong with detection. Latency is the SLO the *user of the gate* (the orchestrator) experiences. p95 (not p99) is the SLO target because the gate's tail is dominated by FS-latency outliers that the kill-switch handles cleanly — the page-worthy condition is the **median** of the tail moving, not a single slow tick.
+
+**Burn-rate alerts** (defined in alerts.yaml).
+- `drift-gate-latency-p95-high` (severity: **ticket**) — fires when `histogram_quantile(0.95, rate(haiku.drift.gate.duration_ms[1h])) > 500`. Capacity warning; not a page. Paging on a single bad p95 hour generates noise on transient FS slowness.
 
 **Diagnostic playbook.** Slow ticks point to one of: large `haiku.drift.surface.size` (file-count enumeration is the dominant cost), filesystem latency on baseline read/write, or marker-store growth (`haiku.drift.markers.total_count`). The remediation order is (1) check the saturation signals listed in §Healthy baseline, (2) if marker-store size is the culprit, work scenario 10, (3) if surface size is the culprit, the tracked-surface boundary may be too wide — file feedback against the design stage.
 
-**Reconciliation latency** has its own sibling target: p99 of `haiku.reconciliation.fingerprint.duration_ms` ≤ 5000ms (corpus enumeration is heavier). Same multi-window burn semantics; same rollback (acknowledge per stage).
+**Reconciliation latency** has its own sibling SLO in slos.yaml: `reconciliation-fingerprint-latency-p95` — **p95 ≤ 750ms over 7d**, ≥ 95% of samples under 750ms. Burn-rate alert: `reconciliation-fingerprint-latency-p95-high` (severity: **ticket**). Corpus enumeration is heavier than the per-tick drift surface scan, but the same hot-path constraint applies — page-class severity is reserved for write failures, not latency.
 
 ### SLO 3 — Finding signal-to-noise
 
@@ -356,12 +361,12 @@ Anything outside this envelope is unhealthy and is the cause one of the SLOs bel
 
 The mandate from the SRE hat is: alert on causes, not symptoms; never alert on a single error; never alert without a diagnostic step. Every rule below cites a cause, links to a scenario, and has a remediation handle. Alerts that fire without a runbook scenario are alert noise — file feedback against this runbook to add the scenario rather than acking the alert in silence.
 
-| Rule | Trigger | Severity | Linked scenario | First diagnostic step |
+| Rule (alerts.yaml ID) | Trigger | Severity | Linked scenario | First diagnostic step |
 |---|---|---|---|---|
-| `drift-gate-availability-burn-fast` | SLO 1: 2% of 7-day budget burned in 1 hour | page | 3, 4 | Read `state.json` for the affected stage; identify which error emitter fired (`baseline.corrupt` vs `baseline.write_failed` vs `clear_marker_failed`) |
-| `drift-gate-availability-burn-slow` | SLO 1: 5% of budget burned in 6 hours | page | 3, 4, 10 | Group error emits by `path` attribute; one path repeating → I/O issue on that path |
-| `drift-gate-latency-p99-high` | SLO 2: p99 > 3000ms for 5 min | page | (latency playbook) | Compare `haiku.drift.surface.size` and `haiku.drift.markers.total_count` deltas across the window |
-| `reconciliation-latency-p99-high` | sibling SLO 2: p99 of `reconciliation.fingerprint.duration_ms` > 5000ms for 10 min | warn | 5, 11 | Inspect corpus size growth; confirm prior-stage artifacts have not exploded |
+| `drift-availability-fast-burn` | SLO 1 (`drift-gate-availability`, 28d): 1h burn × 14.4 AND 6h burn × 6 both exceed | page | 3, 4 | Read `state.json` for the affected stage; identify which error emitter fired (`baseline.corrupt` vs `baseline.write_failed`) |
+| `drift-availability-slow-burn` | SLO 1: 6h burn × 6 AND 24h burn × 1 both exceed | ticket | 3, 4, 10 | Group error emits by `path` attribute; one path repeating → I/O issue on that path |
+| `drift-gate-latency-p95-high` | SLO 2 (`drift-gate-latency-p95`, 7d): `histogram_quantile(0.95, rate(haiku.drift.gate.duration_ms[1h])) > 500` | ticket | (latency playbook) | Compare `haiku.drift.surface.size` and `haiku.drift.markers.total_count` deltas across the window |
+| `reconciliation-fingerprint-latency-p95-high` | sibling SLO (`reconciliation-fingerprint-latency-p95`, 7d): p95 of `reconciliation.fingerprint.duration_ms` over 1h > 750ms | ticket | 5, 11 | Inspect corpus size growth; confirm prior-stage artifacts have not exploded |
 | `drift-finding-assessment-gap` | SLO 3: < 95% findings get assessments in 6h | page | 6, 9 | Compare `haiku.drift.findings.count` vs `haiku.drift.assessments.count` per stage; the delta tells you which dispatch path failed |
 | `drift-marker-saturation-warn` | SLO 4: `open_count` > 50 for 1h | warn | 10 | Read `.haiku/intents/{slug}/drift-markers.json`; group open markers by linked-resolution invariant |
 | `drift-marker-saturation-page` | SLO 4: `open_count` > 200 OR strictly increasing 6 ticks | page | 10 | Same as above; expect one path / one feedback ID dominating the leak |
@@ -387,13 +392,14 @@ Every diagnostic step that says "check telemetry" or "check the metric" names an
 | `haiku.drift.gate.tick` | 1, 2; SLO 1 (denominator) |
 | `haiku.drift.gate.duration_ms` | SLO 2 |
 | `haiku.drift.findings.count` | 1, 9; SLO 3 (denominator) |
+| `haiku.drift.findings.mass_synthesized` | drift-findings-mass-synthesized runbook (mass-drift synthesis trigger; carries `raw_findings_count`, `effective_surface_size`, `drift_ratio`) |
 | `haiku.drift.surface.size` | 1, 8; SLO 2 diagnostic |
 | `haiku.drift.baseline.corrupt` | 3; SLO 1 numerator |
 | `haiku.drift.baseline.write_failed` | 4; SLO 1 numerator |
 | `haiku.drift.markers.open_count` | 9, 10; SLO 4 |
 | `haiku.drift.markers.total_count` | 9, 10; SLO 2 diagnostic |
 | `haiku.drift.assessments.count` | SLO 3 (numerator), Healthy baseline §2 |
-| `haiku.drift.clear_marker_failed` | 10; SLO 1 numerator |
+| `haiku.drift.clear_marker_failed` | 10 (cause-based alert; not in `drift-gate-availability` SLI per slos.yaml) |
 | `haiku.reconciliation.fingerprint.drifted` | 5, 11 |
 | `haiku.reconciliation.fingerprint.duration_ms` | 11; SLO 2 sibling |
 | `haiku.reconciliation.fingerprint.matched` | Healthy baseline §6 |
@@ -591,7 +597,35 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 # the lower-case entries.)
 ```
 
-**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident: stop telemetry export (`HAIKU_TELEMETRY_DISABLE=1`), page security, and audit the OTLP backend's last 24h of events for the leaked keys. Credential-shaped keys (`password`, `token`, `api_key`, `authorization`, `bearer`, `secret`) escalate immediately regardless of count — assume the credential was sent over the wire and rotate it.
+**Escalation:** If multiple distinct keys strip in <1h, treat as a privacy incident. Credential-shaped keys (`password`, `token`, `api_key`, `authorization`, `bearer`, `secret`) escalate immediately regardless of count — assume the credential was sent over the wire and rotate it. Execute the leak-stop procedure in this order, then page security and audit the OTLP backend's last 24h of events for the leaked keys.
+
+```bash
+# 1. Stop new export at the source (belt-and-suspenders: kill both the
+#    enable flag AND the endpoint so a stray restart can't re-export).
+#    There is no single-env runtime kill — telemetry is gated by
+#    `features.telemetry = flag("CLAUDE_CODE_ENABLE_TELEMETRY", false)`
+#    in packages/haiku/src/config.ts:140 and the OTLP endpoint resolves
+#    via OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+#    in packages/haiku/src/telemetry.ts:59-66. WILL_SEND
+#    (telemetry.ts:312) requires both to be true.
+unset CLAUDE_CODE_ENABLE_TELEMETRY  # or: export CLAUDE_CODE_ENABLE_TELEMETRY=false
+unset OTEL_EXPORTER_OTLP_ENDPOINT
+unset OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+
+# 2. Restart the MCP server so the new env is read. config.ts captures
+#    `features.telemetry` at module import; a hot reload will not pick
+#    it up.
+#    (Operator-specific — invoke whatever supervisor restarts the haiku
+#    MCP process: systemctl, pm2, launchctl, or kill + relaunch.)
+
+# 3. Verify export has stopped. Confirm zero `haiku.drift.gate.tick`
+#    events arrive at the OTLP backend within 60s of restart.
+#    (Backend-specific — query whatever backend the OTLP endpoint
+#    pointed at: e.g. for Loki, `count_over_time({event="haiku.drift.gate.tick"}[1m])`
+#    must drop to 0.)
+```
+
+If the operator cannot confirm zero events within 60s, do NOT assume mitigation is in place — escalate to security immediately and treat the OTLP backend as actively receiving leaked data until proven otherwise.
 
 **Rollback:** Telemetry events are append-only and may be in the backend already. If a leak is confirmed, contact the OTLP backend admin to purge events matching the offending keys; revert the regressing PR.
 
@@ -616,9 +650,9 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 - Single intent flapping: see `drift-gate-baseline-corrupt` runbook above.
 - FS-wide: see `drift-gate-write-failed` runbook above.
 
-**Escalation:** Fast-burn that doesn't clear within 30 min → consider engaging kill switch to stop the budget bleed while you investigate (`HAIKU_DRIFT_GATE_DISABLED=1`).
+**Escalation:** Fast-burn that doesn't clear within 30 min → engage the kill-switch to stop the budget bleed while you investigate. Add `drift_detection: false` to `.haiku/settings.yml` (see scenario 2 / `kill-switch-engaged`).
 
-**Rollback:** Re-enable the gate (`unset HAIKU_DRIFT_GATE_DISABLED`) once the underlying cause is fixed and `gate.tick` events resume cleanly for 1h.
+**Rollback:** Re-enable the gate by removing the `drift_detection: false` line from `.haiku/settings.yml` (or setting it to `true`) once the underlying cause is fixed and `gate.tick` events resume cleanly for 1h.
 
 ## drift-gate-latency-high
 
@@ -660,29 +694,49 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 
 **Rollback:** N/A.
 
-## drift-oom-synthetic
+## drift-findings-mass-synthesized
 
-**Symptom:** Alert `drift-surface-oom-synthetic` fires. Event `haiku.drift.baseline.oom_synthetic` shows non-zero count.
+**Symptom:** Alert `drift-findings-mass-synthesized` fires. Event `haiku.drift.findings.mass_synthesized` shows non-zero count. Drift gate emitted exactly one synthetic stage-level finding instead of a per-file list.
 
-**Cause:** Surface size for an intent exceeded the in-memory baseline threshold. Gate downgraded to one synthetic finding per stage. Detection still works; per-file fidelity is lost.
+**Cause:** > 50% of the tracked surface for an intent/stage drifted in a single tick. The gate (`drift-detection-gate.ts` §9) collapses the per-file findings into one synthetic event when `findings.length > effectiveSurfaceSize * 0.5`. **This is NOT a surface-size or memory-cap event.** The trigger is *drift volume relative to surface*, not absolute surface size — a 40-file surface with 30 files changed in one tick will fire the same as a 4000-file surface with 3000 changed. Detection still works; per-file diff fidelity is lost for this tick.
+
+**Most-likely root causes (check in order):**
+1. A bulk regenerate / scaffolder script ran (e.g. `bun run export:workflow-diagrams`, codegen, formatter applied repo-wide).
+2. A `git rebase`, `git merge`, or branch swap landed many files at once.
+3. A large refactor or rename touched the majority of tracked files in one commit.
+4. An upstream tool (linter on `--fix-all`, auto-formatter, AI bulk edit) rewrote the surface.
 
 **Diagnose:**
 
 ```bash
-# 1. Which intent + stage tripped the threshold?
-#    `haiku.drift.baseline.oom_synthetic` carries intent_slug + stage.
+# 1. Which intent + stage tripped synthesis?
+#    `haiku.drift.findings.mass_synthesized` carries intent_slug + stage.
+#    The event also carries:
+#      - raw_findings_count   = N files that drifted this tick
+#      - effective_surface_size = total tracked file count
+#      - drift_ratio          = raw_findings_count / effective_surface_size
 #
-# 2. What is the surface size for that intent/stage?
-#    `haiku.drift.surface.size` gives the count.
+# 2. Confirm a bulk operation is responsible. Look at git history on the
+#    affected stage's branch around the synthesis timestamp:
+git -C <repo> log --since="<alert_time -10m>" --until="<alert_time +1m>" --stat <stage-branch>
+#    A single commit touching dozens of files (or a rebase landing many
+#    commits at once) is the smoking gun.
+#
+# 3. If git is silent, check for out-of-band tooling:
+#    - codegen scripts (search package.json `"scripts"` for export/regen tasks)
+#    - editor format-on-save run across many files
+#    - an interrupted AI agent session that rewrote the surface
 ```
 
 **Remediate:**
-- If the intent has accumulated cruft (old assessments, archived attachments), prune.
-- If the intent is genuinely large, the synthetic baseline is correct behavior — no action. The user will see one finding per stage instead of one per file; they can drill into git for details.
+- If the bulk operation was intentional and approved (regen, refactor): no action — the synthesis fired correctly. The agent will see one finding per stage and either accept it or trigger a stage revisit. Per-file fidelity returns on the next tick once the new content is the baseline.
+- If the bulk operation was unintentional (rogue script, accidental rebase): identify the source, revert, and re-run the gate. The synthetic finding will clear once `findings.length / effectiveSurfaceSize` drops below 0.5.
+- Do NOT prune the surface. The trigger is not surface size; pruning will not stop the alert and may hide real drift.
+- Do NOT raise the 0.5 ratio threshold without an architecture revision — it is the documented out-of-sync heuristic (ARCHITECTURE.md §8.3).
 
-**Escalation:** If >3 intents cross the threshold in a week, the in-memory threshold itself may need raising. File a follow-up issue; do not page.
+**Escalation:** If mass synthesis fires repeatedly on the same intent/stage with no identifiable bulk operation, escalate to engineering — the gate may be misclassifying steady-state churn as mass drift, OR the baseline establishment path is failing to capture writes (file an issue; capture `raw_findings_count`, `effective_surface_size`, and the affected stage branch).
 
-**Rollback:** N/A.
+**Rollback:** N/A. The synthesis is read-only telemetry; nothing to roll back.
 
 ## drift-markers-churn
 
@@ -705,36 +759,43 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 
 **Symptom:** Alert `kill-switch-engaged` fires. Event `haiku.drift.gate.kill_switch_hit` shows non-zero count.
 
-**Cause:** `HAIKU_DRIFT_GATE_DISABLED=1` (or equivalent) is set in the MCP environment. Detection is OFF.
+**Cause:** `drift_detection: false` is set in `.haiku/settings.yml`. The setting is read by `isDriftDetectionDisabled(haikuRoot)` in `packages/haiku/src/orchestrator/workflow/drift-baseline.ts:723` — the first check inside `runDriftDetectionGate`. Detection is OFF.
 
 **Diagnose:**
 
 ```bash
 # 1. Confirm the kill switch is set
-env | grep HAIKU_DRIFT
+grep -E '^drift_detection:' .haiku/settings.yml
+# Expected output when engaged: drift_detection: false
+#
 # 2. Check who set it and when
-#    `git log` on the dotenv / launcher script that exports it.
+git log -p -- .haiku/settings.yml | grep -A1 -B1 drift_detection
 ```
 
 **Remediate:**
 
 ```bash
-# When the underlying cause is resolved:
-unset HAIKU_DRIFT_GATE_DISABLED
-# Or remove the export from the launcher.
-# Restart MCP. Next tick should emit haiku.drift.gate.tick instead of
-# kill_switch_hit.
+# When the underlying cause is resolved, remove the line (or flip to true):
+#   Edit .haiku/settings.yml and either delete the `drift_detection: false`
+#   line or change it to `drift_detection: true`. The default (line absent)
+#   is enabled.
+#
+# No MCP restart is required — isDriftDetectionDisabled re-reads
+# settings.yml on every gate invocation. The next tick should emit
+# haiku.drift.gate.tick instead of kill_switch_hit.
 ```
+
+**Scope clause (CRITICAL):** `drift_detection: false` disables only the per-stage drift-detection gate. It does NOT silence the upstream-reconciliation gate. See scenario 2 for the full scope description and the companion `haiku_reconciliation_acknowledge` path.
 
 **Escalation:** If the kill switch has been on for >24h without a follow-up issue tracking the resolution, file an issue and tag the person who set it. Long-running kill switches mask other problems.
 
-**Rollback:** Re-engage the kill switch if a regression appears immediately after re-enabling.
+**Rollback:** Re-engage the kill-switch (re-add `drift_detection: false` to `.haiku/settings.yml`) if a regression appears immediately after re-enabling.
 
 ## assessments-stuck
 
-**Symptom:** Alert `assessments-zero-completion` fires (info, possible false-positive).
+**Symptom:** Alert `assessments-zero-completion` fires (info).
 
-**Cause:** Drift assessments dispatched (`haiku.drift.assessments.count` ticked up) but the agent didn't emit a corresponding resolution event. Possible loop, stuck agent, or missing resolution telemetry.
+**Cause:** Drift assessments were dispatched (`haiku.drift.assessments.count` ticked up) but no corresponding `haiku.drift.assessments.resolved` event fired in the same 6h window. The resolution event is emitted by `haiku_classify_drift.ts` at the same site as `haiku.assessment.recorded` — so a firing alert means classification was dispatched and never completed (stuck agent, loop, or crashed handler).
 
 **Diagnose:**
 
@@ -744,11 +805,14 @@ find .haiku/intents/*/stages/*/drift-assessments -type f -newer /tmp/.6h-ago
 
 # 2. Check the agent's recent run-tick output for a stuck loop
 tail -200 ~/.claude/logs/mcp.log | grep manual_change_assessment
+
+# 3. Confirm no resolution events landed for the affected intent_slug/stage
+#    in the alert window (resolved metric should be > 0 if classification ran)
+grep "haiku.drift.assessments.resolved" ~/.claude/logs/telemetry.log \
+  | grep "$INTENT_SLUG" | tail -20
 ```
 
 **Remediate:** Agent intervention — instruct the agent to resolve the open assessment (`haiku_run_next` should pick it up). If the agent loops indefinitely, manually move the assessment file to `.resolved-manual/<ts>/` and document the case as a follow-up.
-
-**Note:** This alert depends on a `haiku.drift.assessments.resolved` event that does not yet exist. Marked as a telemetry coverage gap for a future unit.
 
 **Escalation:** If assessments accumulate across many intents (>20 unresolved over 24h), the dispatch-vs-resolution loop is likely broken — file an incident.
 

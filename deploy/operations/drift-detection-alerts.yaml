@@ -107,26 +107,45 @@ alerts:
   # ─────────────────────────────────────────────────────────────────
   - id: drift-gate-latency-p95-high
     severity: ticket
-    title: Drift gate p95 latency exceeds SLO
+    title: Drift gate p95 latency exceeds SLO — intent {{ $labels.intent_slug }} / stage {{ $labels.stage }}
     slo: drift-gate-latency-p95
     cause: >
-      p95 of `haiku.drift.gate.duration_ms` over 1h > 500ms. Likely root
-      cause: surface size growth (correlate with
-      `haiku.drift.surface.size`) or filesystem degradation.
+      p95 of `haiku.drift.gate.duration_ms` over 1h > 500ms for a given
+      `(intent_slug, stage)` series. Likely root cause: surface size
+      growth (correlate with `haiku.drift.surface.size` filtered to the
+      same labels) or filesystem degradation. Per the unit-02
+      cross-artifact contract, this alert MUST aggregate
+      `by (intent_slug, stage)` so the page identifies which intent is
+      slow without requiring the operator to re-aggregate manually.
     fires_when: |
-      histogram_quantile(0.95, rate(haiku.drift.gate.duration_ms[1h])) > 500
+      histogram_quantile(0.95, sum by (intent_slug, stage, le) (rate(haiku.drift.gate.duration_ms_bucket[1h]))) > 500
+    annotations:
+      summary: >
+        Drift gate p95 latency > 500ms on intent={{ $labels.intent_slug }}
+        stage={{ $labels.stage }}. Operator must check this intent's
+        surface size before re-aggregating.
     runbook: .haiku/knowledge/RUNBOOK.md#drift-gate-latency-high
 
   - id: reconciliation-fingerprint-latency-p95-high
     severity: ticket
-    title: Reconciliation fingerprint p95 latency exceeds SLO
+    title: Reconciliation fingerprint p95 latency exceeds SLO — intent {{ $labels.intent_slug }} / stage {{ $labels.stage }}
     slo: reconciliation-fingerprint-latency-p95
     cause: >
       p95 of `haiku.reconciliation.fingerprint.duration_ms` over 1h >
-      750ms. Correlate with `haiku.reconciliation.corpus.bytes` to
-      confirm corpus growth vs. filesystem slowdown.
+      750ms for a given `(intent_slug, stage)` series. Correlate with
+      `haiku.reconciliation.corpus.bytes` filtered to the same labels
+      to confirm corpus growth vs. filesystem slowdown. Per the unit-02
+      cross-artifact contract, this alert MUST aggregate
+      `by (intent_slug, stage)` so the page identifies which intent is
+      slow without requiring the operator to re-aggregate manually.
     fires_when: |
-      histogram_quantile(0.95, rate(haiku.reconciliation.fingerprint.duration_ms[1h])) > 750
+      histogram_quantile(0.95, sum by (intent_slug, stage, le) (rate(haiku.reconciliation.fingerprint.duration_ms_bucket[1h]))) > 750
+    annotations:
+      summary: >
+        Reconciliation fingerprint p95 latency > 750ms on
+        intent={{ $labels.intent_slug }} stage={{ $labels.stage }}.
+        Operator must check this intent's corpus size before
+        re-aggregating.
     runbook: .haiku/knowledge/RUNBOOK.md#reconciliation-latency-high
 
   # ─────────────────────────────────────────────────────────────────

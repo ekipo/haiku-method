@@ -164,9 +164,11 @@ alerts:
     severity: ticket
     title: Drift gate kill-switch engaged
     cause: >
-      `HAIKU_DRIFT_GATE_DISABLED=1` or equivalent triggered the kill
-      switch path. Detection is OFF — this is intentional but should
-      not stay on indefinitely.
+      `drift_detection: false` is set in `.haiku/settings.yml` (read by
+      `isDriftDetectionDisabled` in
+      `packages/haiku/src/orchestrator/workflow/drift-baseline.ts:723`).
+      Detection is OFF — this is intentional but should not stay on
+      indefinitely.
     fires_when: |
       sum by (intent_slug, stage) (rate(haiku.drift.gate.kill_switch_hit[1h])) > 0
     runbook: .haiku/knowledge/RUNBOOK.md#kill-switch-engaged
@@ -182,15 +184,23 @@ alerts:
       `stages/<s>/drift-assessments/` are not consumed. Suggests the
       agent is dispatching but not finishing — possible loop.
     fires_when: |
-      # Custom: ratio of assessments dispatched to assessments resolved.
-      # Resolution is a separate event the orchestrator emits (TBD).
+      # Compound: assessments dispatched (count) without a paired
+      # resolution event (resolved) over a 6h window. Both metrics share
+      # `intent_slug` + `stage` labels so series pair cleanly. The
+      # resolution event is emitted by haiku_classify_drift.ts at the
+      # same point AS-NN.json is written; an unresolved assessment
+      # therefore means the agent never finished classifying.
       sum by (intent_slug, stage) (rate(haiku.drift.assessments.count[6h])) > 0
       AND
       sum by (intent_slug, stage) (rate(haiku.drift.assessments.resolved[6h])) == 0
     runbook: .haiku/knowledge/RUNBOOK.md#assessments-stuck
     notes: >
-      Resolution event TBD — flagged as future telemetry coverage gap.
-      For now, alert is informational and may produce false positives.
+      `haiku.drift.assessments.resolved` is emitted by
+      packages/haiku/src/tools/orchestrator/haiku_classify_drift.ts at
+      the same site as `haiku.assessment.recorded`. A firing alert
+      indicates the agent dispatched an assessment but classification
+      never completed — true loop or stuck-agent signal, not a
+      telemetry gap.
 
 # ─────────────────────────────────────────────────────────────────────
 # Anti-patterns rejected during alert design (per SRE hat directive):

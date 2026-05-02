@@ -14,7 +14,12 @@ Path conventions used throughout (verified against `packages/haiku/src/orchestra
 - Intent-root active drift dispatch: `.haiku/intents/{slug}/drift-dispatch.json`
 - Intent-root action log: `.haiku/intents/{slug}/action-log.jsonl`
 - Intent-root write-audit log: `.haiku/intents/{slug}/write-audit.jsonl`
-- Intent-root features: `.haiku/intents/{slug}/features/*.feature`
+- Intent-root features: `.haiku/intents/{slug}/features/*.feature` — for this intent (`out-of-band-human-file-modifications`), the five owned feature files are:
+  - `.haiku/intents/out-of-band-human-file-modifications/features/silent-filesystem-drop-detection.feature`
+  - `.haiku/intents/out-of-band-human-file-modifications/features/manual-change-assessment.feature`
+  - `.haiku/intents/out-of-band-human-file-modifications/features/agent-writes-on-behalf-of-human.feature`
+  - `.haiku/intents/out-of-band-human-file-modifications/features/explicit-spa-upload.feature`
+  - `.haiku/intents/out-of-band-human-file-modifications/features/drift-assessment-visibility.feature`
 - Repo settings: `.haiku/settings.yml`
 
 The kill-switch (scenario 2) is the universal rollback for the per-stage drift-detection gate. `haiku_reconciliation_acknowledge` is the per-stage release valve for the upstream-reconciliation gate. They have different scopes; the rest of the runbook leans on these two as backstops.

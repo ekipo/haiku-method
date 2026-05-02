@@ -60,7 +60,6 @@ jobs:
       - name: Verify drift-test coverage
         run: node scripts/check-ci-covers-drift-tests.mjs
 
-      - name: Run MCP test suite
-        working-directory: packages/haiku
-        run: node test/run-all.mjs
+      - name: Run MCP test suite (packages/haiku npm test)
+        run: npm test --workspace packages/haiku
 

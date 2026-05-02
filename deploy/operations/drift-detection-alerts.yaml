@@ -130,18 +130,24 @@ alerts:
     runbook: .haiku/knowledge/RUNBOOK.md#reconciliation-latency-high
 
   # ─────────────────────────────────────────────────────────────────
-  # SATURATION TICKETS (capacity warnings — cause: corpus is growing)
+  # FIDELITY-LOSS TICKETS (per-file detail collapsed; detection still works)
   # ─────────────────────────────────────────────────────────────────
-  - id: drift-surface-oom-synthetic
+  - id: drift-findings-mass-synthesized
     severity: ticket
-    title: Drift gate fell back to OOM-synthetic baseline
+    title: Drift gate synthesized findings — > 50% of surface drifted in one tick
     cause: >
-      Surface size exceeded the in-memory baseline threshold; gate
-      downgraded to one synthetic finding per stage. Detection still
-      works; per-file fidelity is lost.
+      More than 50% of the tracked surface for an intent/stage drifted
+      in a single tick. The gate collapsed the per-file findings into
+      one synthetic stage-level event (see `drift-detection-gate.ts`
+      §9). This is NOT a surface-size or memory-cap event — it triggers
+      on drift volume relative to surface, regardless of absolute
+      surface size. Typical causes: bulk regeneration script, `git
+      rebase`, large refactor, or an upstream tool rewriting the
+      majority of tracked files. Per-file diff fidelity is lost for
+      this tick; detection itself still works.
     fires_when: |
-      sum by (intent_slug, stage) (rate(haiku.drift.baseline.oom_synthetic[1d])) > 0
-    runbook: .haiku/knowledge/RUNBOOK.md#drift-oom-synthetic
+      sum by (intent_slug, stage) (rate(haiku.drift.findings.mass_synthesized[1d])) > 0
+    runbook: .haiku/knowledge/RUNBOOK.md#drift-findings-mass-synthesized
 
   - id: drift-markers-stale-burst
     severity: info

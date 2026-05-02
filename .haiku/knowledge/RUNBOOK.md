@@ -387,6 +387,7 @@ Every diagnostic step that says "check telemetry" or "check the metric" names an
 | `haiku.drift.gate.tick` | 1, 2; SLO 1 (denominator) |
 | `haiku.drift.gate.duration_ms` | SLO 2 |
 | `haiku.drift.findings.count` | 1, 9; SLO 3 (denominator) |
+| `haiku.drift.findings.mass_synthesized` | drift-findings-mass-synthesized runbook (mass-drift synthesis trigger; carries `raw_findings_count`, `effective_surface_size`, `drift_ratio`) |
 | `haiku.drift.surface.size` | 1, 8; SLO 2 diagnostic |
 | `haiku.drift.baseline.corrupt` | 3; SLO 1 numerator |
 | `haiku.drift.baseline.write_failed` | 4; SLO 1 numerator |
@@ -649,29 +650,49 @@ $EDITOR packages/haiku/test/telemetry-otel.test.mjs
 
 **Rollback:** N/A.
 
-## drift-oom-synthetic
+## drift-findings-mass-synthesized
 
-**Symptom:** Alert `drift-surface-oom-synthetic` fires. Event `haiku.drift.baseline.oom_synthetic` shows non-zero count.
+**Symptom:** Alert `drift-findings-mass-synthesized` fires. Event `haiku.drift.findings.mass_synthesized` shows non-zero count. Drift gate emitted exactly one synthetic stage-level finding instead of a per-file list.
 
-**Cause:** Surface size for an intent exceeded the in-memory baseline threshold. Gate downgraded to one synthetic finding per stage. Detection still works; per-file fidelity is lost.
+**Cause:** > 50% of the tracked surface for an intent/stage drifted in a single tick. The gate (`drift-detection-gate.ts` §9) collapses the per-file findings into one synthetic event when `findings.length > effectiveSurfaceSize * 0.5`. **This is NOT a surface-size or memory-cap event.** The trigger is *drift volume relative to surface*, not absolute surface size — a 40-file surface with 30 files changed in one tick will fire the same as a 4000-file surface with 3000 changed. Detection still works; per-file diff fidelity is lost for this tick.
+
+**Most-likely root causes (check in order):**
+1. A bulk regenerate / scaffolder script ran (e.g. `bun run export:workflow-diagrams`, codegen, formatter applied repo-wide).
+2. A `git rebase`, `git merge`, or branch swap landed many files at once.
+3. A large refactor or rename touched the majority of tracked files in one commit.
+4. An upstream tool (linter on `--fix-all`, auto-formatter, AI bulk edit) rewrote the surface.
 
 **Diagnose:**
 
 ```bash
-# 1. Which intent + stage tripped the threshold?
-#    `haiku.drift.baseline.oom_synthetic` carries intent_slug + stage.
+# 1. Which intent + stage tripped synthesis?
+#    `haiku.drift.findings.mass_synthesized` carries intent_slug + stage.
+#    The event also carries:
+#      - raw_findings_count   = N files that drifted this tick
+#      - effective_surface_size = total tracked file count
+#      - drift_ratio          = raw_findings_count / effective_surface_size
 #
-# 2. What is the surface size for that intent/stage?
-#    `haiku.drift.surface.size` gives the count.
+# 2. Confirm a bulk operation is responsible. Look at git history on the
+#    affected stage's branch around the synthesis timestamp:
+git -C <repo> log --since="<alert_time -10m>" --until="<alert_time +1m>" --stat <stage-branch>
+#    A single commit touching dozens of files (or a rebase landing many
+#    commits at once) is the smoking gun.
+#
+# 3. If git is silent, check for out-of-band tooling:
+#    - codegen scripts (search package.json `"scripts"` for export/regen tasks)
+#    - editor format-on-save run across many files
+#    - an interrupted AI agent session that rewrote the surface
 ```
 
 **Remediate:**
-- If the intent has accumulated cruft (old assessments, archived attachments), prune.
-- If the intent is genuinely large, the synthetic baseline is correct behavior — no action. The user will see one finding per stage instead of one per file; they can drill into git for details.
+- If the bulk operation was intentional and approved (regen, refactor): no action — the synthesis fired correctly. The agent will see one finding per stage and either accept it or trigger a stage revisit. Per-file fidelity returns on the next tick once the new content is the baseline.
+- If the bulk operation was unintentional (rogue script, accidental rebase): identify the source, revert, and re-run the gate. The synthetic finding will clear once `findings.length / effectiveSurfaceSize` drops below 0.5.
+- Do NOT prune the surface. The trigger is not surface size; pruning will not stop the alert and may hide real drift.
+- Do NOT raise the 0.5 ratio threshold without an architecture revision — it is the documented out-of-sync heuristic (ARCHITECTURE.md §8.3).
 
-**Escalation:** If >3 intents cross the threshold in a week, the in-memory threshold itself may need raising. File a follow-up issue; do not page.
+**Escalation:** If mass synthesis fires repeatedly on the same intent/stage with no identifiable bulk operation, escalate to engineering — the gate may be misclassifying steady-state churn as mass drift, OR the baseline establishment path is failing to capture writes (file an issue; capture `raw_findings_count`, `effective_surface_size`, and the affected stage branch).
 
-**Rollback:** N/A.
+**Rollback:** N/A. The synthesis is read-only telemetry; nothing to roll back.
 
 ## drift-markers-churn
 

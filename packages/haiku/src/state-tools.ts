@@ -15,6 +15,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 import {
 	dedupeFrontmatterKeys,
@@ -3096,6 +3097,12 @@ export const UNIT_FRONTMATTER_SCHEMA = {
 			description:
 				"On revisit iterations, list of FB IDs this unit addresses (e.g. `[FB-01, FB-03]`). Every pending FB must be claimed by some unit's `closes:` to allow advancement.",
 		},
+		applicable_skills: {
+			type: "array",
+			items: { type: "string" },
+			description:
+				"Skill slugs (slash-command names without the leading `/`) identified as relevant for this unit during elaboration. The elaborator populates this from the installed skill registry. Hat subagent prompts surface these automatically so subagents know which skills to reach for.",
+		},
 	},
 	// workflow-driven fields. Agents MUST NOT set these — the workflow engine owns
 	// transitions via haiku_unit_advance_hat / haiku_unit_reject_hat /
@@ -5188,6 +5195,92 @@ export function deleteFeedbackFile(
 	return { ok: true }
 }
 
+// ── Skill discovery ───────────────────────────────────────────────────────
+
+export interface InstalledSkill {
+	slug: string
+	name: string
+	description: string
+	source: "plugin" | "project" | "global"
+}
+
+/**
+ * Enumerate all Claude Code skills (slash commands) visible to the current
+ * session. Three search locations, in priority order:
+ *
+ *   1. Plugin-root skills  — `{CLAUDE_PLUGIN_ROOT}/skills/{slug}/SKILL.md`
+ *   2. Project-local skills — `{cwd}/.claude/skills/{slug}/SKILL.md`
+ *   3. Global user plugins  — `~/.claude/plugins/*/skills/{slug}/SKILL.md`
+ *
+ * De-duplicated by slug (first occurrence wins, so plugin-root skills shadow
+ * global ones with the same name). Returns an empty array when no skills
+ * directory is found; never throws.
+ */
+export function listInstalledSkills(): InstalledSkill[] {
+	const skills: InstalledSkill[] = []
+	const seen = new Set<string>()
+
+	function readSkillDir(
+		dir: string,
+		source: InstalledSkill["source"],
+	): void {
+		if (!existsSync(dir)) return
+		let entries: ReturnType<typeof readdirSync>
+		try {
+			entries = readdirSync(dir, { withFileTypes: true })
+		} catch {
+			return
+		}
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue
+			const slug = entry.name
+			if (seen.has(slug)) continue
+			const skillFile = join(dir, slug, "SKILL.md")
+			if (!existsSync(skillFile)) continue
+			seen.add(slug)
+			try {
+				const raw = readFileSync(skillFile, "utf8")
+				const { data } = parseFrontmatter(raw)
+				skills.push({
+					slug,
+					name: (data.name as string) || slug,
+					description: (data.description as string) || "",
+					source,
+				})
+			} catch {
+				/* skip malformed skill files */
+			}
+		}
+	}
+
+	// 1. Plugin-root skills (haiku plugin's bundled skills)
+	const pluginRoot = resolvePluginRoot()
+	if (pluginRoot) readSkillDir(join(pluginRoot, "skills"), "plugin")
+
+	// 2. Project-local skills (.claude/skills/ in cwd)
+	readSkillDir(join(process.cwd(), ".claude", "skills"), "project")
+
+	// 3. Global user skills (~/.claude/plugins/*/skills/)
+	try {
+		const globalPluginsDir = join(homedir(), ".claude", "plugins")
+		if (existsSync(globalPluginsDir)) {
+			for (const entry of readdirSync(globalPluginsDir, {
+				withFileTypes: true,
+			})) {
+				if (!entry.isDirectory()) continue
+				readSkillDir(
+					join(globalPluginsDir, entry.name, "skills"),
+					"global",
+				)
+			}
+		}
+	} catch {
+		/* non-fatal */
+	}
+
+	return skills
+}
+
 // ── Tool definitions ───────────────────────────────────────────────────────
 
 export const stateToolDefs = [
@@ -5728,6 +5821,40 @@ Forbidden FM fields (workflow-driven, mutating these returns \`fsm_field_forbidd
 				content: { type: "string", description: "Raw markdown body." },
 			},
 			required: ["found", "name", "content"],
+		},
+	},
+	// Skill tools
+	{
+		name: "haiku_skill_list",
+		description:
+			"List all Claude Code skills (slash commands) installed in the user's environment — plugin root, project-local (.claude/skills/), and global (~/.claude/plugins/*/skills/). " +
+			"The elaborator calls this to annotate units with `applicable_skills:` frontmatter; hat subagent prompts surface those skills automatically.",
+		inputSchema: { type: "object" as const, properties: {} },
+		outputSchema: {
+			type: "object",
+			properties: {
+				skills: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							slug: {
+								type: "string",
+								description:
+									"Skill slug — the identifier used in `applicable_skills:` frontmatter (no leading `/`).",
+							},
+							name: { type: "string" },
+							description: { type: "string" },
+							source: {
+								type: "string",
+								description: "plugin | project | global",
+							},
+						},
+						required: ["slug", "name", "description", "source"],
+					},
+				},
+			},
+			required: ["skills"],
 		},
 	},
 	// Studio tools
@@ -8321,6 +8448,11 @@ export function handleStateTool(
 				name: args.name as string,
 				content: readFileSync(path, "utf8"),
 			})
+		}
+
+		// ── Skills ──
+		case "haiku_skill_list": {
+			return reply({ skills: listInstalledSkills() })
 		}
 
 		// ── Studio ──

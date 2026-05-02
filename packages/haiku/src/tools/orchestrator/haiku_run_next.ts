@@ -77,7 +77,7 @@ import {
 	listVisibleIntents,
 	parseFrontmatter,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	stageStatePath,
 	syncSessionMetadata,
 	validateBranch,
@@ -352,12 +352,7 @@ export default defineTool({
 					if (gateContext === "intent_review") {
 						// Intent approved — mark as reviewed AND advance phase
 						// to execute.
-						const intentFilePath = join(
-							process.cwd(),
-							intentDirPath,
-							"intent.md",
-						)
-						setFrontmatterField(intentFilePath, "intent_reviewed", true)
+						setIntentField(slug, "intent_reviewed", true)
 						if (nextPhase) workflowAdvancePhase(slug, stage, nextPhase)
 						gitCommitState(`haiku: intent ${slug} approved by user`)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
@@ -511,18 +506,9 @@ export default defineTool({
 					// INTENT_FIELDS, so we must reseal the integrity
 					// checksum after writing or verifyIntentState() will
 					// false-positive.
-					const intentFilePath = join(intentDir(slug), "intent.md")
-					setFrontmatterField(intentFilePath, "phase", "active")
-					setFrontmatterField(
-						intentFilePath,
-						"completion_review_dispatched",
-						false,
-					)
-					setFrontmatterField(
-						intentFilePath,
-						"completion_review_skipped",
-						false,
-					)
+					setIntentField(slug, "phase", "active")
+					setIntentField(slug, "completion_review_dispatched", false)
+					setIntentField(slug, "completion_review_skipped", false)
 					resetFixLoopBolts(slug, "")
 					sealIntentState(slug)
 					gitCommitState(
@@ -677,12 +663,7 @@ export default defineTool({
 								(elicitResult.content as Record<string, string>).feedback || ""
 							if (decision === "approve") {
 								if (gateContext === "intent_review") {
-									const intentFilePath = join(
-										process.cwd(),
-										intentDirPath,
-										"intent.md",
-									)
-									setFrontmatterField(intentFilePath, "intent_reviewed", true)
+									setIntentField(slug, "intent_reviewed", true)
 									if (nextPhase) workflowAdvancePhase(slug, stage, nextPhase)
 									gitCommitState(
 										`haiku: intent ${slug} approved by user (elicitation)`,

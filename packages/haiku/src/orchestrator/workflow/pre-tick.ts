@@ -24,15 +24,21 @@ import {
 } from "node:fs"
 import { join } from "node:path"
 import matter from "gray-matter"
+import {
+	getCurrentBranch,
+	readFileFromBranch,
+	writeOnIntentMain,
+} from "../../git-worktree.js"
 import { getCurrentState } from "../../current-state.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { resolveIntentStages, resolveStudioStages } from "../../orchestrator.js"
 import {
 	gitCommitState,
 	intentDir,
+	isGitRepo,
 	parseFrontmatter,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	timestamp,
 	writeJson,
 } from "../../state-tools.js"
@@ -41,6 +47,73 @@ import { emitTelemetry } from "../../telemetry.js"
 function readFm(filePath: string): Record<string, unknown> {
 	const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
 	return data
+}
+
+// Fields whose divergence between stage branch and intent main would
+// cause incorrect workflow routing. active_stage is handled separately
+// by syncActiveStageFromStateJson; these are the remaining sentinel fields.
+const INTENT_SENTINEL_FIELDS = [
+	"status",
+	"mode",
+	"phase",
+	"archived",
+	"autopilot",
+] as const
+
+/** Detect divergence of key intent.md fields between the current stage
+ *  branch and intent main. When diverged, the stage branch is considered
+ *  the source of truth (it has the newer writes) and is mirrored to main.
+ *  Returns a safe_intent_repair action so the agent sees the repair rather
+ *  than silently picking one version. No-op in non-git mode or when already
+ *  on intent main.
+ */
+function checkIntentMainDivergence(
+	slug: string,
+	intentFile: string,
+	intent: Record<string, unknown>,
+): OrchestratorAction | null {
+	if (!isGitRepo()) return null
+	const branch = getCurrentBranch()
+	if (!branch || !branch.startsWith(`haiku/${slug}/`)) return null
+	if (branch === `haiku/${slug}/main`) return null
+
+	const mainBranch = `haiku/${slug}/main`
+	const relPath = `.haiku/intents/${slug}/intent.md`
+	const mainRaw = readFileFromBranch(mainBranch, relPath)
+	if (!mainRaw) return null
+
+	const mainFm = parseFrontmatter(mainRaw).data
+
+	const diverged: (typeof INTENT_SENTINEL_FIELDS)[number][] = []
+	for (const f of INTENT_SENTINEL_FIELDS) {
+		if (JSON.stringify(intent[f]) !== JSON.stringify(mainFm[f])) {
+			diverged.push(f)
+		}
+	}
+	if (diverged.length === 0) return null
+
+	// Stage branch has the newer writes; mirror it to intent main.
+	const localContent = readFileSync(intentFile, "utf8")
+	writeOnIntentMain(
+		slug,
+		relPath,
+		localContent,
+		`haiku: repair intent ${slug} — sync stage branch to main (diverged: ${diverged.join(", ")})`,
+	)
+
+	emitTelemetry("haiku.workflow.intent_md_divergence", {
+		intent: slug,
+		branch,
+		diverged_fields: diverged.join(","),
+	})
+
+	return {
+		action: "safe_intent_repair",
+		intent: slug,
+		diverged_fields: diverged,
+		repaired: true,
+		message: `Intent '${slug}' had diverged intent.md between stage branch ('${branch}') and intent main. Fields: [${diverged.join(", ")}]. Repaired by mirroring stage branch to intent main. Call haiku_run_next again to proceed.`,
+	}
 }
 
 /** Run the consistency pre-tick. May mutate disk state. Returns:
@@ -68,6 +141,12 @@ export function preTickConsistency(
 	const studio = (intent.studio as string) || ""
 	if (!studio) return null
 	if (intent.composite) return null
+
+	// Guard: detect intent.md divergence between stage branch and intent main.
+	// Must run before the existing repair logic so diverged fields don't
+	// corrupt the synthesized-state decisions below.
+	const divergenceAction = checkIntentMainDivergence(slug, intentFile, intent)
+	if (divergenceAction) return divergenceAction
 
 	const studioStages = resolveIntentStages(intent, studio)
 	if (studioStages.length === 0) return null
@@ -98,7 +177,7 @@ export function preTickConsistency(
 		const current = getCurrentState(slug, root)
 		const derived = current?.stage || studioStages[studioStages.length - 1]
 		if (declared !== derived) {
-			setFrontmatterField(intentFile, "active_stage", derived)
+			setIntentField(slug, "active_stage", derived)
 			emitTelemetry("haiku.workflow.consistency_fix", {
 				intent: slug,
 				stale_stage: declared,
@@ -144,7 +223,7 @@ export function preTickConsistency(
 		// Active stage has no units — point active_stage at the first
 		// incomplete prior and proceed (next derive-state will pick up).
 		const corrected = incompletePrior[0]
-		setFrontmatterField(intentFile, "active_stage", corrected)
+		setIntentField(slug, "active_stage", corrected)
 		emitTelemetry("haiku.workflow.consistency_fix", {
 			intent: slug,
 			stale_stage: activeStage,

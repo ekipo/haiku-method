@@ -59,7 +59,7 @@ import {
 	parseFrontmatter,
 	readFeedbackFiles,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	timestamp,
 	writeJson,
 } from "../../../state-tools.js"
@@ -826,7 +826,7 @@ const emit: WorkflowHandler = (ctx) => {
 
 	if (!specGateAsks) {
 		if (isIntentReview) {
-			setFrontmatterField(intentFile, "intent_reviewed", true)
+			setIntentField(slug, "intent_reviewed", true)
 			gitCommitState(`haiku: intent ${slug} auto-approved`)
 		}
 		workflowAdvancePhase(slug, currentStage, "execute")

@@ -22,7 +22,7 @@ import {
 	gitCommitState,
 	parseFrontmatter,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 } from "../../state-tools.js"
 import { listStudios, resolveStudio } from "../../studio-reader.js"
 import { emitTelemetry } from "../../telemetry.js"
@@ -305,9 +305,9 @@ export default defineTool({
 			existingStages && existingStages.length > 0
 				? existingStages // stages were set at creation time (e.g. quick mode)
 				: allStudioStages
-		setFrontmatterField(intentFile, "studio", selectedStudio)
+		setIntentField(slug, "studio", selectedStudio)
 		if (!existingStages || existingStages.length === 0) {
-			setFrontmatterField(intentFile, "stages", activeStages)
+			setIntentField(slug, "stages", activeStages)
 		}
 
 		gitCommitState(`haiku: select studio ${selectedStudio} for intent ${slug}`)

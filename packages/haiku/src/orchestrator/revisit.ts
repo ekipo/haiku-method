@@ -34,7 +34,7 @@ import {
 	parseFrontmatter,
 	readFeedbackFiles,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	stageStatePath,
 	timestamp,
 	writeJson,
@@ -280,8 +280,8 @@ function uncompleteIntent(slug: string, intentFile: string): void {
 	const intent = readFrontmatter(intentFile)
 	let dirty = false
 	if (intent.status === "completed") {
-		setFrontmatterField(intentFile, "status", "active")
-		setFrontmatterField(intentFile, "completed_at", null)
+		setIntentField(slug, "status", "active")
+		setIntentField(slug, "completed_at", null)
 		dirty = true
 	}
 	// A completed intent may have landed in awaiting_completion_review
@@ -292,9 +292,9 @@ function uncompleteIntent(slug: string, intentFile: string): void {
 		intent.phase === "awaiting_completion_review" ||
 		intent.completion_review_dispatched === true
 	) {
-		setFrontmatterField(intentFile, "phase", "active")
-		setFrontmatterField(intentFile, "completion_review_dispatched", false)
-		setFrontmatterField(intentFile, "completion_review_skipped", false)
+		setIntentField(slug, "phase", "active")
+		setIntentField(slug, "completion_review_dispatched", false)
+		setIntentField(slug, "completion_review_skipped", false)
 		dirty = true
 	}
 	if (dirty) {
@@ -496,7 +496,7 @@ function revisitEarlierStage(
 	markDownstreamStagesStale(slug, iDir, targetStage, intentFile)
 
 	uncompleteIntent(slug, intentFile)
-	setFrontmatterField(intentFile, "active_stage", targetStage)
+	setIntentField(slug, "active_stage", targetStage)
 	sealIntentState(slug)
 
 	emitTelemetry("haiku.revisit.stage", {

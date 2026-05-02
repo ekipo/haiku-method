@@ -41,6 +41,7 @@ import {
 	openPullRequest,
 	readFileFromBranch,
 	removeTempWorktree,
+	writeOnIntentMain,
 } from "./git-worktree.js"
 import { getCapabilities } from "./harness.js"
 import { escalate } from "./model-selection.js"
@@ -3487,6 +3488,29 @@ export function setFrontmatterField(
 			normalizeDates(updated as Record<string, unknown>),
 		),
 	)
+}
+
+/** Write an intent-scope frontmatter field and mirror the change to the
+ *  intent's main branch (`haiku/<slug>/main`) via a temp worktree commit.
+ *  This guarantees that intent-scope metadata (active_stage, status, mode,
+ *  phase, etc.) stays consistent regardless of which stage branch is currently
+ *  checked out. Non-git (filesystem) mode skips the mirror — local write only.
+ *  Mirror failures are non-fatal: the local write always lands. */
+export function setIntentField(slug: string, field: string, value: unknown): void {
+	const iFile = join(intentDir(slug), "intent.md")
+	setFrontmatterField(iFile, field, value)
+	if (!isGitRepo()) return
+	const content = readFileSync(iFile, "utf8")
+	const relPath = `.haiku/intents/${slug}/intent.md`
+	const result = writeOnIntentMain(
+		slug,
+		relPath,
+		content,
+		`haiku: sync intent ${slug} ${field} to main`,
+	)
+	if (!result.ok && result.message !== "no git") {
+		console.warn(`[haiku] setIntentField mirror failed for ${slug}.${field}: ${result.message}`)
+	}
 }
 
 /** Write a unit frontmatter field to BOTH the parent worktree's copy AND

@@ -10,7 +10,7 @@ import {
 	findHaikuRoot,
 	gitCommitState,
 	parseFrontmatter,
-	setFrontmatterField,
+	setIntentField,
 } from "../../state-tools.js"
 import { defineTool } from "../define.js"
 import { text } from "./_text.js"
@@ -42,9 +42,7 @@ export default defineTool({
 
 		// Single-read idempotency check: parse once with parseFrontmatter
 		// (which normalizes dates). If already archived, noop. Otherwise
-		// delegate the write to setFrontmatterField — it re-reads but
-		// preserves the normalizeDates() pass we depend on for stable YAML
-		// output.
+		// delegate to setIntentField which mirrors the write to intent main.
 		const { data } = parseFrontmatter(readFileSync(intentFile, "utf8"))
 
 		if (data.archived === true) {
@@ -78,7 +76,7 @@ export default defineTool({
 			}
 		}
 
-		setFrontmatterField(intentFile, "archived", true)
+		setIntentField(slug, "archived", true)
 		gitCommitState(`haiku: archive intent ${slug}`)
 
 		return text(

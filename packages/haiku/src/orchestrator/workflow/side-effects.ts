@@ -51,7 +51,7 @@ import {
 	isGitRepo,
 	parseFrontmatter,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	stageStatePath,
 	timestamp,
 	writeJson,
@@ -166,7 +166,7 @@ export function workflowStartStage(slug: string, stage: string): void {
 	appendStageIteration(slug, stage, { trigger: "initial" })
 
 	if (existsSync(intentFile)) {
-		setFrontmatterField(intentFile, "active_stage", stage)
+		setIntentField(slug, "active_stage", stage)
 	}
 
 	cleanupOrphanedStageBranches(slug)
@@ -227,7 +227,7 @@ export function workflowAdvanceStage(
 
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (existsSync(intentFile)) {
-		setFrontmatterField(intentFile, "active_stage", nextStage)
+		setIntentField(slug, "active_stage", nextStage)
 	}
 
 	workflowStartStage(slug, nextStage)
@@ -258,8 +258,8 @@ export function workflowGateAsk(slug: string, stage: string): void {
 function workflowEnterIntentCompletionReview(slug: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (!existsSync(intentFile)) return
-	setFrontmatterField(intentFile, "phase", "awaiting_completion_review")
-	setFrontmatterField(intentFile, "completion_review_entered_at", timestamp())
+	setIntentField(slug, "phase", "awaiting_completion_review")
+	setIntentField(slug, "completion_review_entered_at", timestamp())
 	emitTelemetry("haiku.intent.completion_review_entered", { intent: slug })
 	sealIntentState(slug)
 }
@@ -365,8 +365,8 @@ export function completeOrReviewIntent(
 export function workflowIntentComplete(slug: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (existsSync(intentFile)) {
-		setFrontmatterField(intentFile, "status", "completed")
-		setFrontmatterField(intentFile, "completed_at", timestamp())
+		setIntentField(slug, "status", "completed")
+		setIntentField(slug, "completed_at", timestamp())
 	}
 	emitTelemetry("haiku.intent.completed", { intent: slug })
 	gitCommitState(`haiku: complete intent ${slug}`)

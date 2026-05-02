@@ -26,6 +26,7 @@
 
 import { existsSync, readdirSync } from "node:fs"
 import { basename, join } from "node:path"
+import { setIntentField } from "../state-tools.js"
 import { defineHook } from "./define.js"
 import {
 	checkIntentCriteria,
@@ -34,7 +35,6 @@ import {
 	isUnitBranch,
 	readFrontmatterField,
 	readJson,
-	setFrontmatterField,
 } from "./utils.js"
 
 function emitBlock(reason: string): void {
@@ -154,7 +154,7 @@ export async function enforceIteration(
 
 	// Mark intent as still active if it drifted.
 	if (intentStatus !== "active") {
-		setFrontmatterField(intentFile, "status", "active")
+		setIntentField(intentSlug, "status", "active")
 	}
 
 	// Report the iteration miss to Sentry so we can track how often the

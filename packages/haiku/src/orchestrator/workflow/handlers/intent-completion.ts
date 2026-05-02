@@ -49,6 +49,7 @@ import {
 	parseFrontmatter,
 	readFeedbackFiles,
 	setFrontmatterField,
+	setIntentField,
 	timestamp,
 } from "../../../state-tools.js"
 import {
@@ -203,16 +204,12 @@ const emit: WorkflowHandler = (ctx) => {
 	if (!reviewDispatched) {
 		const agentPaths = readStudioReviewAgentPaths(studio)
 		if (Object.keys(agentPaths).length === 0) {
-			setFrontmatterField(intentFile, "completion_review_dispatched", true)
-			setFrontmatterField(intentFile, "completion_review_skipped", true)
+			setIntentField(slug, "completion_review_dispatched", true)
+			setIntentField(slug, "completion_review_skipped", true)
 			sealIntentState(slug)
 		} else {
-			setFrontmatterField(intentFile, "completion_review_dispatched", true)
-			setFrontmatterField(
-				intentFile,
-				"completion_review_dispatched_at",
-				timestamp(),
-			)
+			setIntentField(slug, "completion_review_dispatched", true)
+			setIntentField(slug, "completion_review_dispatched_at", timestamp())
 			sealIntentState(slug)
 			emitTelemetry("haiku.intent.completion_review_dispatched", {
 				intent: slug,

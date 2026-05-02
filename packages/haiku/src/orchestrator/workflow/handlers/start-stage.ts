@@ -46,7 +46,7 @@ import {
 	gitCommitState,
 	parseFrontmatter,
 	readJson,
-	setFrontmatterField,
+	setIntentField,
 	timestamp,
 	writeJson,
 } from "../../../state-tools.js"
@@ -221,7 +221,7 @@ const emit: WorkflowHandler = (ctx, rootArg) => {
 				// Active stage is empty — point active_stage at the first
 				// incomplete prior and treat it as the new currentStage.
 				currentStage = incompletePrior[0]
-				setFrontmatterField(intentFile, "active_stage", currentStage)
+				setIntentField(slug, "active_stage", currentStage)
 				emitTelemetry("haiku.workflow.consistency_fix", {
 					intent: slug,
 					stale_stage: activeStage,

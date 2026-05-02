@@ -721,9 +721,9 @@ unset HAIKU_DRIFT_GATE_DISABLED
 
 ## assessments-stuck
 
-**Symptom:** Alert `assessments-zero-completion` fires (info, possible false-positive).
+**Symptom:** Alert `assessments-zero-completion` fires (info).
 
-**Cause:** Drift assessments dispatched (`haiku.drift.assessments.count` ticked up) but the agent didn't emit a corresponding resolution event. Possible loop, stuck agent, or missing resolution telemetry.
+**Cause:** Drift assessments were dispatched (`haiku.drift.assessments.count` ticked up) but no corresponding `haiku.drift.assessments.resolved` event fired in the same 6h window. The resolution event is emitted by `haiku_classify_drift.ts` at the same site as `haiku.assessment.recorded` — so a firing alert means classification was dispatched and never completed (stuck agent, loop, or crashed handler).
 
 **Diagnose:**
 
@@ -733,11 +733,14 @@ find .haiku/intents/*/stages/*/drift-assessments -type f -newer /tmp/.6h-ago
 
 # 2. Check the agent's recent run-tick output for a stuck loop
 tail -200 ~/.claude/logs/mcp.log | grep manual_change_assessment
+
+# 3. Confirm no resolution events landed for the affected intent_slug/stage
+#    in the alert window (resolved metric should be > 0 if classification ran)
+grep "haiku.drift.assessments.resolved" ~/.claude/logs/telemetry.log \
+  | grep "$INTENT_SLUG" | tail -20
 ```
 
 **Remediate:** Agent intervention — instruct the agent to resolve the open assessment (`haiku_run_next` should pick it up). If the agent loops indefinitely, manually move the assessment file to `.resolved-manual/<ts>/` and document the case as a follow-up.
-
-**Note:** This alert depends on a `haiku.drift.assessments.resolved` event that does not yet exist. Marked as a telemetry coverage gap for a future unit.
 
 **Escalation:** If assessments accumulate across many intents (>20 unresolved over 24h), the dispatch-vs-resolution loop is likely broken — file an incident.
 

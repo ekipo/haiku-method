@@ -671,6 +671,12 @@ await withEnv({}, (t) => {
 				"tick_iteration",
 				"count",
 			],
+			"haiku.drift.assessments.resolved": [
+				"intent_slug",
+				"stage",
+				"tick_iteration",
+				"count",
+			],
 			"haiku.reconciliation.fingerprint.duration_ms": [
 				"intent_slug",
 				"stage",

@@ -49,9 +49,11 @@ matrix + §8 disposition table) to the control implemented here.
 
 | Threat (severity) | Control | Implementation site | Test |
 |---|---|---|---|
-| Knowledge XSS via `.html`/`.htm`/`.xhtml`/`.mhtml`/`.svg`/`.xml` upload **(HIGH, V-01)** | `BLOCKED_EXTENSIONS` set + `ALLOWED_MIMES_KNOWLEDGE` allowlist; reject with **415 unsupported_media_type** before any byte is written | `upload-routes.ts` `BLOCKED_EXTENSIONS`, `ALLOWED_MIMES_KNOWLEDGE`, knowledge-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"knowledge: text/html upload rejected with 415 (V-01: html upload rejected)"`, `"knowledge: .svg upload rejected even when MIME claims image/svg+xml (V-01)"` |
-| Stage-output XSS same class **(HIGH, V-02)** | `ALLOWED_MIMES_STAGE_OUTPUT` allowlist + same `BLOCKED_EXTENSIONS` blocklist; reject with **415** before write | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, stage-output-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"stage-output: text/html upload rejected with 415 unsupported_media_type (V-02)"`, `"stage-output: .svg upload rejected even when MIME claims image/svg+xml (V-02)"` |
-| MIME spoof — `text/plain` (or `image/png`) claim with renderable extension in filename **(MED, V-01/V-02 variant)** | Extension blocklist applies to BOTH `filePart.filename` AND `target_filename`/`target_path` independently — extension wins over claimed MIME | `upload-routes.ts` `hasBlockedExtension(filePart.filename)` and `hasBlockedExtension(targetFilename)` / `hasBlockedExtension(targetPath)` checked separately, with extension-blocked rejected first regardless of MIME | `upload-routes.test.mjs`: `"stage-output: MIME spoof — text/plain claim with .html filename rejected (V-02 defence-in-depth)"`; `"stage-output: target_path with .html extension rejected even when uploaded filename is safe (V-02)"`; `"knowledge: MIME spoof rejected — text/plain claim with .html target_filename (V-01 defence-in-depth)"` |
+| Knowledge XSS via served file in tunnel origin (extension class includes `.html`/`.htm`/`.xhtml`/`.mhtml`/`.svg`/`.xml` AND bolt-3 additions `.js`/`.mjs`/`.cjs`/`.css`/`.htc`/`.hta`/`.htaccess`) **(HIGH, V-01 + red-team R-01/R-02)** | `BLOCKED_EXTENSIONS` set (broadened in bolt 3) + `ALLOWED_MIMES_KNOWLEDGE` allowlist (octet-stream removed in bolt 3); reject with **415 unsupported_media_type** before any byte is written | `upload-routes.ts` `BLOCKED_EXTENSIONS`, `ALLOWED_MIMES_KNOWLEDGE`, knowledge-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"knowledge: text/html upload rejected with 415 (V-01: html upload rejected)"`, `"knowledge: .svg upload rejected even when MIME claims image/svg+xml (V-01)"`, `"knowledge: .js upload rejected with 415 (red-team R-01 on knowledge route)"`, `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route"` |
+| Stage-output XSS same class (extension class as above) **(HIGH, V-02 + red-team R-01/R-02)** | `ALLOWED_MIMES_STAGE_OUTPUT` allowlist (octet-stream removed in bolt 3) + same broadened `BLOCKED_EXTENSIONS`; reject with **415** before write | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, stage-output-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"stage-output: text/html upload rejected with 415 unsupported_media_type (V-02)"`, `"stage-output: .svg upload rejected even when MIME claims image/svg+xml (V-02)"`, `"stage-output: .js upload rejected with 415 — same threat class as V-02 (red-team R-01)"`, `"stage-output: .css upload rejected with 415 — stylesheet injection vector (red-team R-02)"`, `"stage-output: .mjs/.cjs/.htc/.hta/.htaccess all rejected with 415 (red-team R-01 sibling vectors)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-01 closed: .js upload via application/octet-stream now rejected with 415"`, `"R-02 closed: .css upload via application/octet-stream now rejected with 415"` |
+| Allowlist no-op via `application/octet-stream` (multipart default MIME) **(MED, red-team R-03)** | `application/octet-stream` removed from BOTH `ALLOWED_MIMES_KNOWLEDGE` and `ALLOWED_MIMES_STAGE_OUTPUT`; the allowlist now restricts payload types as advertised. Legitimate binary uploads (PDFs, images) send their real MIME; tooling that previously sent octet-stream must learn to send the correct type | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, `ALLOWED_MIMES_KNOWLEDGE` (octet-stream omitted) | `upload-routes.test.mjs`: `"stage-output: application/octet-stream MIME now rejected (red-team R-03 — allowlist no longer accepts the multipart default)"`, `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it"` |
+| Audit-log poisoning / future SPA-render XSS via unvalidated `attribute_to_user` **(LOW, red-team R-04)** | `ATTRIBUTE_TO_USER_PATTERN = /^[\w][\w\-.@ ]{0,127}$/` — slug-with-spaces bound enforced at upload time on BOTH routes; reject with **400 bad_attribute_to_user**. Bound is wide enough for real human IDs (`alice`, `Alice Smith`, `alice.smith@example.com`, `product-owner-2`) but rejects every HTML / JS sigil and shell metacharacter, so the audit log cannot store an attacker-shaped string | `upload-routes.ts` `ATTRIBUTE_TO_USER_PATTERN`, `isValidAttributeToUser()`; both route handlers reject right after the field-presence check, before the extension/MIME branch | `upload-routes.test.mjs`: `"stage-output: attribute_to_user with HTML payload rejected with bad_attribute_to_user (red-team R-04 audit-log XSS guard)"`, `"knowledge: attribute_to_user with shell metacharacters rejected (red-team R-04)"`, `"attribute_to_user: realistic legitimate identities accepted (no false positives on R-04)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)"` |
+| MIME spoof — `text/plain` (or `image/png`) claim with renderable extension in filename **(MED, V-01/V-02 variant)** | Extension blocklist applies to BOTH `filePart.filename` AND `target_filename`/`target_path` independently — extension wins over claimed MIME | `upload-routes.ts` `hasBlockedExtension(filePart.filename)` and `hasBlockedExtension(targetFilename)` / `hasBlockedExtension(targetPath)` checked separately, with extension-blocked rejected first regardless of MIME | `upload-routes.test.mjs`: `"stage-output: MIME spoof — text/plain claim with .html filename rejected (V-02 defence-in-depth)"`; `"stage-output: target_path with .html extension rejected even when uploaded filename is safe (V-02)"`; `"knowledge: MIME spoof rejected — text/plain claim with .html target_filename (V-01 defence-in-depth)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist"` |
 | Operator misconfig of `HAIKU_UPLOAD_MAX_BYTES` (extra zero) **(MED, V-07)** | `MAX_UPLOAD_BYTES_HARD_CAP = 50 * 1024 * 1024`; `getUploadMaxBytes()` returns `Math.min(envValue, hardCap)`; `haiku.upload.cap_clamped` telemetry event when clamping fires | `upload-routes.ts` `MAX_UPLOAD_BYTES_HARD_CAP`, `getUploadMaxBytes()` (exported for unit-test assertion), `UPLOAD_MAX_BYTES_HARD_CAP` exported constant | `upload-routes.test.mjs`: `"HAIKU_UPLOAD_MAX_BYTES clamps to MAX_UPLOAD_BYTES_HARD_CAP (50 MiB) when env exceeds the hard cap (V-07: hard cap upload clamp)"` — direct unit-level assertion on `getUploadMaxBytes()` for both clamp and below-cap pass-through |
 | Drift-gate sync-SHA stall on multi-GB file **(MED, V-07 cascade)** | Bounded by the upload-side hard cap above — no additional control here | `upload-routes.ts` (control above) | Covered transitively by the V-07 test; deeper async-hash work is deferred |
 | Unbounded `agent_rationale` write **(LOW, V-09 fix #1)** | `MAX_RATIONALE_BYTES = 10 * 1024` schema cap; `validateRationaleCaps()` helper; `haiku_classify_drift` rejects with `agent_rationale_too_long` structured error before DA-NN.json write | `state-tools.ts` `MAX_RATIONALE_BYTES`, `validateRationaleCaps()`; `tools/orchestrator/haiku_classify_drift.ts` cap-violation branch | `state-tools-handlers.test.mjs`: `"validateRationaleCaps: agent_rationale > 10 KB returns agent_rationale_too_long structured error (V-09 agent_rationale reject)"`; `"validateRationaleCaps: passes when both fields are within caps"`; `"validateRationaleCaps: agent_rationale checked BEFORE per-finding excerpts (deterministic order)"` |
@@ -72,26 +74,53 @@ hats inherit the boundary.
 All paths are repository-relative; line numbers are approximate (anchored to
 the helper or constant name so they survive light edits).
 
-### 3.1 V-01 / V-02 controls
+### 3.1 V-01 / V-02 controls (incl. red-team R-01/R-02/R-03/R-04 closures)
 
 - `packages/haiku/src/http/upload-routes.ts`
   - `BLOCKED_EXTENSIONS: ReadonlySet<string>` — the renderable-script
-    extension blocklist (`.html`, `.htm`, `.svg`, `.xml`, `.xhtml`,
-    `.mhtml`).
+    extension blocklist. Bolt 1: `.html`, `.htm`, `.svg`, `.xml`,
+    `.xhtml`, `.mhtml`. **Bolt 3 additions** (close red-team R-01/R-02 +
+    sibling vectors): `.js`, `.mjs`, `.cjs`, `.css`, `.htc`, `.hta`,
+    `.htaccess`. `serveFile` returns `application/javascript` for `.js`/
+    `.mjs`/`.cjs` and `text/css` for `.css`, both of which execute under
+    the tunnel origin (same XSS / stylesheet-injection class V-01/V-02
+    named). `.htc` (HTML Components, IE-mode-on-Edge), `.hta` (HTML
+    Applications), and `.htaccess` (Apache config injection if the serve
+    root is fronted by Apache) are fellow-traveler vectors.
   - `ALLOWED_MIMES_STAGE_OUTPUT: ReadonlySet<string>` — per-route MIME
-    allowlist for the stage-output handler.
+    allowlist for the stage-output handler. **Bolt 3:** `application/
+    octet-stream` removed (closes red-team R-03). It was the multipart
+    default MIME a client sends when no Content-Type is set, which made
+    the allowlist effectively a no-op for any extension not in
+    `BLOCKED_EXTENSIONS`. Treat octet-stream as "unknown — reject."
+    Legitimate binary uploads (PDFs, PNGs, JPEGs) already send their real
+    MIME; tooling that previously used octet-stream must learn to send
+    the correct type.
   - `ALLOWED_MIMES_KNOWLEDGE: ReadonlySet<string>` — per-route MIME
-    allowlist for the knowledge handler.
+    allowlist for the knowledge handler. Same bolt-3 octet-stream
+    removal.
+  - `ATTRIBUTE_TO_USER_PATTERN = /^[\w][\w\-.@ ]{0,127}$/` — bolt-3
+    addition (closes red-team R-04). Slug-with-spaces bound on the
+    `attribute_to_user` multipart field. Wide enough for real human IDs
+    (`alice`, `alice.smith@example.com`, `Alice Smith`, `product-owner-2`)
+    but rejects every HTML/JS sigil and shell metacharacter, so the
+    `human_author_id` field written to `action-log.jsonl` and
+    `write-audit.jsonl` cannot store an attacker-shaped string. Future
+    SPA audit-log viewers therefore cannot become a stored-XSS sink.
+  - `isValidAttributeToUser(value)` — exported helper used by both routes
+    and a unit test.
   - `fileExtension(filename)` — lowercases and extracts the dot-prefixed
     suffix.
   - `normaliseMime(mime)` — strips `;charset=…` and lowercases the primary
     type/subtype.
   - `hasBlockedExtension(filename)` — single-call check used by both routes.
-  - Stage-output handler: extension + MIME check inserted between the
-    `bad_param` (missing-fields) block and the `mode` validation. Checks
-    `hasBlockedExtension(filePart.filename)`, `hasBlockedExtension(targetPath)`,
-    then `ALLOWED_MIMES_STAGE_OUTPUT.has(normaliseMime(filePart.mimetype))`.
-  - Knowledge handler: same pattern, swapped to
+  - Stage-output handler order: field-presence → `attribute_to_user` bound
+    → extension blocklist (`hasBlockedExtension(filePart.filename)` and
+    `hasBlockedExtension(targetPath)`) → MIME allowlist
+    (`ALLOWED_MIMES_STAGE_OUTPUT.has(normaliseMime(filePart.mimetype))`)
+    → `mode` validation. Earliest reject wins; the audit-log poisoning
+    guard fires before any byte is written or any audit entry stamped.
+  - Knowledge handler: same order, swapped to
     `hasBlockedExtension(targetFilename)` and `ALLOWED_MIMES_KNOWLEDGE`.
 
 ### 3.2 V-07 controls
@@ -159,7 +188,7 @@ Every control above is exercised by at least one named test. Suite:
 `bun run --cwd packages/haiku test` — full suite passes (1183/0 across
 60 test files at this writing, stable across three consecutive runs).
 
-### 4.1 Upload-route tests (V-01 / V-02 / V-07)
+### 4.1 Upload-route tests (V-01 / V-02 / V-07 + bolt-3 hardening)
 
 - `packages/haiku/test/upload-routes.test.mjs`
   - **V-02 (stage-output) — extension/MIME allowlist:**
@@ -176,13 +205,42 @@ Every control above is exercised by at least one named test. Suite:
     — exercises both the clamp and the below-cap pass-through. The
     pre-existing 413 streaming-overflow test continues to cover the runtime
     size-cap enforcement path.
+  - **Bolt-3 hardening — equivalent-class bypass + audit-log poisoning closed:**
+    - `"stage-output: .js upload rejected with 415 — same threat class as V-02 (red-team R-01)"`
+    - `"stage-output: .css upload rejected with 415 — stylesheet injection vector (red-team R-02)"`
+    - `"stage-output: .mjs/.cjs/.htc/.hta/.htaccess all rejected with 415 (red-team R-01 sibling vectors)"`
+    - `"stage-output: application/octet-stream MIME now rejected (red-team R-03 — allowlist no longer accepts the multipart default)"`
+    - `"knowledge: .js upload rejected with 415 (red-team R-01 on knowledge route)"`
+    - `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`
+    - `"stage-output: attribute_to_user with HTML payload rejected with bad_attribute_to_user (red-team R-04 audit-log XSS guard)"`
+    - `"knowledge: attribute_to_user with shell metacharacters rejected (red-team R-04)"`
+    - `"attribute_to_user: realistic legitimate identities accepted (no false positives on R-04)"` — guards the bound from over-narrow regression that would reject `Alice Smith`, `alice.smith@example.com`, `product-owner-2`.
   - **Pre-existing fixtures rewritten:** the original tests used `.html`
     files (e.g. `dashboard-layout.html`) which are now blocked. They were
     rewritten to `.md` with explicit `text/markdown` content-type so they
     exercise the "happy path" through the new allowlist instead of
-    regressing into 415s. Coverage of the original behaviours (atomic
-    write, action-log/audit-log stamping, mode enforcement,
-    locked/archived/sealed gates, path-traversal) is preserved.
+    regressing into 415s. The four tests that previously omitted
+    `contentType` (defaulting to `application/octet-stream` in the test
+    helper) were updated to send their real MIME (`text/markdown` or
+    `text/plain`); the helper's default was also changed to `text/plain`
+    so that tests that don't care about MIME do not accidentally exercise
+    the bolt-3 octet-stream rejection path. Coverage of the original
+    behaviours (atomic write, action-log/audit-log stamping, mode
+    enforcement, locked/archived/sealed gates, path-traversal) is preserved.
+
+- `packages/haiku/test/red-team-unit-01-upload-bypass.test.mjs` — bolt-1
+  bypass PoC, **inverted in bolt 3** to assert REJECTION (415 / 400)
+  instead of the original 200. Now serves as a regression guard: any
+  future change that re-introduces `.js` / `.css` / `application/octet-
+  stream` / unvalidated `attribute_to_user` will fail this test
+  immediately.
+  - `"R-01 closed: .js upload via application/octet-stream now rejected with 415"`
+  - `"R-02 closed: .css upload via application/octet-stream now rejected with 415"`
+  - `"R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist"`
+  - `"R-04 (positive control): the V-02 fix DOES still reject .html + text/plain"`
+  - `"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route"`
+  - `"R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it"`
+  - `"R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)"`
 
 ### 4.2 Rationale-cap tests (V-09 fix #1)
 
@@ -212,12 +270,27 @@ Every control above is exercised by at least one named test. Suite:
 
 ## 5. Residual risk
 
+### 5.0 Bolt-3 closure summary
+
+The bolt-1 controls landed the named V-01 / V-02 / V-07 / V-09 fixes but
+left an equivalent-class bypass open: `.js` / `.css` / `application/
+octet-stream` / unvalidated `attribute_to_user`. Red-team bolt 1
+demonstrated end-to-end PoCs (R-01..R-04 in `RED-TEAM-unit-01.md`).
+**Bolt 3 closes those gaps in-scope** — see §2 rows for the
+equivalent-class extension blocklist additions, the octet-stream
+allowlist removal, and the `ATTRIBUTE_TO_USER_PATTERN` bound. The
+red-team test `red-team-unit-01-upload-bypass.test.mjs` is now a
+regression guard.
+
+### 5.1 Inherited deferrals
+
 The threat-model boundary 4 (serve-back) and the supply-chain regression
 dimension (§5 of the threat model) remain. The upload-side allowlist
 closes the **primary attack vector** for V-01 / V-02 — bytes that today
-would render as `text/html` are refused at boundary 2 and never reach
-boundary 4. But three defense-in-depth gaps stay open and are
-**explicitly accepted** here, with named target hands-off:
+would render as `text/html` (or `application/javascript`, or `text/css`)
+are refused at boundary 2 and never reach boundary 4. But three
+defense-in-depth gaps stay open and are **explicitly accepted** here,
+with named target hands-off:
 
 1. **`serveFile`'s MIME map still inline-renders any extension it knows
    about.** If a future patch adds `.xml`/`.xhtml` to `MIME_TYPES`, or

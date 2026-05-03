@@ -87,9 +87,10 @@ const MAX_UPLOAD_BYTES_HARD_CAP = 50 * 1024 * 1024 // 50 MB
 /**
  * VULN-REPORT V-01 / V-02: MIME and extension allowlist for SPA uploads.
  *
- * `serveFile`'s MIME map matches `text/html`, `image/svg+xml`, etc., so any
- * uploaded `.html` / `.svg` file rendered inline becomes a stored-XSS vector
- * under the reviewer's privileged tunnel origin.
+ * `serveFile`'s MIME map matches `text/html`, `image/svg+xml`, `text/css`,
+ * `application/javascript`, etc., so any uploaded `.html` / `.svg` / `.js` /
+ * `.css` file rendered inline becomes a stored-XSS or stylesheet-injection
+ * vector under the reviewer's privileged tunnel origin.
  *
  * The fix has two layers:
  *   1. `ALLOWED_MIMES_*` — per-route allowlist of MIME types the server
@@ -98,6 +99,21 @@ const MAX_UPLOAD_BYTES_HARD_CAP = 50 * 1024 * 1024 // 50 MB
  *      that render as scripts (or carry script payloads) regardless of the
  *      claimed MIME. Rejected with 415 even when the MIME is on the
  *      allowlist (covers MIME-spoof attacks like `text/plain`+`.html`).
+ *
+ * Bolt-3 hardening (closes red-team R-01/R-02/R-03/R-04):
+ *   - `.js`, `.css`, `.htc`, `.hta`, `.htaccess` added to BLOCKED_EXTENSIONS:
+ *     `serveFile` returns `application/javascript` and `text/css` for these
+ *     extensions, so the same threat class V-01/V-02 named (stored XSS in the
+ *     tunnel origin) was reachable via these equivalent extensions while only
+ *     six were blocked. `.htc` (HTML Components, IE-mode-on-Edge), `.hta`
+ *     (HTML Applications), and `.htaccess` (Apache config injection) are
+ *     fellow-traveler vectors for the same threat class.
+ *   - `application/octet-stream` removed from BOTH allowlists: it is the
+ *     default MIME a multipart client uses when no Content-Type is set, which
+ *     made the MIME allowlist effectively a no-op for any extension not in
+ *     BLOCKED_EXTENSIONS. Treat octet-stream as "unknown — reject" rather than
+ *     "binary blob — accept". Legitimate binary uploads (PDFs, images) already
+ *     send their real MIME.
  *
  * Defence in depth — the serve-side hardening (CSP, sandbox sub-origin,
  * inverted MIME map) is deferred to follow-up unit-04 work; this unit
@@ -110,12 +126,26 @@ const BLOCKED_EXTENSIONS: ReadonlySet<string> = new Set([
 	".xml",
 	".xhtml",
 	".mhtml",
+	// Bolt 3 — close red-team R-01/R-02 (.js/.css render as script/style under
+	// the tunnel origin) and the IE-legacy / Apache-config siblings.
+	".js",
+	".mjs",
+	".cjs",
+	".css",
+	".htc",
+	".hta",
+	".htaccess",
 ])
 
 /** Stage-output uploads — the SPA writes designer mockups, screenshots,
  *  PDFs, and structured data. Markdown is intentionally allowed because
  *  designers attach `.md` notes alongside binary mockups; markdown is
- *  rendered as `text/plain` by `serveFile` so it does not execute. */
+ *  rendered as `text/plain` by `serveFile` so it does not execute.
+ *
+ *  Bolt 3 — `application/octet-stream` removed (red-team R-03): it is the
+ *  multipart default when the client omits Content-Type, which made the
+ *  allowlist effectively a no-op. Legitimate binary uploads send their
+ *  real MIME (image/png, application/pdf, etc.); octet-stream is rejected. */
 const ALLOWED_MIMES_STAGE_OUTPUT: ReadonlySet<string> = new Set([
 	"image/png",
 	"image/jpeg",
@@ -125,11 +155,11 @@ const ALLOWED_MIMES_STAGE_OUTPUT: ReadonlySet<string> = new Set([
 	"text/plain",
 	"text/markdown",
 	"application/json",
-	"application/octet-stream",
 ])
 
 /** Knowledge uploads — same allowlist as stage-output. Knowledge artifacts
- *  are documentation + research material; the same MIME set covers them. */
+ *  are documentation + research material; the same MIME set covers them.
+ *  `application/octet-stream` removed in bolt 3 — see stage-output comment. */
 const ALLOWED_MIMES_KNOWLEDGE: ReadonlySet<string> = new Set([
 	"image/png",
 	"image/jpeg",
@@ -139,8 +169,34 @@ const ALLOWED_MIMES_KNOWLEDGE: ReadonlySet<string> = new Set([
 	"text/plain",
 	"text/markdown",
 	"application/json",
-	"application/octet-stream",
 ])
+
+/**
+ * VULN-REPORT red-team R-04: bounded `attribute_to_user` validator.
+ *
+ * `attribute_to_user` previously flowed verbatim into `action-log.jsonl` and
+ * `write-audit.jsonl`. Any future SPA renderer that displayed those audit
+ * fields without escaping would re-emit attacker-controlled HTML into the
+ * reviewer's session — a stored XSS via the audit log.
+ *
+ * Bound the field at upload time to a slug-with-spaces pattern: starts with a
+ * word char, followed by 0-127 word chars, hyphens, dots, at-signs, or spaces.
+ * This is wide enough to cover real human author IDs (`alice`, `Alice Smith`,
+ * `alice.smith@example.com`, `product-owner-2`) but rejects every HTML / JS
+ * sigil and every shell metacharacter.
+ */
+const ATTRIBUTE_TO_USER_PATTERN = /^[\w][\w\-.@ ]{0,127}$/
+
+/** Returns true when the supplied attribution string is safe to write into
+ *  `human_author_id` audit fields. */
+function isValidAttributeToUser(value: string | undefined): boolean {
+	if (typeof value !== "string") return false
+	return ATTRIBUTE_TO_USER_PATTERN.test(value)
+}
+
+/** Exported for tests so the red-team R-04 bound can be exercised without an
+ *  HTTP round trip. */
+export { ATTRIBUTE_TO_USER_PATTERN, isValidAttributeToUser }
 
 /** Extract the lowercase extension (including the leading dot) from a
  *  filename. Returns "" when the filename has no extension. */
@@ -449,6 +505,21 @@ export async function registerUploadRoutes(
 					return
 				}
 
+				// VULN-REPORT red-team R-04: bound `attribute_to_user` to a safe
+				// slug-with-spaces pattern. Unvalidated attributions previously
+				// flowed verbatim into action-log.jsonl + write-audit.jsonl,
+				// creating a stored-XSS sink for any future SPA audit-log viewer.
+				if (!isValidAttributeToUser(attributeToUser)) {
+					reply.status(400).send({
+						error: "bad_attribute_to_user",
+						code: "bad_attribute_to_user",
+						message:
+							"attribute_to_user must match /^[\\w][\\w\\-.@ ]{0,127}$/ — alphanumerics, underscore, hyphen, dot, at-sign, space; max 128 chars; cannot start with a separator.",
+						pattern: ATTRIBUTE_TO_USER_PATTERN.source,
+					})
+					return
+				}
+
 				// VULN-REPORT V-02: stored-XSS via stage-output uploads.
 				// Reject blocked extensions FIRST (defends against MIME-spoofing
 				// where client sends text/plain with a .html filename), then
@@ -743,6 +814,19 @@ export async function registerUploadRoutes(
 						code: "bad_param",
 						message:
 							"Missing required fields: target_filename, attribute_to_user, file",
+					})
+					return
+				}
+
+				// VULN-REPORT red-team R-04: bound `attribute_to_user` (see
+				// stage-output handler for rationale).
+				if (!isValidAttributeToUser(attributeToUser)) {
+					reply.status(400).send({
+						error: "bad_attribute_to_user",
+						code: "bad_attribute_to_user",
+						message:
+							"attribute_to_user must match /^[\\w][\\w\\-.@ ]{0,127}$/ — alphanumerics, underscore, hyphen, dot, at-sign, space; max 128 chars; cannot start with a separator.",
+						pattern: ATTRIBUTE_TO_USER_PATTERN.source,
 					})
 					return
 				}

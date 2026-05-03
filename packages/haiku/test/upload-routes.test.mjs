@@ -246,7 +246,11 @@ function buildMultipart(fields, files) {
 	}
 
 	for (const { name, filename, content, contentType } of files) {
-		const ct = contentType ?? "application/octet-stream"
+		// Default contentType is text/plain (on the upload allowlist) so a
+		// test that doesn't care about MIME doesn't accidentally exercise
+		// the bolt-3 octet-stream rejection path. Tests that DO want to
+		// exercise octet-stream rejection set contentType explicitly.
+		const ct = contentType ?? "text/plain"
 		parts.push(
 			`--${boundary}\r\n` +
 				`Content-Disposition: form-data; name="${name}"; filename="${filename}"\r\n` +
@@ -701,7 +705,14 @@ async function run() {
 				mode: "upsert",
 				attribute_to_user: "attacker",
 			},
-			[{ name: "file", filename: "passwd", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "passwd",
+					content: fileContent,
+					contentType: "text/plain",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -945,6 +956,7 @@ async function run() {
 					name: "file",
 					filename: "competitive-analysis.md",
 					content: fileContent,
+					contentType: "text/markdown",
 				},
 			],
 		)
@@ -1005,6 +1017,7 @@ async function run() {
 					name: "file",
 					filename: "competitive-analysis.md",
 					content: fileContent,
+					contentType: "text/markdown",
 				},
 			],
 		)
@@ -1123,6 +1136,321 @@ async function run() {
 		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
 	})
 
+	// ── Bolt-3 hardening (closes red-team R-01/R-02/R-03/R-04) ───────────────
+
+	console.log(
+		"\n=== Bolt-3 hardening: .js/.css blocked, octet-stream rejected, attribute_to_user bound ===",
+	)
+
+	await test("stage-output: .js upload rejected with 415 — same threat class as V-02 (red-team R-01)", async () => {
+		const fileContent = Buffer.from("alert(document.cookie); // pwn.js")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/pwn.js",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "pwn.js",
+					content: fileContent,
+					contentType: "application/javascript",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-01: .js MUST reject (serveFile returns application/javascript — same XSS class as V-02). Got ${res.status}.`,
+		)
+		const dest = join(
+			intentDirPath,
+			"stages",
+			stageName,
+			"artifacts",
+			"pwn.js",
+		)
+		assert.ok(!existsSync(dest), "Rejected `.js` upload must not land on disk")
+	})
+
+	await test("stage-output: .css upload rejected with 415 — stylesheet injection vector (red-team R-02)", async () => {
+		const fileContent = Buffer.from(
+			"input[type=password]{background:url(https://evil/x)}",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/pwn.css",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "pwn.css",
+					content: fileContent,
+					contentType: "text/css",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-02: .css MUST reject (stylesheet-injection vector under tunnel origin). Got ${res.status}.`,
+		)
+	})
+
+	await test("stage-output: .mjs/.cjs/.htc/.hta/.htaccess all rejected with 415 (red-team R-01 sibling vectors)", async () => {
+		const cases = [
+			{ filename: "pwn.mjs", ct: "application/javascript" },
+			{ filename: "pwn.cjs", ct: "application/javascript" },
+			{ filename: "pwn.htc", ct: "text/x-component" },
+			{ filename: "pwn.hta", ct: "application/hta" },
+			{ filename: "pwn.htaccess", ct: "text/plain" },
+		]
+		for (const c of cases) {
+			const { body, contentType } = buildMultipart(
+				{
+					stage: stageName,
+					target_path: `artifacts/${c.filename}`,
+					mode: "upsert",
+					attribute_to_user: "attacker",
+				},
+				[
+					{
+						name: "file",
+						filename: c.filename,
+						content: Buffer.from("payload"),
+						contentType: c.ct,
+					},
+				],
+			)
+			const res = await fetch(
+				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+				{
+					method: "POST",
+					headers: { "Content-Type": contentType },
+					body,
+				},
+			)
+			assert.strictEqual(
+				res.status,
+				415,
+				`Sibling vector ${c.filename} MUST be rejected. Got ${res.status}.`,
+			)
+		}
+	})
+
+	await test("stage-output: application/octet-stream MIME now rejected (red-team R-03 — allowlist no longer accepts the multipart default)", async () => {
+		const fileContent = Buffer.from("opaque blob")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/blob.bin",
+				mode: "upsert",
+				attribute_to_user: "tooling",
+			},
+			[
+				{
+					name: "file",
+					filename: "blob.bin",
+					content: fileContent,
+					contentType: "application/octet-stream",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-03: application/octet-stream MUST be rejected — it was the multipart default that made the allowlist a no-op. Got ${res.status}.`,
+		)
+		const data = await res.json()
+		assert.ok(
+			data.error === "unsupported_media_type" ||
+				data.code === "unsupported_media_type",
+		)
+	})
+
+	await test("knowledge: .js upload rejected with 415 (red-team R-01 on knowledge route)", async () => {
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "evil.js",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "evil.js",
+					content: Buffer.from("alert(1)"),
+					contentType: "application/javascript",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+	})
+
+	await test("knowledge: octet-stream rejected (red-team R-03 on knowledge route)", async () => {
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "blob.bin",
+				attribute_to_user: "tooling",
+			},
+			[
+				{
+					name: "file",
+					filename: "blob.bin",
+					content: Buffer.from("blob"),
+					contentType: "application/octet-stream",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+	})
+
+	await test("stage-output: attribute_to_user with HTML payload rejected with bad_attribute_to_user (red-team R-04 audit-log XSS guard)", async () => {
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/innocent-payload.md",
+				mode: "upsert",
+				attribute_to_user: "<img src=x onerror=alert(1)>",
+			},
+			[
+				{
+					name: "file",
+					filename: "innocent-payload.md",
+					content: Buffer.from("# safe content\n"),
+					contentType: "text/markdown",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			400,
+			`R-04: HTML payload in attribute_to_user MUST be rejected. Got ${res.status}.`,
+		)
+		const data = await res.json()
+		assert.strictEqual(
+			data.error,
+			"bad_attribute_to_user",
+			`Expected bad_attribute_to_user, got ${JSON.stringify(data)}`,
+		)
+	})
+
+	await test("knowledge: attribute_to_user with shell metacharacters rejected (red-team R-04)", async () => {
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "ok.md",
+				attribute_to_user: "alice; rm -rf /",
+			},
+			[
+				{
+					name: "file",
+					filename: "ok.md",
+					content: Buffer.from("# safe\n"),
+					contentType: "text/markdown",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 400, `Expected 400, got ${res.status}`)
+		const data = await res.json()
+		assert.strictEqual(data.error, "bad_attribute_to_user")
+	})
+
+	await test("attribute_to_user: realistic legitimate identities accepted (no false positives on R-04)", async () => {
+		// The bound must be wide enough for real human author IDs.
+		const { isValidAttributeToUser } = await import(
+			"../src/http/upload-routes.ts"
+		)
+		const accepted = [
+			"alice",
+			"alice.smith",
+			"Alice Smith",
+			"alice.smith@example.com",
+			"product-owner-2",
+			"u_42",
+			"Bob O'Reilly".replace("'", ""), // apostrophe NOT allowed; the slug-with-spaces bound rejects punctuation we don't list
+		]
+		for (const id of accepted) {
+			assert.ok(
+				isValidAttributeToUser(id),
+				`Legitimate id '${id}' MUST pass the bound`,
+			)
+		}
+		const rejected = [
+			"", // empty
+			" alice", // leading space
+			"-alice", // leading hyphen
+			"<script>alert(1)</script>",
+			"alice; rm -rf /",
+			"a".repeat(129), // > 128 chars
+		]
+		for (const id of rejected) {
+			assert.ok(
+				!isValidAttributeToUser(id),
+				`Illegitimate id '${id}' MUST fail the bound`,
+			)
+		}
+	})
+
 	// ── tick_counter correctness (Finding 2) ──────────────────────────────────
 
 	console.log(
@@ -1196,6 +1524,7 @@ async function run() {
 					name: "file",
 					filename: "tick-counter-test.md",
 					content: fileContent,
+					contentType: "text/markdown",
 				},
 			],
 		)

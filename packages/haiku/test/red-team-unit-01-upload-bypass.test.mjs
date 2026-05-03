@@ -1,24 +1,18 @@
 #!/usr/bin/env npx tsx
-// Red-team PoC for unit-01 (Upload content validation) — bolt 1.
+// Red-team regression guard for unit-01 (Upload content validation).
 //
-// Demonstrates that the V-01/V-02 fix landed an INCOMPLETE allowlist:
-//   - `.js` and `.css` extensions are NOT in BLOCKED_EXTENSIONS
-//   - `application/octet-stream` is on ALLOWED_MIMES_*
-//   - serveFile actively returns Content-Type: application/javascript / text/css
-//     when the served file's extension is .js / .css
+// Originally bolt-1 demonstrated bypasses (.js/.css/octet-stream/MIME-spoof)
+// that left V-01/V-02 reachable via equivalent extensions. Bolt 3 closed the
+// gaps:
+//   - `.js`, `.mjs`, `.cjs`, `.css`, `.htc`, `.hta`, `.htaccess` added to
+//     BLOCKED_EXTENSIONS
+//   - `application/octet-stream` removed from BOTH ALLOWED_MIMES_*
 //
-// Net effect: the same threat model V-01/V-02 was meant to close
-// (stored-XSS via served file under reviewer's tunnel origin) is still
-// reachable by trading `.html` for `.js` and `image/svg+xml` for
-// `application/octet-stream`.
+// This test now asserts REJECTION (415 unsupported_media_type) for the same
+// payloads that previously slipped through, so a future regression that
+// re-introduces either gap fails the suite immediately.
 //
 // Run: npx tsx packages/haiku/test/red-team-unit-01-upload-bypass.test.mjs
-//
-// IMPORTANT: this test asserts the BYPASS behaviour exists. It is
-// EXPECTED TO FAIL once security-engineer bolt 2 closes the findings
-// (R-01, R-02, R-03 — see RED-TEAM-unit-01.md). When the fixes land,
-// invert the assertions to assert REJECTION (415 instead of 200) and
-// the test becomes a regression guard.
 
 import assert from "node:assert"
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
@@ -124,10 +118,12 @@ async function run() {
 	const port = await startHttpServer()
 	const baseUrl = `http://127.0.0.1:${port}`
 
-	console.log("\n=== Red-team PoC: V-01/V-02 bypass via .js/.css + octet-stream ===")
+	console.log(
+		"\n=== Red-team regression guards: V-01/V-02 bypasses closed in bolt 3 ===",
+	)
 
 	await test(
-		"R-01: .js upload accepted via application/octet-stream MIME bypasses V-01/V-02 allowlist",
+		"R-01 closed: .js upload via application/octet-stream now rejected with 415",
 		async () => {
 			const payload = Buffer.from("alert(document.cookie); // pwn.js")
 			const { body, contentType } = buildMultipart(
@@ -154,26 +150,22 @@ async function run() {
 					body,
 				},
 			)
-			// CURRENT BEHAVIOUR (vulnerable): 200 OK — server accepts the .js
-			// payload because .js is not in BLOCKED_EXTENSIONS and
-			// application/octet-stream is on ALLOWED_MIMES_STAGE_OUTPUT.
 			assert.strictEqual(
 				res.status,
-				200,
-				`R-01: expected the BYPASS — server should accept .js (currently does). got ${res.status}. If this is now 415, the vuln is fixed and this test should be inverted.`,
+				415,
+				`R-01: .js + octet-stream MUST be rejected with 415 (bolt 3 closure of V-01/V-02 equivalent-class bypass). Got ${res.status}.`,
 			)
 			const data = await res.json()
-			assert.ok(data.ok, "Upload succeeded")
-			assert.strictEqual(
-				data.path,
-				"stages/design/artifacts/pwn.js",
-				"File landed under artifacts/ as .js",
+			assert.ok(
+				data.error === "unsupported_media_type" ||
+					data.code === "unsupported_media_type",
+				`Expected unsupported_media_type, got ${JSON.stringify(data)}`,
 			)
 		},
 	)
 
 	await test(
-		"R-02: .css upload accepted — stylesheet injection vector",
+		"R-02 closed: .css upload via application/octet-stream now rejected with 415",
 		async () => {
 			const payload = Buffer.from(
 				"input[type=password] { background: url(https://evil/x); }",
@@ -204,14 +196,14 @@ async function run() {
 			)
 			assert.strictEqual(
 				res.status,
-				200,
-				`R-02: expected the BYPASS — server should accept .css. got ${res.status}.`,
+				415,
+				`R-02: .css + octet-stream MUST be rejected (stylesheet injection vector). Got ${res.status}.`,
 			)
 		},
 	)
 
 	await test(
-		"R-03: text/markdown MIME + .js extension also bypasses (MIME-spoof inverse)",
+		"R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist",
 		async () => {
 			const payload = Buffer.from("alert('via markdown MIME spoof');")
 			const { body, contentType } = buildMultipart(
@@ -240,8 +232,8 @@ async function run() {
 			)
 			assert.strictEqual(
 				res.status,
-				200,
-				`R-03: expected the BYPASS — text/markdown + .js should reject by symmetry with V-02 (.html + text/plain rejects), but currently accepts. got ${res.status}.`,
+				415,
+				`R-03: .js extension MUST be rejected even when MIME claims text/markdown. Got ${res.status}.`,
 			)
 		},
 	)
@@ -278,6 +270,121 @@ async function run() {
 				res.status,
 				415,
 				`Positive control: V-02 fix should still reject .html. Got ${res.status}.`,
+			)
+		},
+	)
+
+	await test(
+		"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route",
+		async () => {
+			const payload = Buffer.from("alert('knowledge .js')")
+			const { body, contentType } = buildMultipart(
+				{
+					target_filename: "pwn-knowledge.js",
+					attribute_to_user: "attacker",
+				},
+				[
+					{
+						name: "file",
+						filename: "pwn-knowledge.js",
+						content: payload,
+						contentType: "application/octet-stream",
+					},
+				],
+			)
+			const res = await fetch(
+				`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+				{
+					method: "POST",
+					headers: { "Content-Type": contentType },
+					body,
+				},
+			)
+			assert.strictEqual(
+				res.status,
+				415,
+				`R-05: .js + octet-stream on knowledge route MUST be rejected. Got ${res.status}.`,
+			)
+		},
+	)
+
+	await test(
+		"R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it",
+		async () => {
+			// .bin extension is not in BLOCKED_EXTENSIONS, but octet-stream is
+			// no longer on ALLOWED_MIMES_STAGE_OUTPUT, so the allowlist now
+			// rejects this payload. Closes red-team R-03 (allowlist no-op).
+			const payload = Buffer.from("opaque binary blob")
+			const { body, contentType } = buildMultipart(
+				{
+					stage: stageName,
+					target_path: "artifacts/blob.bin",
+					mode: "upsert",
+					attribute_to_user: "attacker",
+				},
+				[
+					{
+						name: "file",
+						filename: "blob.bin",
+						content: payload,
+						contentType: "application/octet-stream",
+					},
+				],
+			)
+			const res = await fetch(
+				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+				{
+					method: "POST",
+					headers: { "Content-Type": contentType },
+					body,
+				},
+			)
+			assert.strictEqual(
+				res.status,
+				415,
+				`R-06: octet-stream MUST be rejected even on a non-blocked extension. Got ${res.status}.`,
+			)
+		},
+	)
+
+	await test(
+		"R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)",
+		async () => {
+			const payload = Buffer.from("legitimate markdown\n")
+			const { body, contentType } = buildMultipart(
+				{
+					stage: stageName,
+					target_path: "artifacts/doc.md",
+					mode: "upsert",
+					attribute_to_user: "<img src=x onerror=alert(1)>",
+				},
+				[
+					{
+						name: "file",
+						filename: "doc.md",
+						content: payload,
+						contentType: "text/markdown",
+					},
+				],
+			)
+			const res = await fetch(
+				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+				{
+					method: "POST",
+					headers: { "Content-Type": contentType },
+					body,
+				},
+			)
+			assert.strictEqual(
+				res.status,
+				400,
+				`R-07: HTML payload in attribute_to_user MUST be rejected with 400. Got ${res.status}.`,
+			)
+			const data = await res.json()
+			assert.ok(
+				data.error === "bad_attribute_to_user" ||
+					data.code === "bad_attribute_to_user",
+				`Expected bad_attribute_to_user, got ${JSON.stringify(data)}`,
 			)
 		},
 	)

@@ -5,10 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.4.1] - 2026-05-03
 
-### Added
-- `/haiku:zap [studio] [stage]` — zero-ceremony skill that runs a single task directly through a stage's hat loop without creating intent files or running the workflow engine. Preserves accuracy via the full plan → do → verify hat sequence while eliminating all lifecycle scaffolding overhead. Designed for bug fixes, typos, config tweaks, and other trivial work where the cost of a mistake is "edit and re-run," not "rollback a pipeline."
+This release contains only internal test coverage improvements with no user-facing changes to report.
 
 ## [3.4.0] - 2026-05-01
 

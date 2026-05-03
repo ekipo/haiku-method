@@ -347,8 +347,7 @@ const emit: WorkflowHandler = (ctx) => {
 	// for an autopilot intent is this one — emit it directly so the
 	// agent opens the delivery PR from intent main to repo mainline.
 	const intentMode = ((intent.mode as string) || "continuous").toLowerCase()
-	const autopilot =
-		intentMode === "autopilot" || intent.autopilot === true
+	const autopilot = intentMode === "autopilot" || intent.autopilot === true
 	if (autopilot && isGitRepo()) {
 		return {
 			action: "external_review_requested",

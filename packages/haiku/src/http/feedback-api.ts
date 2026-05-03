@@ -33,6 +33,14 @@ import {
 	FeedbackUpdateRequestSchema,
 	type FeedbackUpdateResponse,
 } from "haiku-api"
+// V-10 (feedback-body XSS defence): every body that flows through this
+// router is sanitized server-side via `sanitizeFeedbackBody` before it
+// reaches `writeFeedbackFile` / `appendFeedbackReply` (which also call the
+// sanitizer for defence-in-depth). Stripping at the route boundary means
+// the on-disk artefact, the action-log entry, and any future audit-log
+// consumer all see the post-sanitization text — no XSS payload can be
+// reconstructed from the raw multipart body after this point.
+import { sanitizeFeedbackBody } from "../state/sanitize-feedback.js"
 import {
 	appendFeedbackReply,
 	deleteFeedbackFile,
@@ -46,14 +54,6 @@ import {
 } from "../state-tools.js"
 import { logFeedbackAction } from "./action-log.js"
 import { requireTunnelAuth, verifyFeedbackMutationAuth } from "./auth.js"
-// V-10 (feedback-body XSS defence): every body that flows through this
-// router is sanitized server-side via `sanitizeFeedbackBody` before it
-// reaches `writeFeedbackFile` / `appendFeedbackReply` (which also call the
-// sanitizer for defence-in-depth). Stripping at the route boundary means
-// the on-disk artefact, the action-log entry, and any future audit-log
-// consumer all see the post-sanitization text — no XSS payload can be
-// reconstructed from the raw multipart body after this point.
-import { sanitizeFeedbackBody } from "../state/sanitize-feedback.js"
 import { serveUnderRoot } from "./path-safety.js"
 import {
 	isValidSlug,

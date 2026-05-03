@@ -466,8 +466,9 @@ const emit: WorkflowHandler = (ctx) => {
 	// older interpretation of autopilot, the agent opened (and possibly
 	// closed) a per-stage PR, and the user wants the workflow to resume
 	// under the corrected semantics without manual state surgery.
-	const intentModeForReconcile =
-		((intent.mode as string) || "continuous").toLowerCase()
+	const intentModeForReconcile = (
+		(intent.mode as string) || "continuous"
+	).toLowerCase()
 	const autopilotForReconcile =
 		intentModeForReconcile === "autopilot" || intent.autopilot === true
 	if (
@@ -564,8 +565,7 @@ const emit: WorkflowHandler = (ctx) => {
 	// discrete-hybrid behavior, it should derive it from
 	// `intentMode === "continuous" && <some per-stage condition>` rather
 	// than reading a stored field.
-	const autopilot =
-		intentMode === "autopilot" || intent.autopilot === true
+	const autopilot = intentMode === "autopilot" || intent.autopilot === true
 	const isDiscrete = intentMode === "discrete"
 
 	// Discrete-mode contract: every stage gate MUST open an external
@@ -606,9 +606,7 @@ const emit: WorkflowHandler = (ctx) => {
 	// they are left untouched.
 	let reviewType = coercedReviewType
 	if (autopilot) {
-		const segments = coercedReviewType
-			.split(",")
-			.map((t) => t.trim())
+		const segments = coercedReviewType.split(",").map((t) => t.trim())
 		reviewType = segments.includes("await") ? "await" : "auto"
 	}
 	const stageIdx = studioStages.indexOf(currentStage)
@@ -655,7 +653,6 @@ const emit: WorkflowHandler = (ctx) => {
 			`Auto-gate passed — all stages complete for intent '${slug}'.`,
 		)
 	}
-
 
 	let effectiveGateType: string
 	if (!gitAvailable && reviewType.includes("external")) {

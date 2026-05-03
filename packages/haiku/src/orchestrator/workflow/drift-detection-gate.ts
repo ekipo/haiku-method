@@ -52,13 +52,13 @@ import {
 // continue to work (e.g. drift-detection-gate.test.mjs).
 export { isDriftDetectionDisabled }
 
+import { emitTelemetry } from "../../telemetry.js"
 import {
 	findOpenMarker,
 	isStaleMarker,
 	readMarkers,
 	removeMarkersSync,
 } from "./drift-markers.js"
-import { emitTelemetry } from "../../telemetry.js"
 
 // ── Telemetry helpers ──────────────────────────────────────────────────────
 //
@@ -641,10 +641,7 @@ export function runDriftDetectionGate(
 	// path-based author-class lookup below.
 	const stageActionLogEntries = readActionLogSync(intentDir, tickCounter)
 	const intentScopeActionLog = readIntentScopeActionLogSync(intentDir)
-	const actionLogEntries = [
-		...stageActionLogEntries,
-		...intentScopeActionLog,
-	]
+	const actionLogEntries = [...stageActionLogEntries, ...intentScopeActionLog]
 
 	// 7. Steady-state scan.
 	const findings: DriftFinding[] = []

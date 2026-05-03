@@ -63,7 +63,11 @@ await test("V-04.1: planted symlink at parent dir is rejected", async () => {
 		join(root, "stages", "security", "knowledge", "note.md"),
 	)
 
-	assert.strictEqual(result.ok, false, `expected refusal, got ${JSON.stringify(result)}`)
+	assert.strictEqual(
+		result.ok,
+		false,
+		`expected refusal, got ${JSON.stringify(result)}`,
+	)
 	assert.strictEqual(result.code, "parent_chain_contains_symlink")
 	// The decoy directory MUST be empty — the write must NOT have landed there.
 	const { readdirSync } = await import("node:fs")
@@ -107,7 +111,11 @@ await test("V-04.3: legitimate write to fresh parent chain succeeds", async () =
 		join(root, "stages", "security", "knowledge", "note.md"),
 	)
 
-	assert.strictEqual(result.ok, true, `expected ok, got ${JSON.stringify(result)}`)
+	assert.strictEqual(
+		result.ok,
+		true,
+		`expected ok, got ${JSON.stringify(result)}`,
+	)
 	assert.ok(
 		existsSync(join(root, "stages", "security", "knowledge", "note.md")),
 	)
@@ -157,8 +165,12 @@ await test("V-04.5: parent that escapes intentRoot is rejected", async () => {
 
 console.log("\n=== V-08 — CSRF defence-in-depth (Origin matcher) ===")
 
-const { isOriginAllowed, mintCsrfNonce, getCsrfNonce, _resetCsrfNoncesForTests } =
-	await import("../src/http/csrf.ts")
+const {
+	isOriginAllowed,
+	mintCsrfNonce,
+	getCsrfNonce,
+	_resetCsrfNoncesForTests,
+} = await import("../src/http/csrf.ts")
 
 await test("V-08.O1: exact match", () => {
 	assert.strictEqual(
@@ -242,7 +254,9 @@ await test("V-08.N3: re-mint replaces the old nonce", () => {
 
 console.log("\n=== V-10 — feedback body sanitization ===")
 
-const { sanitizeFeedbackBody } = await import("../src/state/sanitize-feedback.ts")
+const { sanitizeFeedbackBody } = await import(
+	"../src/state/sanitize-feedback.ts"
+)
 
 await test("V-10.1: <script> blocks are stripped", () => {
 	const input = "Hello <script>alert(1)</script> world"
@@ -273,7 +287,9 @@ await test("V-10.4: javascript: URL in href= attribute is neutralized", () => {
 })
 
 await test("V-10.5: data:text/html in href= is neutralized", () => {
-	const out = sanitizeFeedbackBody('<a href="data:text/html,<script>x</script>">x</a>')
+	const out = sanitizeFeedbackBody(
+		'<a href="data:text/html,<script>x</script>">x</a>',
+	)
 	assert.ok(!out.includes("data:text/html"))
 })
 
@@ -301,9 +317,7 @@ await test("V-10.9: <style> blocks are stripped (CSS expression injection)", () 
 })
 
 await test("V-10.10: <form> blocks are stripped", () => {
-	const out = sanitizeFeedbackBody(
-		'<form action="x"><input name="y"></form>x',
-	)
+	const out = sanitizeFeedbackBody('<form action="x"><input name="y"></form>x')
 	assert.ok(!out.includes("<form"))
 })
 
@@ -443,10 +457,7 @@ await test("V-11.T2: events outside 10-tick window are trimmed", () => {
 
 await test("V-11.S1: wasBaselinePreviouslyEstablished — false when state.json absent", () => {
 	const dir = makeIntentDir()
-	assert.strictEqual(
-		wasBaselinePreviouslyEstablished(dir, "security"),
-		false,
-	)
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), false)
 })
 
 await test("V-11.S2: wasBaselinePreviouslyEstablished — false when stamp absent", () => {
@@ -455,10 +466,7 @@ await test("V-11.S2: wasBaselinePreviouslyEstablished — false when stamp absen
 		join(dir, "stages", "security", "state.json"),
 		JSON.stringify({ status: "active" }),
 	)
-	assert.strictEqual(
-		wasBaselinePreviouslyEstablished(dir, "security"),
-		false,
-	)
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), false)
 })
 
 await test("V-11.S3: wasBaselinePreviouslyEstablished — true when stamp present", () => {
@@ -554,115 +562,85 @@ await test("V-11.R4: reconstructPriorBaseline rejects sidecar with mismatched ha
 // silently regress if someone refactors the helpers without realising
 // the action-log + sidecar are load-bearing for the V-11 gate.
 
-await test(
-	"V-11.B1 (blue-team): wasBaselinePreviouslyEstablished — true via action-log marker even when state.json is absent",
-	() => {
-		const dir = makeIntentDir()
-		// Append a baseline_established marker to the action log, with NO
-		// state.json on disk. The legacy implementation would return false
-		// (no state.json → no stamp → "first tick"). The fix returns true
-		// because the action-log marker is tamper-evident.
-		writeFileSync(
-			join(dir, "action-log.jsonl"),
-			`${JSON.stringify({
-				entry_type: "baseline_established",
-				path: "__baseline_marker__:established:security",
-				sha: "",
-				author_class: "agent",
-				timestamp: "2026-04-30T00:00:00Z",
-				human_author_id: null,
-				entry_id: "BLN-EST-1-aaa",
-				tick_counter: 1,
-			})}\n`,
-		)
-		assert.strictEqual(
-			wasBaselinePreviouslyEstablished(dir, "security"),
-			true,
-		)
-	},
-)
+await test("V-11.B1 (blue-team): wasBaselinePreviouslyEstablished — true via action-log marker even when state.json is absent", () => {
+	const dir = makeIntentDir()
+	// Append a baseline_established marker to the action log, with NO
+	// state.json on disk. The legacy implementation would return false
+	// (no state.json → no stamp → "first tick"). The fix returns true
+	// because the action-log marker is tamper-evident.
+	writeFileSync(
+		join(dir, "action-log.jsonl"),
+		`${JSON.stringify({
+			entry_type: "baseline_established",
+			path: "__baseline_marker__:established:security",
+			sha: "",
+			author_class: "agent",
+			timestamp: "2026-04-30T00:00:00Z",
+			human_author_id: null,
+			entry_id: "BLN-EST-1-aaa",
+			tick_counter: 1,
+		})}\n`,
+	)
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), true)
+})
 
-await test(
-	"V-11.B2 (blue-team): wasBaselinePreviouslyEstablished — true via validated sidecar even when state.json + log are absent",
-	async () => {
-		const dir = makeIntentDir()
-		const { createHash } = await import("node:crypto")
-		const buf = Buffer.from("baselined content")
-		const sha = createHash("sha256").update(buf).digest("hex")
-		mkdirSync(join(dir, "stages", "security", "baseline-content"), {
-			recursive: true,
-		})
-		writeFileSync(
-			join(dir, "stages", "security", "baseline-content", sha),
-			buf,
-		)
-		// No state.json, no action-log — only a content-addressed sidecar.
-		// The fix returns true because the sidecar is tamper-evident.
-		assert.strictEqual(
-			wasBaselinePreviouslyEstablished(dir, "security"),
-			true,
-		)
-	},
-)
+await test("V-11.B2 (blue-team): wasBaselinePreviouslyEstablished — true via validated sidecar even when state.json + log are absent", async () => {
+	const dir = makeIntentDir()
+	const { createHash } = await import("node:crypto")
+	const buf = Buffer.from("baselined content")
+	const sha = createHash("sha256").update(buf).digest("hex")
+	mkdirSync(join(dir, "stages", "security", "baseline-content"), {
+		recursive: true,
+	})
+	writeFileSync(join(dir, "stages", "security", "baseline-content", sha), buf)
+	// No state.json, no action-log — only a content-addressed sidecar.
+	// The fix returns true because the sidecar is tamper-evident.
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), true)
+})
 
-await test(
-	"V-11.B3 (blue-team): wasBaselinePreviouslyEstablished — sidecar with mismatched hash is ignored (no false positive)",
-	() => {
-		const dir = makeIntentDir()
-		// File named like a sha but with mismatched content — does NOT
-		// validate as a tamper-evident sidecar.
-		const fakeSha = "f".repeat(64)
-		mkdirSync(join(dir, "stages", "security", "baseline-content"), {
-			recursive: true,
-		})
-		writeFileSync(
-			join(dir, "stages", "security", "baseline-content", fakeSha),
-			"actual content does not hash to f-repeated",
-		)
-		assert.strictEqual(
-			wasBaselinePreviouslyEstablished(dir, "security"),
-			false,
-		)
-	},
-)
+await test("V-11.B3 (blue-team): wasBaselinePreviouslyEstablished — sidecar with mismatched hash is ignored (no false positive)", () => {
+	const dir = makeIntentDir()
+	// File named like a sha but with mismatched content — does NOT
+	// validate as a tamper-evident sidecar.
+	const fakeSha = "f".repeat(64)
+	mkdirSync(join(dir, "stages", "security", "baseline-content"), {
+		recursive: true,
+	})
+	writeFileSync(
+		join(dir, "stages", "security", "baseline-content", fakeSha),
+		"actual content does not hash to f-repeated",
+	)
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), false)
+})
 
-await test(
-	"V-11.B4 (blue-team): isBaselineThrashing — action-log floor preserves count when baseline-thrash.json is deleted",
-	() => {
-		const dir = makeIntentDir()
-		// Build up to thrashing via the public API (which writes to BOTH
-		// the cache file AND the action-log).
-		recordBaselineCorruption(dir, "security", 1)
-		recordBaselineCorruption(dir, "security", 2)
-		recordBaselineCorruption(dir, "security", 3)
-		recordBaselineCorruption(dir, "security", 4)
-		assert.strictEqual(
-			isBaselineThrashing(dir, "security", 4).thrashing,
-			true,
-			"setup: thrashing engaged",
-		)
-		// Attacker deletes the cache file (out-of-band).
-		unlinkSync(join(dir, "stages", "security", "baseline-thrash.json"))
-		// Action-log floor preserves the count → still thrashing.
-		const after = isBaselineThrashing(dir, "security", 4)
-		assert.strictEqual(after.thrashing, true)
-		assert.strictEqual(after.recentCount, 4)
-	},
-)
+await test("V-11.B4 (blue-team): isBaselineThrashing — action-log floor preserves count when baseline-thrash.json is deleted", () => {
+	const dir = makeIntentDir()
+	// Build up to thrashing via the public API (which writes to BOTH
+	// the cache file AND the action-log).
+	recordBaselineCorruption(dir, "security", 1)
+	recordBaselineCorruption(dir, "security", 2)
+	recordBaselineCorruption(dir, "security", 3)
+	recordBaselineCorruption(dir, "security", 4)
+	assert.strictEqual(
+		isBaselineThrashing(dir, "security", 4).thrashing,
+		true,
+		"setup: thrashing engaged",
+	)
+	// Attacker deletes the cache file (out-of-band).
+	unlinkSync(join(dir, "stages", "security", "baseline-thrash.json"))
+	// Action-log floor preserves the count → still thrashing.
+	const after = isBaselineThrashing(dir, "security", 4)
+	assert.strictEqual(after.thrashing, true)
+	assert.strictEqual(after.recentCount, 4)
+})
 
-await test(
-	"V-11.B5 (blue-team): wasBaselinePreviouslyEstablished — false when ALL three sources are absent (legitimate first-tick)",
-	() => {
-		const dir = makeIntentDir()
-		// No state.json, no sidecar, no action-log marker — this is the
-		// only case where the fix should return false (legitimate first-
-		// tick establish, allowed).
-		assert.strictEqual(
-			wasBaselinePreviouslyEstablished(dir, "security"),
-			false,
-		)
-	},
-)
+await test("V-11.B5 (blue-team): wasBaselinePreviouslyEstablished — false when ALL three sources are absent (legitimate first-tick)", () => {
+	const dir = makeIntentDir()
+	// No state.json, no sidecar, no action-log marker — this is the
+	// only case where the fix should return false (legitimate first-
+	// tick establish, allowed).
+	assert.strictEqual(wasBaselinePreviouslyEstablished(dir, "security"), false)
+})
 
 console.log(`\n${passed} passed, ${failed} failed\n`)
 

@@ -71,7 +71,10 @@ await attack(
 			recursive: true,
 		})
 		// Plant the symlink at the dest path itself.
-		symlinkSync(sensitive, join(root, "stages", "security", "knowledge", "evil.md"))
+		symlinkSync(
+			sensitive,
+			join(root, "stages", "security", "knowledge", "evil.md"),
+		)
 		const tmpFile = join(root, ".tmp-write")
 		writeFileSync(tmpFile, "attacker payload")
 
@@ -94,7 +97,9 @@ await attack(
 		// of the OS contract, not the helper.
 		assert.strictEqual(result.ok, true)
 		// Cleanup
-		try { unlinkSync(sensitive) } catch {}
+		try {
+			unlinkSync(sensitive)
+		} catch {}
 	},
 )
 
@@ -164,7 +169,10 @@ await attack(
 			recursive: true,
 		})
 		// Plant a sibling symlink — should NOT affect the write
-		symlinkSync(decoy, join(root, "stages", "security", "knowledge", "sibling-link"))
+		symlinkSync(
+			decoy,
+			join(root, "stages", "security", "knowledge", "sibling-link"),
+		)
 		const tmpFile = join(root, ".tmp-write")
 		writeFileSync(tmpFile, "legit")
 		const result = safeMkdirAndRename(
@@ -177,32 +185,32 @@ await attack(
 		// Sibling decoy still empty
 		assert.strictEqual(readdirSync(decoy).length, 0)
 		assert.strictEqual(
-			readFileSync(join(root, "stages", "security", "knowledge", "real.md"), "utf-8"),
+			readFileSync(
+				join(root, "stages", "security", "knowledge", "real.md"),
+				"utf-8",
+			),
 			"legit",
 		)
 	},
 )
 
-await attack(
-	"V-04.RT5: dest exactly equals parentDir (boundary)",
-	async () => {
-		// ATTACK: caller passes destPath === parentDir. The check
-		// `destAbs.startsWith(parentAbs+sep)` should reject this — dest
-		// must be BELOW parent, not equal. Verify rejection.
-		const root = mkdtempSync(join(tmp, "v04rt5-"))
-		const tmpFile = join(root, ".tmp-write")
-		writeFileSync(tmpFile, "x")
-		const result = safeMkdirAndRename(
-			root,
-			join(root, "stages"),
-			tmpFile,
-			join(root, "stages"), // dest == parent
-		)
-		assert.strictEqual(result.ok, false)
-		assert.strictEqual(result.code, "parent_chain_escape")
-		cleanupTempFile(tmpFile)
-	},
-)
+await attack("V-04.RT5: dest exactly equals parentDir (boundary)", async () => {
+	// ATTACK: caller passes destPath === parentDir. The check
+	// `destAbs.startsWith(parentAbs+sep)` should reject this — dest
+	// must be BELOW parent, not equal. Verify rejection.
+	const root = mkdtempSync(join(tmp, "v04rt5-"))
+	const tmpFile = join(root, ".tmp-write")
+	writeFileSync(tmpFile, "x")
+	const result = safeMkdirAndRename(
+		root,
+		join(root, "stages"),
+		tmpFile,
+		join(root, "stages"), // dest == parent
+	)
+	assert.strictEqual(result.ok, false)
+	assert.strictEqual(result.code, "parent_chain_escape")
+	cleanupTempFile(tmpFile)
+})
 
 await attack(
 	"V-04.RT6: chain walks past intentRoot when parent is rootAbs (segments=[])",
@@ -275,15 +283,12 @@ console.log("\n=== V-08 RED-TEAM — CSRF bypass attempts ===")
 
 const { isOriginAllowed } = await import("../src/http/csrf.ts")
 
-await attack(
-	"V-08.RT1: Origin spoofing via 'null' literal",
-	async () => {
-		// ATTACK: some browsers emit `Origin: null` for sandboxed iframes,
-		// data:/file: schemes, and certain redirect cases. If the matcher
-		// allowed 'null', a sandboxed iframe could mount a CSRF.
-		assert.strictEqual(isOriginAllowed("null", ["http://localhost:*"]), false)
-	},
-)
+await attack("V-08.RT1: Origin spoofing via 'null' literal", async () => {
+	// ATTACK: some browsers emit `Origin: null` for sandboxed iframes,
+	// data:/file: schemes, and certain redirect cases. If the matcher
+	// allowed 'null', a sandboxed iframe could mount a CSRF.
+	assert.strictEqual(isOriginAllowed("null", ["http://localhost:*"]), false)
+})
 
 await attack(
 	"V-08.RT2: port wildcard does NOT match credentials in Origin",
@@ -308,7 +313,9 @@ await attack(
 		// uses `host.endsWith('.example.com')` which still matches
 		// `attacker.com.example.com.evil.com`-style strings — verify.
 		assert.strictEqual(
-			isOriginAllowed("https://example.com.evil.com", ["https://*.example.com"]),
+			isOriginAllowed("https://example.com.evil.com", [
+				"https://*.example.com",
+			]),
 			false,
 			"subdomain wildcard matched a different parent domain — V-08 bypass",
 		)
@@ -373,7 +380,9 @@ await attack(
 
 console.log("\n=== V-10 RED-TEAM — sanitizer bypass attempts ===")
 
-const { sanitizeFeedbackBody } = await import("../src/state/sanitize-feedback.ts")
+const { sanitizeFeedbackBody } = await import(
+	"../src/state/sanitize-feedback.ts"
+)
 
 await attack(
 	"V-10.RT1: nested tag obfuscation — <scr<script>ipt>",
@@ -412,19 +421,16 @@ await attack(
 	},
 )
 
-await attack(
-	"V-10.RT4: <math> + xlink:href javascript: scheme",
-	async () => {
-		// ATTACK: <math href="javascript:..."> or xlink:href="javascript:..."
-		// — xlink:href is in stripDangerousAttrs. javascript: in href= is
-		// neutralized. Both layers should fire.
-		const out = sanitizeFeedbackBody(
-			'<math xlink:href="javascript:alert(1)">x</math>',
-		)
-		assert.ok(!/xlink:href/i.test(out), `xlink:href survived: ${out}`)
-		assert.ok(!/javascript:/i.test(out))
-	},
-)
+await attack("V-10.RT4: <math> + xlink:href javascript: scheme", async () => {
+	// ATTACK: <math href="javascript:..."> or xlink:href="javascript:..."
+	// — xlink:href is in stripDangerousAttrs. javascript: in href= is
+	// neutralized. Both layers should fire.
+	const out = sanitizeFeedbackBody(
+		'<math xlink:href="javascript:alert(1)">x</math>',
+	)
+	assert.ok(!/xlink:href/i.test(out), `xlink:href survived: ${out}`)
+	assert.ok(!/javascript:/i.test(out))
+})
 
 await attack(
 	"V-10.RT5: CSS injection via <a style='background:url(javascript:...)'>",
@@ -440,7 +446,10 @@ await attack(
 		// The ASSERTION is that the helper does NOT strip style=, so
 		// downstream callers (SPA renderer, CLI exporters) MUST apply
 		// their own style= scrubbing if they render this content.
-		assert.ok(/style=/.test(out), `style= unexpectedly stripped — verify policy`)
+		assert.ok(
+			/style=/.test(out),
+			`style= unexpectedly stripped — verify policy`,
+		)
 		// Document this as RESIDUAL in unit-04 ASSESSMENTS.md
 		findings.push({
 			severity: "LOW",
@@ -458,7 +467,10 @@ await attack(
 		// all relative URLs in the page. Not stripped by current code.
 		// The href= javascript: scheme is neutralized → href="#".
 		const out = sanitizeFeedbackBody('<base href="javascript:alert(1)">')
-		assert.ok(!/javascript:/i.test(out), `javascript: in base href survived: ${out}`)
+		assert.ok(
+			!/javascript:/i.test(out),
+			`javascript: in base href survived: ${out}`,
+		)
 		// <base> tag itself survives — that's fine because href is now #.
 	},
 )
@@ -474,12 +486,16 @@ await attack(
 			'<meta http-equiv="refresh" content="0;url=javascript:alert(1)">',
 		)
 		// Document this gap.
-		assert.ok(/javascript:/i.test(out), `meta-refresh javascript: survived (expected gap)`)
+		assert.ok(
+			/javascript:/i.test(out),
+			`meta-refresh javascript: survived (expected gap)`,
+		)
 		findings.push({
 			severity: "LOW",
 			area: "V-10",
 			vector: "<meta http-equiv='refresh'> with javascript: in content=",
-			outcome: "documented residual — markdown spec doesn't render meta tags; SPA renderer's allowlist is the defence",
+			outcome:
+				"documented residual — markdown spec doesn't render meta tags; SPA renderer's allowlist is the defence",
 		})
 	},
 )
@@ -505,19 +521,16 @@ await attack(
 	},
 )
 
-await attack(
-	"V-10.RT9: HTML entity encoded <script>",
-	async () => {
-		// ATTACK: `&lt;script&gt;alert(1)&lt;/script&gt;` — the sanitizer
-		// won't see <script> literal. The on-disk content is harmless
-		// text. But if a downstream renderer decodes entities BEFORE
-		// rendering and then renders as HTML, this re-emerges. Document.
-		const out = sanitizeFeedbackBody("&lt;script&gt;alert(1)&lt;/script&gt;")
-		// Sanitizer preserves entity-encoded text — that's correct for a
-		// markdown-safe sanitizer (entities are display-time concerns).
-		assert.strictEqual(out, "&lt;script&gt;alert(1)&lt;/script&gt;")
-	},
-)
+await attack("V-10.RT9: HTML entity encoded <script>", async () => {
+	// ATTACK: `&lt;script&gt;alert(1)&lt;/script&gt;` — the sanitizer
+	// won't see <script> literal. The on-disk content is harmless
+	// text. But if a downstream renderer decodes entities BEFORE
+	// rendering and then renders as HTML, this re-emerges. Document.
+	const out = sanitizeFeedbackBody("&lt;script&gt;alert(1)&lt;/script&gt;")
+	// Sanitizer preserves entity-encoded text — that's correct for a
+	// markdown-safe sanitizer (entities are display-time concerns).
+	assert.strictEqual(out, "&lt;script&gt;alert(1)&lt;/script&gt;")
+})
 
 await attack(
 	"V-10.RT10: markdown autolink <javascript:alert(1)> — angle-bracket form",
@@ -671,9 +684,9 @@ await attack(
 		// must NOT touch raster image data: URLs (legitimate base64
 		// attachments) or relative intent-scope paths.
 		const safeRaster =
-			'![ok](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9R6lYwIAAAAASUVORK5CYII=)'
+			"![ok](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9R6lYwIAAAAASUVORK5CYII=)"
 		assert.strictEqual(sanitizeFeedbackBody(safeRaster), safeRaster)
-		const safeJpeg = '![ok](data:image/jpeg;base64,/9j/4AAQ==)'
+		const safeJpeg = "![ok](data:image/jpeg;base64,/9j/4AAQ==)"
 		assert.strictEqual(sanitizeFeedbackBody(safeJpeg), safeJpeg)
 		const intentScope = "![x](/api/feedback-attachment/abc/def/123.png)"
 		assert.strictEqual(sanitizeFeedbackBody(intentScope), intentScope)
@@ -682,11 +695,13 @@ await attack(
 
 // ── V-11 RED-TEAM — baseline-corrupt operator-gate bypass attempts ──────────
 
-console.log("\n=== V-11 RED-TEAM — baseline-corrupt operator-gate bypass attempts ===")
+console.log(
+	"\n=== V-11 RED-TEAM — baseline-corrupt operator-gate bypass attempts ===",
+)
 
-const {
-	wasBaselinePreviouslyEstablished,
-} = await import("../src/orchestrator/workflow/drift-baseline.ts")
+const { wasBaselinePreviouslyEstablished } = await import(
+	"../src/orchestrator/workflow/drift-baseline.ts"
+)
 
 await attack(
 	"V-11.RT1: state.json delete (CLOSED by blue-team bolt 1) — gate stays armed via action-log + sidecar fallback",
@@ -737,9 +752,7 @@ await attack(
 		)
 		const { createHash } = await import("node:crypto")
 		const sidecarContent = Buffer.from("sample baselined content")
-		const sidecarSha = createHash("sha256")
-			.update(sidecarContent)
-			.digest("hex")
+		const sidecarSha = createHash("sha256").update(sidecarContent).digest("hex")
 		mkdirSync(join(root, "stages", "security", "baseline-content"), {
 			recursive: true,
 		})
@@ -847,7 +860,8 @@ await attack(
 			severity: "MED",
 			area: "V-11",
 			vector: "out-of-band write of .baseline-ack with arbitrary diff_hash",
-			outcome: "single silent-establish per write — gate doesn't verify the diff_hash matches a real reconstructed-vs-on-disk diff. Mitigation: gate should compute diff_hash itself and compare. Threat-model assumption is that out-of-band-writable filesystem == compromised host == can't defend further; document residual.",
+			outcome:
+				"single silent-establish per write — gate doesn't verify the diff_hash matches a real reconstructed-vs-on-disk diff. Mitigation: gate should compute diff_hash itself and compare. Threat-model assumption is that out-of-band-writable filesystem == compromised host == can't defend further; document residual.",
 		})
 	},
 )
@@ -877,7 +891,8 @@ await attack(
 			severity: "INFO",
 			area: "V-11",
 			vector: "thrash threshold = strictly > 3",
-			outcome: "an attacker who paces corruption to ≤3 per 10-tick window stays under the breaker. Each corruption requires operator ack to recover, so the attack is loud — operator will notice the recurring acks. Documented residual; tighten threshold if telemetry shows the pattern in production.",
+			outcome:
+				"an attacker who paces corruption to ≤3 per 10-tick window stays under the breaker. Each corruption requires operator ack to recover, so the attack is loud — operator will notice the recurring acks. Documented residual; tighten threshold if telemetry shows the pattern in production.",
 		})
 	},
 )
@@ -928,7 +943,8 @@ await attack(
 			findings.push({
 				severity: "LOW",
 				area: "V-11",
-				vector: "reconstructPriorBaseline trusts action-log paths (no tracked-surface validation)",
+				vector:
+					"reconstructPriorBaseline trusts action-log paths (no tracked-surface validation)",
 				outcome: `path '../../etc/passwd' surfaces in reconstructed baseline. Mitigation: filter paths through canonicalisePath + tracked-surface allowlist before emitting. Operator-visible in diff so the attack is noisy.`,
 			})
 		}
@@ -963,9 +979,7 @@ await attack(
 		// secondary tamper-evident anchor).
 		const { createHash } = await import("node:crypto")
 		const sidecarContent = Buffer.from("sample baselined content rt6")
-		const sidecarSha = createHash("sha256")
-			.update(sidecarContent)
-			.digest("hex")
+		const sidecarSha = createHash("sha256").update(sidecarContent).digest("hex")
 		mkdirSync(join(root, "stages", "security", "baseline-content"), {
 			recursive: true,
 		})
@@ -973,10 +987,7 @@ await attack(
 			join(root, "stages", "security", "baseline-content", sidecarSha),
 			sidecarContent,
 		)
-		assert.strictEqual(
-			wasBaselinePreviouslyEstablished(root, "security"),
-			true,
-		)
+		assert.strictEqual(wasBaselinePreviouslyEstablished(root, "security"), true)
 		// ATTACK: rewrite state.json without the stamp
 		writeFileSync(
 			stateFile,

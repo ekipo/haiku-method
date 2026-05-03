@@ -1049,10 +1049,7 @@ export function writeBaselineAckMarker(
 
 /** Clear the ack marker after a successful reset — single-use semantics
  *  prevent the marker from authorising a future silent re-establish. */
-export function clearBaselineAckMarker(
-	intentDir: string,
-	stage: string,
-): void {
+export function clearBaselineAckMarker(intentDir: string, stage: string): void {
 	const markerPath = baselineAckMarkerPath(intentDir, stage)
 	if (existsSync(markerPath)) {
 		try {
@@ -1263,7 +1260,10 @@ function actionLogCountCorruptionEvents(
  *  attacker would have to remove every sidecar from disk to disarm
  *  this check; selective tampering of a single sidecar is detectable
  *  by the sha256 mismatch. */
-function hasValidatedBaselineSidecar(intentDir: string, stage: string): boolean {
+function hasValidatedBaselineSidecar(
+	intentDir: string,
+	stage: string,
+): boolean {
 	const dirs = [baselineContentDir(intentDir, stage)]
 	const intentDirSidecar = baselineIntentContentDir(intentDir)
 	if (existsSync(intentDirSidecar)) dirs.push(intentDirSidecar)

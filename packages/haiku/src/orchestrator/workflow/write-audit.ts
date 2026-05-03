@@ -206,7 +206,9 @@ function truncateBytes(s: string, maxBytes: number): string {
  *  the appender will refuse any record above the cap so the on-disk
  *  bytes are always within a size the userspace mutex + O_APPEND can
  *  guarantee don't interleave. */
-export function validateAndCapAuditRecord(record: WriteAuditRecord):
+export function validateAndCapAuditRecord(
+	record: WriteAuditRecord,
+):
 	| { ok: true; record: WriteAuditRecord; line: string }
 	| { ok: false; reason: string; bytes: number; cap: number } {
 	// Defensive: treat null/undefined uniformly so legacy fixtures and
@@ -271,7 +273,10 @@ async function withFileMutex<T>(
 	const next = new Promise<void>((resolve) => {
 		release = resolve
 	})
-	fileMutexes.set(filePath, prior.then(() => next))
+	fileMutexes.set(
+		filePath,
+		prior.then(() => next),
+	)
 	try {
 		await prior
 		return await fn()

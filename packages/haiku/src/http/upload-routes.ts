@@ -58,6 +58,7 @@ import {
 	appendWriteAudit,
 	nextEntryId,
 } from "../orchestrator/workflow/write-audit.js"
+import { cleanupTempFile, safeMkdirAndRename } from "../state/safe-write.js"
 import {
 	getIntentScopeTickCounter,
 	IntentScopeTickPersistError,
@@ -67,7 +68,6 @@ import {
 } from "../state-tools.js"
 import { emitTelemetry } from "../telemetry.js"
 import { requireTunnelAuth, verifyIntentMutationAuth } from "./auth.js"
-import { cleanupTempFile, safeMkdirAndRename } from "../state/safe-write.js"
 import { isValidSlug, validateIntent, validateStage } from "./validation.js"
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -682,7 +682,12 @@ export async function registerUploadRoutes(
 				// creates missing dirs one segment at a time (no `recursive:
 				// true` follow-symlink trap), and re-validates the parent's
 				// realpath immediately before the rename.
-				const safeResult = safeMkdirAndRename(iDir, destDir, tmpPath, destAbsPath)
+				const safeResult = safeMkdirAndRename(
+					iDir,
+					destDir,
+					tmpPath,
+					destAbsPath,
+				)
 				if (!safeResult.ok) {
 					cleanupTempFile(tmpPath)
 					tmpPath = null
@@ -973,7 +978,12 @@ export async function registerUploadRoutes(
 
 				// V-04 (Symlink TOCTOU defence): atomic rename via the safe
 				// helper. Same semantics as the stage-output route above.
-				const safeResult = safeMkdirAndRename(iDir, destDir, tmpPath, destAbsPath)
+				const safeResult = safeMkdirAndRename(
+					iDir,
+					destDir,
+					tmpPath,
+					destAbsPath,
+				)
 				if (!safeResult.ok) {
 					cleanupTempFile(tmpPath)
 					tmpPath = null

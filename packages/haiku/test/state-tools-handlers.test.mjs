@@ -2156,7 +2156,7 @@ Test stage.
 		)
 	})
 
-	test("isIntentLocked recognises double-quoted YAML status: \"locked\"", () => {
+	test('isIntentLocked recognises double-quoted YAML status: "locked"', () => {
 		const dir = join(tmp, "v06-locked-doublequoted")
 		mkdirSync(dir, { recursive: true })
 		writeFileSync(

@@ -27,8 +27,11 @@
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import {
+	createFixChainWorktree,
+	fixChainBranchName,
+} from "../../git-worktree.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
-import { summarizeFeedback } from "../actions.js"
 import {
 	type FeedbackItem,
 	incrementFeedbackBolt,
@@ -36,10 +39,7 @@ import {
 	parseFrontmatter,
 } from "../../state-tools.js"
 import { readHatDefs, studioSearchPaths } from "../../studio-reader.js"
-import {
-	createFixChainWorktree,
-	fixChainBranchName,
-} from "../../git-worktree.js"
+import { summarizeFeedback } from "../actions.js"
 
 /** Read `fix_hats:` from a stage's STAGE.md frontmatter. Returns []
  *  when the file is missing or the field is unset. Inline rather than

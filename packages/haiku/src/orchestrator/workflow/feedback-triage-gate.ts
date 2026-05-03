@@ -44,8 +44,11 @@
 // confirmation — don't dead-lock the workflow.
 
 import type { OrchestratorAction } from "../../orchestrator.js"
-import { gitCommitState } from "../../state-tools.js"
-import { type FeedbackItem, readFeedbackFiles } from "../../state-tools.js"
+import {
+	type FeedbackItem,
+	gitCommitState,
+	readFeedbackFiles,
+} from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
 import {
 	buildFeedbackDispatchAction,

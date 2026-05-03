@@ -130,13 +130,11 @@ export const verifyFeedbackMutationAuth = verifyIntentMutationAuth
 //   when a `?t=<jwt>` query-param token is presented on POST/PUT/PATCH/DELETE.
 //   Mutating routes MUST NOT accept the query-param token carrier; clients
 //   move to `Authorization: Bearer` for mutations.
-export { CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON } from "./csrf.js"
 //
 // Layer 2 — Origin allowlist (HAIKU_ALLOWED_ORIGINS env).
 //   `isOriginAllowed(origin, allowList)` is the matcher; the env var
 //   `HAIKU_ALLOWED_ORIGINS` (comma-separated, default `http://localhost:*`)
 //   is read by `csrf.ts:readAllowedOrigins`.
-export { isOriginAllowed as checkOrigin } from "./csrf.js"
 //
 // Layer 3 — Per-session CSRF nonce (X-Haiku-CSRF header).
 //   `csrfPreHandler` is the Fastify preHandler that enforces all three
@@ -146,6 +144,11 @@ export { isOriginAllowed as checkOrigin } from "./csrf.js"
 //   `requireCsrfNonce` re-export name surfaces the "auth chokepoint that
 //   requires the nonce" intent on the auth surface — implementation is
 //   the `csrfPreHandler` in csrf.ts.
-export { csrfPreHandler as requireCsrfNonce } from "./csrf.js"
-export { mintCsrfNonce, getCsrfNonce } from "./csrf.js"
-export { CSRF_NONCE_HEADER } from "./csrf.js"
+export {
+	CSRF_NONCE_HEADER,
+	CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON,
+	csrfPreHandler as requireCsrfNonce,
+	getCsrfNonce,
+	isOriginAllowed as checkOrigin,
+	mintCsrfNonce,
+} from "./csrf.js"

@@ -88,13 +88,7 @@ writeFileSync(
 // since markdown has the same "designer attaches notes" semantics
 // without the script-execution vector.
 writeFileSync(
-	join(
-		intentDirPath,
-		"stages",
-		stageName,
-		"artifacts",
-		"dashboard-layout.md",
-	),
+	join(intentDirPath, "stages", stageName, "artifacts", "dashboard-layout.md"),
 	"# Dashboard layout — original\n",
 )
 
@@ -163,7 +157,11 @@ writeFileSync(
 // pre-fix substring scan missed this and let uploads through. The shared
 // gray-matter helper MUST classify it as locked.
 const singleQuotedLockedSlug = "test-singlequoted-locked-intent"
-const singleQuotedLockedPath = join(haikuRoot, "intents", singleQuotedLockedSlug)
+const singleQuotedLockedPath = join(
+	haikuRoot,
+	"intents",
+	singleQuotedLockedSlug,
+)
 mkdirSync(join(singleQuotedLockedPath, "stages", stageName, "artifacts"), {
 	recursive: true,
 })
@@ -1246,13 +1244,7 @@ async function run() {
 			415,
 			`R-01: .js MUST reject (serveFile returns application/javascript — same XSS class as V-02). Got ${res.status}.`,
 		)
-		const dest = join(
-			intentDirPath,
-			"stages",
-			stageName,
-			"artifacts",
-			"pwn.js",
-		)
+		const dest = join(intentDirPath, "stages", stageName, "artifacts", "pwn.js")
 		assert.ok(!existsSync(dest), "Rejected `.js` upload must not land on disk")
 	})
 
@@ -1696,7 +1688,9 @@ async function run() {
 
 	// ── V-03: claimed_author_id (canonical) is written alongside the legacy
 	//         human_author_id alias on every new audit-log + action-log entry.
-	console.log("\n=== V-03: claimed_author_id rename (legacy alias mirrored) ===")
+	console.log(
+		"\n=== V-03: claimed_author_id rename (legacy alias mirrored) ===",
+	)
 
 	await test("V-03: stage-output upload writes claimed_author_id AND human_author_id (legacy alias)", async () => {
 		// V-03 tests author-attribution semantics, NOT upload content-type.

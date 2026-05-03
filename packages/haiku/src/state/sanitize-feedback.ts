@@ -127,10 +127,7 @@ function stripVoidTag(input: string, tagName: string): string {
  *  attribute values. */
 function stripEventHandlers(input: string): string {
 	// `on<word>="..."` or `on<word>='...'` or `on<word>=value`
-	return input.replace(
-		/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
-		"",
-	)
+	return input.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
 }
 
 /** Strip dangerous attributes other than `on*=`: `formaction`, `srcdoc`,
@@ -161,15 +158,12 @@ function neutralizeAttrUrlSchemes(input: string): string {
  *  `[text](javascript:…)` → `[text](#)`,
  *  `![alt](javascript:…)` → `![alt](#)`. */
 function neutralizeMarkdownUrlSchemes(input: string): string {
-	return input.replace(
-		/(!?\[[^\]]*\])\(([^)]+)\)/g,
-		(match, label, url) => {
-			if (DANGEROUS_URL_SCHEMES.test(url.trim())) {
-				return `${label}(#)`
-			}
-			return match
-		},
-	)
+	return input.replace(/(!?\[[^\]]*\])\(([^)]+)\)/g, (match, label, url) => {
+		if (DANGEROUS_URL_SCHEMES.test(url.trim())) {
+			return `${label}(#)`
+		}
+		return match
+	})
 }
 
 /**

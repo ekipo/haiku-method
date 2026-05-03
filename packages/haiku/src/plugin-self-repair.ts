@@ -163,9 +163,11 @@ export function attemptSelfRepair(): RepairResult {
  *  plugin is intact (or was just successfully repaired). Fires Sentry
  *  on every removal detection AND on every repair attempt result so
  *  we can quantify how often this is happening in production. */
-export function checkPluginIntegrity(
-	sessionCtx?: Record<string, string>,
-): { ok: boolean; repaired: boolean; result?: RepairResult } {
+export function checkPluginIntegrity(sessionCtx?: Record<string, string>): {
+	ok: boolean
+	repaired: boolean
+	result?: RepairResult
+} {
 	const now = Date.now()
 	if (now - _lastGoodCheck < CHECK_THROTTLE_MS) {
 		return { ok: true, repaired: false }

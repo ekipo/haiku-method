@@ -132,7 +132,11 @@ export function computeCorpusFingerprintInstrumented(
 		hasher.update(`${entry.relPath}\0${fileSha}\n`)
 	}
 	const elapsed = Number(process.hrtime.bigint() - startedNs) / 1_000_000
-	return { fingerprint: hasher.digest("hex"), durationMs: elapsed, corpusBytes: bytes }
+	return {
+		fingerprint: hasher.digest("hex"),
+		durationMs: elapsed,
+		corpusBytes: bytes,
+	}
 }
 
 /** A single text source ingested for reconciliation analysis. */

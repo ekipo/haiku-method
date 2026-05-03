@@ -35,6 +35,7 @@ import {
 	truncateInstruction,
 	type WriteAuditRecord,
 } from "../../orchestrator/workflow/write-audit.js"
+import { cleanupTempFile, safeMkdirAndRename } from "../../state/safe-write.js"
 import {
 	findHaikuRoot,
 	getIntentScopeTickCounter,
@@ -42,7 +43,6 @@ import {
 	isIntentArchived,
 	isIntentLocked,
 } from "../../state-tools.js"
-import { cleanupTempFile, safeMkdirAndRename } from "../../state/safe-write.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
@@ -728,7 +728,12 @@ export default defineTool({
 			}
 		}
 
-		const safeResult = safeMkdirAndRename(intentDir, parentDir, tmpPath, destAbs)
+		const safeResult = safeMkdirAndRename(
+			intentDir,
+			parentDir,
+			tmpPath,
+			destAbs,
+		)
 		if (!safeResult.ok) {
 			// V-04 defence triggered, OR rename failed for a benign reason.
 			// Either way: clean up the temp file and surface a structured
@@ -746,7 +751,9 @@ export default defineTool({
 						text: JSON.stringify(
 							{
 								ok: false,
-								error: isSymlinkAttack ? "path_outside_tracked_surface" : "disk_write_failed",
+								error: isSymlinkAttack
+									? "path_outside_tracked_surface"
+									: "disk_write_failed",
 								path: canonicalPath,
 								reason: isSymlinkAttack ? safeResult.code : undefined,
 								message: isSymlinkAttack

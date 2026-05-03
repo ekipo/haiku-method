@@ -688,14 +688,7 @@ export function mergeStageBranchIntoMain(
 		const current = getCurrentBranch()
 
 		const mergeInPrimary = (): void => {
-			run([
-				"git",
-				"merge",
-				stageBranch,
-				"--no-edit",
-				"-m",
-				mergeMessage,
-			])
+			run(["git", "merge", stageBranch, "--no-edit", "-m", mergeMessage])
 		}
 
 		if (current === mainBranch) {

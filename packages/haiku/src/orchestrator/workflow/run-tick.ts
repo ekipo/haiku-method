@@ -17,7 +17,11 @@ import { existsSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { verifyIntentState } from "../../state-integrity.js"
-import { getStageIterationCount, readJson, writeJson } from "../../state-tools.js"
+import {
+	getStageIterationCount,
+	readJson,
+	writeJson,
+} from "../../state-tools.js"
 import { writeActionPromptFile } from "../../subagent-prompt-file.js"
 import { emitTelemetry } from "../../telemetry.js"
 import { resolveIntentStages } from "../studio.js"
@@ -339,11 +343,7 @@ function maybeUpstreamReconciliationGate(
 	//   - stored differs → fall through to detectors below; if they emit
 	//     findings, fire the gate. If they emit none, stamp the new
 	//     fingerprint silently.
-	const fpResult = computeCorpusFingerprintInstrumented(
-		slug,
-		priorStages,
-		root,
-	)
+	const fpResult = computeCorpusFingerprintInstrumented(slug, priorStages, root)
 	const currentFingerprint = fpResult.fingerprint
 	emitTelemetry("haiku.reconciliation.fingerprint.duration_ms", {
 		...reconAttrs,

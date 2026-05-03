@@ -221,183 +221,161 @@ async function run() {
 	)
 
 	// ── R-01 baseline: own-intent JWT proceeds ────────────────────────────────
-	await test(
-		"R-01 baseline: stage-output upload with own-intent JWT proceeds (200)",
-		async () => {
-			const res = await postUpload(
-				baseUrl,
-				intentASlug,
-				"stage-output",
-				{
-					stage: stageName,
-					target_path: "artifacts/r01-baseline-a.txt",
-					mode: "create",
-					attribute_to_user: "alice",
-					file: {
-						filename: "r01-baseline-a.txt",
-						content: "baseline\n",
-						contentType: "text/plain",
-					},
+	await test("R-01 baseline: stage-output upload with own-intent JWT proceeds (200)", async () => {
+		const res = await postUpload(
+			baseUrl,
+			intentASlug,
+			"stage-output",
+			{
+				stage: stageName,
+				target_path: "artifacts/r01-baseline-a.txt",
+				mode: "create",
+				attribute_to_user: "alice",
+				file: {
+					filename: "r01-baseline-a.txt",
+					content: "baseline\n",
+					contentType: "text/plain",
 				},
-				{ Authorization: `Bearer ${jwtA}` },
-			)
-			assert.strictEqual(
-				res.status,
-				200,
-				`expected 200 with own-intent JWT, got ${res.status}`,
-			)
-		},
-	)
+			},
+			{ Authorization: `Bearer ${jwtA}` },
+		)
+		assert.strictEqual(
+			res.status,
+			200,
+			`expected 200 with own-intent JWT, got ${res.status}`,
+		)
+	})
 
-	await test(
-		"R-01 baseline: knowledge upload with own-intent JWT proceeds (200)",
-		async () => {
-			const res = await postUpload(
-				baseUrl,
-				intentASlug,
-				"knowledge",
-				{
-					target_filename: "r01-baseline-knowledge.md",
-					attribute_to_user: "alice",
-					file: {
-						filename: "r01-baseline-knowledge.md",
-						content: "# baseline\n",
-						contentType: "text/markdown",
-					},
+	await test("R-01 baseline: knowledge upload with own-intent JWT proceeds (200)", async () => {
+		const res = await postUpload(
+			baseUrl,
+			intentASlug,
+			"knowledge",
+			{
+				target_filename: "r01-baseline-knowledge.md",
+				attribute_to_user: "alice",
+				file: {
+					filename: "r01-baseline-knowledge.md",
+					content: "# baseline\n",
+					contentType: "text/markdown",
 				},
-				{ Authorization: `Bearer ${jwtA}` },
-			)
-			assert.strictEqual(
-				res.status,
-				200,
-				`expected 200 with own-intent JWT, got ${res.status}`,
-			)
-		},
-	)
+			},
+			{ Authorization: `Bearer ${jwtA}` },
+		)
+		assert.strictEqual(
+			res.status,
+			200,
+			`expected 200 with own-intent JWT, got ${res.status}`,
+		)
+	})
 
 	// ── R-01 cross-session bypass attempt — the load-bearing test ────────────
-	await test(
-		"R-01: stage-output upload with JWT for DIFFERENT intent's session returns 403 forbidden_cross_session (no cross-intent attribution)",
-		async () => {
-			// Use intent A's JWT to POST to intent B's stage-output endpoint.
-			// Pre-fix this would 200 and write into intent B with
-			// attribute_to_user='alice' even though sessionA is bound to intent A.
-			const res = await postUpload(
-				baseUrl,
-				intentBSlug,
-				"stage-output",
-				{
-					stage: stageName,
-					target_path: "artifacts/r01-cross-session.txt",
-					mode: "create",
-					attribute_to_user: "mallory",
-					file: {
-						filename: "r01-cross-session.txt",
-						content: "cross-intent payload\n",
-						contentType: "text/plain",
-					},
+	await test("R-01: stage-output upload with JWT for DIFFERENT intent's session returns 403 forbidden_cross_session (no cross-intent attribution)", async () => {
+		// Use intent A's JWT to POST to intent B's stage-output endpoint.
+		// Pre-fix this would 200 and write into intent B with
+		// attribute_to_user='alice' even though sessionA is bound to intent A.
+		const res = await postUpload(
+			baseUrl,
+			intentBSlug,
+			"stage-output",
+			{
+				stage: stageName,
+				target_path: "artifacts/r01-cross-session.txt",
+				mode: "create",
+				attribute_to_user: "mallory",
+				file: {
+					filename: "r01-cross-session.txt",
+					content: "cross-intent payload\n",
+					contentType: "text/plain",
 				},
-				{ Authorization: `Bearer ${jwtA}` },
-			)
-			assert.strictEqual(
-				res.status,
-				403,
-				`expected 403 cross-session, got ${res.status} — R-01 bypass open`,
-			)
-			const data = await res.json()
-			assert.strictEqual(data.error, "forbidden_cross_session")
-			assert.strictEqual(data.reason, "intent_mismatch")
-		},
-	)
+			},
+			{ Authorization: `Bearer ${jwtA}` },
+		)
+		assert.strictEqual(
+			res.status,
+			403,
+			`expected 403 cross-session, got ${res.status} — R-01 bypass open`,
+		)
+		const data = await res.json()
+		assert.strictEqual(data.error, "forbidden_cross_session")
+		assert.strictEqual(data.reason, "intent_mismatch")
+	})
 
-	await test(
-		"R-01: knowledge upload with JWT for DIFFERENT intent's session returns 403 forbidden_cross_session",
-		async () => {
-			// Use intent B's JWT to POST to intent A's knowledge endpoint.
-			const res = await postUpload(
-				baseUrl,
-				intentASlug,
-				"knowledge",
-				{
-					target_filename: "r01-cross-session-knowledge.md",
-					attribute_to_user: "mallory",
-					file: {
-						filename: "r01-cross-session-knowledge.md",
-						content: "cross-intent knowledge\n",
-						contentType: "text/markdown",
-					},
+	await test("R-01: knowledge upload with JWT for DIFFERENT intent's session returns 403 forbidden_cross_session", async () => {
+		// Use intent B's JWT to POST to intent A's knowledge endpoint.
+		const res = await postUpload(
+			baseUrl,
+			intentASlug,
+			"knowledge",
+			{
+				target_filename: "r01-cross-session-knowledge.md",
+				attribute_to_user: "mallory",
+				file: {
+					filename: "r01-cross-session-knowledge.md",
+					content: "cross-intent knowledge\n",
+					contentType: "text/markdown",
 				},
-				{ Authorization: `Bearer ${jwtB}` },
-			)
-			assert.strictEqual(
-				res.status,
-				403,
-				`expected 403 cross-session, got ${res.status} — R-01 bypass open`,
-			)
-			const data = await res.json()
-			assert.strictEqual(data.error, "forbidden_cross_session")
-			assert.strictEqual(data.reason, "intent_mismatch")
-		},
-	)
+			},
+			{ Authorization: `Bearer ${jwtB}` },
+		)
+		assert.strictEqual(
+			res.status,
+			403,
+			`expected 403 cross-session, got ${res.status} — R-01 bypass open`,
+		)
+		const data = await res.json()
+		assert.strictEqual(data.error, "forbidden_cross_session")
+		assert.strictEqual(data.reason, "intent_mismatch")
+	})
 
-	await test(
-		"R-01: stage-output upload with JWT for unknown session returns 403 forbidden_cross_session",
-		async () => {
-			const bogusJwt = mintJWT("sess-does-not-exist")
-			const res = await postUpload(
-				baseUrl,
-				intentASlug,
-				"stage-output",
-				{
-					stage: stageName,
-					target_path: "artifacts/r01-bogus-session.txt",
-					mode: "create",
-					attribute_to_user: "mallory",
-					file: {
-						filename: "r01-bogus-session.txt",
-						content: "bogus\n",
-						contentType: "text/plain",
-					},
+	await test("R-01: stage-output upload with JWT for unknown session returns 403 forbidden_cross_session", async () => {
+		const bogusJwt = mintJWT("sess-does-not-exist")
+		const res = await postUpload(
+			baseUrl,
+			intentASlug,
+			"stage-output",
+			{
+				stage: stageName,
+				target_path: "artifacts/r01-bogus-session.txt",
+				mode: "create",
+				attribute_to_user: "mallory",
+				file: {
+					filename: "r01-bogus-session.txt",
+					content: "bogus\n",
+					contentType: "text/plain",
 				},
-				{ Authorization: `Bearer ${bogusJwt}` },
-			)
-			assert.strictEqual(
-				res.status,
-				403,
-				`expected 403, got ${res.status}`,
-			)
-			const data = await res.json()
-			assert.strictEqual(data.error, "forbidden_cross_session")
-			assert.strictEqual(data.reason, "unknown_session")
-		},
-	)
+			},
+			{ Authorization: `Bearer ${bogusJwt}` },
+		)
+		assert.strictEqual(res.status, 403, `expected 403, got ${res.status}`)
+		const data = await res.json()
+		assert.strictEqual(data.error, "forbidden_cross_session")
+		assert.strictEqual(data.reason, "unknown_session")
+	})
 
-	await test(
-		"R-01: stage-output upload with no auth at all returns 401 (tunnel gate fires first)",
-		async () => {
-			const res = await postUpload(
-				baseUrl,
-				intentASlug,
-				"stage-output",
-				{
-					stage: stageName,
-					target_path: "artifacts/r01-no-auth.txt",
-					mode: "create",
-					attribute_to_user: "anon",
-					file: {
-						filename: "r01-no-auth.txt",
-						content: "anon\n",
-						contentType: "text/plain",
-					},
+	await test("R-01: stage-output upload with no auth at all returns 401 (tunnel gate fires first)", async () => {
+		const res = await postUpload(
+			baseUrl,
+			intentASlug,
+			"stage-output",
+			{
+				stage: stageName,
+				target_path: "artifacts/r01-no-auth.txt",
+				mode: "create",
+				attribute_to_user: "anon",
+				file: {
+					filename: "r01-no-auth.txt",
+					content: "anon\n",
+					contentType: "text/plain",
 				},
-				{},
-			)
-			assert.strictEqual(res.status, 401)
-			const data = await res.json()
-			assert.strictEqual(data.error, "unauthorized")
-			assert.strictEqual(data.reason, "missing_token")
-		},
-	)
+			},
+			{},
+		)
+		assert.strictEqual(res.status, 401)
+		const data = await res.json()
+		assert.strictEqual(data.error, "unauthorized")
+		assert.strictEqual(data.reason, "missing_token")
+	})
 
 	console.log(`\n${passed} passed, ${failed} failed\n`)
 }

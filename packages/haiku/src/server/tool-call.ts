@@ -29,7 +29,6 @@ import {
 	toMermaidDefinition,
 } from "../index.js"
 import { handleOrchestratorTool } from "../orchestrator.js"
-import { orchestratorToolHandlers } from "../tools/orchestrator/index.js"
 import { isSentryConfigured, reportFeedback } from "../sentry.js"
 import type { DesignArchetypeData, QuestionDef } from "../sessions.js"
 import {
@@ -51,6 +50,7 @@ import {
 	listVisibleIntents,
 	parseFrontmatter,
 } from "../state-tools.js"
+import { orchestratorToolHandlers } from "../tools/orchestrator/index.js"
 import {
 	buildReviewUrl,
 	clearE2EKey,

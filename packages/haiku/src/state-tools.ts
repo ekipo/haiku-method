@@ -26,6 +26,7 @@ import { Ajv } from "ajv"
 import matter from "gray-matter"
 import { features, resolvePluginRoot } from "./config.js"
 import { sanitizeFeedbackBody } from "./state/sanitize-feedback.js"
+
 // V-04 (Symlink TOCTOU): `haiku_human_write` (registered via this module's
 // MCP tool table) performs atomic file writes inside intent dirs through the
 // `safeMkdirAndRename` helper in `./state/safe-write.ts`. The helper walks
@@ -36,6 +37,7 @@ import { sanitizeFeedbackBody } from "./state/sanitize-feedback.js"
 // quality-gate static-analysis grep) can locate the V-04 chokepoint from
 // the same module that registers the human-write tool.
 export { safeMkdirAndRename } from "./state/safe-write.js"
+
 // workflow-fields module retained for state-integrity sealing; no direct imports
 // needed here since the completion-only guard is narrow to status/completed.
 import {
@@ -3690,9 +3692,7 @@ function validateSettingsCandidate(data: unknown): boolean {
 			? JSON.parse(readFileSync(settingsPath, "utf8"))
 			: { type: "object", additionalProperties: true }
 		const validator = settingsAjv.compile(settingsSchema)
-		_validateSettingsCandidate = validator as unknown as (
-			d: unknown,
-		) => boolean
+		_validateSettingsCandidate = validator as unknown as (d: unknown) => boolean
 		_validateSettingsErrors = () => validator.errors as unknown[]
 	}
 	return _validateSettingsCandidate(data)
@@ -8037,7 +8037,10 @@ export function handleStateTool(
 						/^merge_conflict: real conflicts on agent-authored content require resolution: (.+)$/m,
 					)
 					const conflictPaths = conflictMatch
-						? conflictMatch[1].split(",").map((p) => p.trim()).filter(Boolean)
+						? conflictMatch[1]
+								.split(",")
+								.map((p) => p.trim())
+								.filter(Boolean)
 						: []
 
 					if (conflictPaths.length > 0) {
@@ -9135,7 +9138,11 @@ export function handleStateTool(
 			}
 			// Write — gray-matter's bundled js-yaml engine handles
 			// stringification consistently with how the file is read.
-			const yamlEngine = (matter as unknown as { engines: { yaml: { stringify: (v: unknown) => string } } }).engines.yaml
+			const yamlEngine = (
+				matter as unknown as {
+					engines: { yaml: { stringify: (v: unknown) => string } }
+				}
+			).engines.yaml
 			const yamlOut = yamlEngine.stringify(candidate)
 			writeFileSync(settingsPath, yamlOut)
 			return reply({
@@ -9175,7 +9182,9 @@ export function handleStateTool(
 				)
 			}
 			// Reject unknown fields.
-			if (!(AGENT_AUTHORABLE_INTENT_FIELDS as readonly string[]).includes(field)) {
+			if (
+				!(AGENT_AUTHORABLE_INTENT_FIELDS as readonly string[]).includes(field)
+			) {
 				return errOut(
 					"intent_field_unknown",
 					`Field '${field}' is not in INTENT_FRONTMATTER_SCHEMA. Allowed: ${AGENT_AUTHORABLE_INTENT_FIELDS.filter((f) => !INTENT_IMMUTABLE_FIELDS.includes(f)).join(", ")}.`,
@@ -9228,10 +9237,7 @@ export function handleStateTool(
 			const field = args.field as string
 			void args.value
 			const errOut = (error: string, message: string) =>
-				reply(
-					{ error, intent: slug, stage, field, message },
-					{ isError: true },
-				)
+				reply({ error, intent: slug, stage, field, message }, { isError: true })
 			if (!slug) return errOut("intent_required", "`intent` is required")
 			if (!stage) return errOut("stage_required", "`stage` is required")
 			if (!field || typeof field !== "string")

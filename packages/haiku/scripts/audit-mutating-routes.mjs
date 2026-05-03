@@ -173,7 +173,8 @@ for (const file of allFiles) {
 	if (text.includes("fastify-plugin") && !text.includes("// audit-allow:")) {
 		warnings.push({
 			file: rel,
-			reason: "fastify_plugin_imported — verify routes inherit the global preHandler",
+			reason:
+				"fastify_plugin_imported — verify routes inherit the global preHandler",
 		})
 	}
 }
@@ -184,7 +185,8 @@ const buildAppText = readFileSync(join(srcRoot, BUILD_APP_FILE), "utf8")
 if (!buildAppText.includes("registerCsrfRoutes(instance)")) {
 	errors.push({
 		file: BUILD_APP_FILE,
-		reason: "registerCsrfRoutes(instance) call missing from buildApp — global CSRF preHandler is NOT installed",
+		reason:
+			"registerCsrfRoutes(instance) call missing from buildApp — global CSRF preHandler is NOT installed",
 	})
 } else {
 	// Confirm the call is BEFORE the other route registrations. Fastify
@@ -197,7 +199,8 @@ if (!buildAppText.includes("registerCsrfRoutes(instance)")) {
 	if (fbIdx !== -1 && csrfIdx > fbIdx) {
 		warnings.push({
 			file: BUILD_APP_FILE,
-			reason: "registerCsrfRoutes called AFTER registerFeedbackRoutes — works but obscures coverage; keep CSRF first",
+			reason:
+				"registerCsrfRoutes called AFTER registerFeedbackRoutes — works but obscures coverage; keep CSRF first",
 		})
 	}
 }

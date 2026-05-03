@@ -42,7 +42,10 @@ import {
 	writeJson,
 } from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
-import { findIncompleteStages, rewindFromCompletionReview } from "./side-effects.js"
+import {
+	findIncompleteStages,
+	rewindFromCompletionReview,
+} from "./side-effects.js"
 
 function readFm(filePath: string): Record<string, unknown> {
 	const { data } = parseFrontmatter(readFileSync(filePath, "utf8"))
@@ -180,9 +183,7 @@ export function preTickConsistency(
 				if (!result.success) {
 					const isConflict = /merge_conflict:/i.test(result.message)
 					return {
-						action: isConflict
-							? "resolve_merge_conflicts"
-							: "merge_failed",
+						action: isConflict ? "resolve_merge_conflicts" : "merge_failed",
 						intent: slug,
 						stage: currentStage,
 						unit: unitName,

@@ -459,7 +459,11 @@ await ok(
 		const huge = "x".repeat(MAX_AUDIT_RATIONALE_BYTES * 4) // 16 KB rationale
 		const rec = makeRecord({ rationale: huge, path: "k/big-rationale.md" })
 		const result = await appendWriteAudit(dir, rec)
-		assert.strictEqual(result.ok, true, "huge rationale capped, append succeeds")
+		assert.strictEqual(
+			result.ok,
+			true,
+			"huge rationale capped, append succeeds",
+		)
 		const raw = readFileSync(writeAuditPath(dir), "utf-8")
 		const lines = raw.split("\n").filter((l) => l.trim() !== "")
 		assert.strictEqual(lines.length, 1, "exactly one line written")

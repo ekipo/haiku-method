@@ -68,7 +68,9 @@ async function serveAndCapture(realPath) {
 	return reply
 }
 
-console.log("\n=== FB-21 — OOB-drop browser-renderable extensions forced to attachment ===")
+console.log(
+	"\n=== FB-21 — OOB-drop browser-renderable extensions forced to attachment ===",
+)
 
 const BLOCKED_EXTS = [
 	".html",
@@ -110,7 +112,9 @@ for (const ext of BLOCKED_EXTS) {
 	})
 }
 
-console.log("\n=== FB-21 — safe inline types still render with typed Content-Type ===")
+console.log(
+	"\n=== FB-21 — safe inline types still render with typed Content-Type ===",
+)
 
 const INLINE_CASES = [
 	{ ext: ".png", expected: "image/png" },

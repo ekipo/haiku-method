@@ -282,8 +282,16 @@ await test("file present on disk but absent from baseline is silently auto-added
 
 	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-	assert.strictEqual(result.action, null, "no dispatch for previously-unseen file")
-	assert.strictEqual(result.findings.length, 0, "no findings for previously-unseen file")
+	assert.strictEqual(
+		result.action,
+		null,
+		"no dispatch for previously-unseen file",
+	)
+	assert.strictEqual(
+		result.findings.length,
+		0,
+		"no findings for previously-unseen file",
+	)
 
 	// Baseline now contains the file — next-tick changes WILL fire.
 	const baseline = await readBaseline(intentDir, stage)
@@ -1349,71 +1357,61 @@ console.log(
 	"\n=== V-05 consumer: drift gate unions per-stage and intent-scope action-log entries ===",
 )
 
-await test(
-	"V-05: SPA intent-scope upload (tick_scope='intent') is classified human-via-mcp on a stage tick",
-	async () => {
-		const { intentDir, stage, artifactsDir } = makeIntentDir(
-			"v05-consumer-union",
-		)
-		const haikuRoot = makeHaikuRoot("v05-consumer-union")
+await test("V-05: SPA intent-scope upload (tick_scope='intent') is classified human-via-mcp on a stage tick", async () => {
+	const { intentDir, stage, artifactsDir } = makeIntentDir("v05-consumer-union")
+	const haikuRoot = makeHaikuRoot("v05-consumer-union")
 
-		// 1) Disk: a tracked file has changed since baseline.
-		const fileName = "design-spec.md"
-		const fileRel = `stages/${stage}/artifacts/${fileName}`
-		const beforeContent = "# Spec v1\nbefore content\n"
-		const afterContent = "# Spec v2\nafter content\n"
-		writeFileSync(join(artifactsDir, fileName), afterContent)
-		const beforeSha = sha256(beforeContent)
+	// 1) Disk: a tracked file has changed since baseline.
+	const fileName = "design-spec.md"
+	const fileRel = `stages/${stage}/artifacts/${fileName}`
+	const beforeContent = "# Spec v1\nbefore content\n"
+	const afterContent = "# Spec v2\nafter content\n"
+	writeFileSync(join(artifactsDir, fileName), afterContent)
+	const beforeSha = sha256(beforeContent)
 
-		// Add an anchor so the OOM heuristic (>50% surface drift) doesn't fire.
-		const anchor = addAnchorFile(intentDir, stage, artifactsDir)
+	// Add an anchor so the OOM heuristic (>50% surface drift) doesn't fire.
+	const anchor = addAnchorFile(intentDir, stage, artifactsDir)
 
-		await writeBaselineForStage(intentDir, stage, {
-			[fileRel]: makeBaselineEntry(fileRel, beforeContent, {
-				sha256: beforeSha,
-			}),
-			[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
-		})
+	await writeBaselineForStage(intentDir, stage, {
+		[fileRel]: makeBaselineEntry(fileRel, beforeContent, {
+			sha256: beforeSha,
+		}),
+		[anchor.relPath]: makeBaselineEntry(anchor.relPath, anchor.content),
+	})
 
-		// 2) Action log: ONE intent-scope entry attributing the file change
-		//    to a human-via-mcp upload — but at intent.tick=42, NOT the
-		//    per-stage tick=1 that the gate will fire under. Pre-V-05 fix:
-		//    the per-tick filter at tickCounter=1 drops this entry and the
-		//    finding falls back to baselineEntry.author_class ("agent").
-		const actionLog = join(intentDir, "action-log.jsonl")
-		const intentScopeEntry = {
-			entry_type: "human_write",
-			path: fileRel,
-			sha: sha256(afterContent),
-			author_class: "human-via-mcp",
-			timestamp: new Date().toISOString(),
-			claimed_author_id: "alice@example.com",
-			human_author_id: "alice@example.com",
-			entry_id: "HWM-42-01",
-			tick_counter: 42, // intent-scope tick — NOT the gate's stage tick
-			tick_scope: "intent",
-		}
-		writeFileSync(actionLog, `${JSON.stringify(intentScopeEntry)}\n`)
+	// 2) Action log: ONE intent-scope entry attributing the file change
+	//    to a human-via-mcp upload — but at intent.tick=42, NOT the
+	//    per-stage tick=1 that the gate will fire under. Pre-V-05 fix:
+	//    the per-tick filter at tickCounter=1 drops this entry and the
+	//    finding falls back to baselineEntry.author_class ("agent").
+	const actionLog = join(intentDir, "action-log.jsonl")
+	const intentScopeEntry = {
+		entry_type: "human_write",
+		path: fileRel,
+		sha: sha256(afterContent),
+		author_class: "human-via-mcp",
+		timestamp: new Date().toISOString(),
+		claimed_author_id: "alice@example.com",
+		human_author_id: "alice@example.com",
+		entry_id: "HWM-42-01",
+		tick_counter: 42, // intent-scope tick — NOT the gate's stage tick
+		tick_scope: "intent",
+	}
+	writeFileSync(actionLog, `${JSON.stringify(intentScopeEntry)}\n`)
 
-		// 3) Run the gate under a per-stage tick (stage.iteration=1).
-		const result = runDriftDetectionGate(
-			makeCtx(intentDir, haikuRoot, stage),
-		)
+	// 3) Run the gate under a per-stage tick (stage.iteration=1).
+	const result = runDriftDetectionGate(makeCtx(intentDir, haikuRoot, stage))
 
-		// 4) Expect a finding for the file, classified human-via-mcp via the
-		//    intentScopeActionLog union.
-		const finding = result.findings.find((f) => f.path === fileRel)
-		assert.ok(
-			finding,
-			"drift gate should produce a finding for the changed file",
-		)
-		assert.strictEqual(
-			finding.author_class,
-			"human-via-mcp",
-			`pre-V-05 fix would fall back to baseline author_class; with the union the intent-scope entry MUST surface as human-via-mcp. Got: ${finding.author_class}`,
-		)
-	},
-)
+	// 4) Expect a finding for the file, classified human-via-mcp via the
+	//    intentScopeActionLog union.
+	const finding = result.findings.find((f) => f.path === fileRel)
+	assert.ok(finding, "drift gate should produce a finding for the changed file")
+	assert.strictEqual(
+		finding.author_class,
+		"human-via-mcp",
+		`pre-V-05 fix would fall back to baseline author_class; with the union the intent-scope entry MUST surface as human-via-mcp. Got: ${finding.author_class}`,
+	)
+})
 
 // ── Cleanup + summary ──────────────────────────────────────────────────────
 

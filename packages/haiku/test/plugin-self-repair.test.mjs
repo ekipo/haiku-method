@@ -21,9 +21,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { detectPluginRemoval } = await import(
-	"../src/plugin-self-repair.ts"
-)
+const { detectPluginRemoval } = await import("../src/plugin-self-repair.ts")
 
 let passed = 0
 let failed = 0
@@ -40,8 +38,10 @@ function test(name, fn) {
 
 function fakePluginRoot(opts = {}) {
 	const root = mkdtempSync(join(tmpdir(), "haiku-plugin-fake-"))
-	if (opts.studios !== false) mkdirSync(join(root, "studios"), { recursive: true })
-	if (opts.schemas !== false) mkdirSync(join(root, "schemas"), { recursive: true })
+	if (opts.studios !== false)
+		mkdirSync(join(root, "studios"), { recursive: true })
+	if (opts.schemas !== false)
+		mkdirSync(join(root, "schemas"), { recursive: true })
 	if (opts.pluginJson !== false) {
 		mkdirSync(join(root, ".claude-plugin"), { recursive: true })
 		writeFileSync(join(root, ".claude-plugin", "plugin.json"), "{}")

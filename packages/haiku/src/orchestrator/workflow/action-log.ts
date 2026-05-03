@@ -29,10 +29,7 @@
 
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import {
-	type ActionLogEntry,
-	appendJsonlLineGuarded,
-} from "./write-audit.js"
+import { type ActionLogEntry, appendJsonlLineGuarded } from "./write-audit.js"
 
 // Re-export so callers can import the type from either module.
 export type { ActionLogEntry } from "./write-audit.js"

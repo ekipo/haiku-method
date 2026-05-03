@@ -52,11 +52,7 @@
 //   Fastify scope (where the global preHandler may not propagate).
 
 import { randomBytes } from "node:crypto"
-import type {
-	FastifyInstance,
-	FastifyReply,
-	FastifyRequest,
-} from "fastify"
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import { isRemoteReviewEnabled, verifyTunnelJWT } from "../tunnel.js"
 import { extractTunnelToken } from "./auth.js"
 
@@ -228,10 +224,10 @@ export async function csrfPreHandler(
 	// re-check the query directly so we can distinguish "token is
 	// in `?t=` only" (HARD reject) from "token is in Authorization"
 	// (allowed).
-	const queryToken = (req.query as Record<string, string | undefined> | null)
-		?.t
+	const queryToken = (req.query as Record<string, string | undefined> | null)?.t
 	const authzHeader = req.headers.authorization
-	const hasAuthzBearer = typeof authzHeader === "string" && /^Bearer\s+/i.test(authzHeader)
+	const hasAuthzBearer =
+		typeof authzHeader === "string" && /^Bearer\s+/i.test(authzHeader)
 	if (queryToken && !hasAuthzBearer) {
 		reply.status(401).send({
 			error: "unauthorized",

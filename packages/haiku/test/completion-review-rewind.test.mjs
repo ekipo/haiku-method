@@ -14,7 +14,13 @@
 // guard performs the same rewind when it fires from a fresh approach.
 
 import assert from "node:assert"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -42,7 +48,8 @@ function test(name, fn) {
 		failed++
 		console.log(`  ✗ ${name}`)
 		console.log(`    ${err.message}`)
-		if (err.stack) console.log(`    ${err.stack.split("\n").slice(1, 4).join("\n    ")}`)
+		if (err.stack)
+			console.log(`    ${err.stack.split("\n").slice(1, 4).join("\n    ")}`)
 	}
 }
 
@@ -133,11 +140,23 @@ test("clears phase + completion_review markers + status", () => {
 	}
 	const fm = readIntent()
 	assert.strictEqual(fm.status, "active", "status reset to active")
-	assert.strictEqual(fm.active_stage, "operations", "active_stage points at first incomplete")
+	assert.strictEqual(
+		fm.active_stage,
+		"operations",
+		"active_stage points at first incomplete",
+	)
 	assert.strictEqual(fm.phase || "", "", "phase cleared")
 	assert.strictEqual(fm.completed_at || "", "", "completed_at cleared")
-	assert.strictEqual(fm.completion_review_entered_at || "", "", "entered_at cleared")
-	assert.strictEqual(fm.completion_review_dispatched, false, "dispatched cleared")
+	assert.strictEqual(
+		fm.completion_review_entered_at || "",
+		"",
+		"entered_at cleared",
+	)
+	assert.strictEqual(
+		fm.completion_review_dispatched,
+		false,
+		"dispatched cleared",
+	)
 	assert.strictEqual(fm.completion_review_skipped, false, "skipped cleared")
 	cleanup()
 })
@@ -201,7 +220,11 @@ test("awaiting_completion_review with all stages complete → no rewind", () => 
 	cleanup()
 	// Healthy intent — phase + markers should still be intact.
 	assert.strictEqual(fm.phase, "awaiting_completion_review", "phase preserved")
-	assert.strictEqual(fm.completion_review_dispatched, true, "dispatched preserved")
+	assert.strictEqual(
+		fm.completion_review_dispatched,
+		true,
+		"dispatched preserved",
+	)
 })
 
 test("active phase (not awaiting_completion_review) → no rewind even with gaps", () => {
@@ -218,7 +241,12 @@ test("active phase (not awaiting_completion_review) → no rewind even with gaps
 			inception: completed("inception"),
 			design: completed("design"),
 			product: completed("product"),
-			development: { stage: "development", status: "active", phase: "execute", started_at: "2026-04-30T00:00:00Z" },
+			development: {
+				stage: "development",
+				status: "active",
+				phase: "execute",
+				started_at: "2026-04-30T00:00:00Z",
+			},
 		},
 	)
 	preTickConsistency("midflight", haikuRoot)
@@ -261,7 +289,8 @@ test("guard fires + rewinds when incomplete stages exist", () => {
 	cleanup()
 	assert.strictEqual(action.action, "error", "guard returns error")
 	assert.ok(
-		action.message.includes("operations") && action.message.includes("security"),
+		action.message.includes("operations") &&
+			action.message.includes("security"),
 		"error names the incomplete stages",
 	)
 	// Rewind should have set active_stage to first incomplete and cleared markers.

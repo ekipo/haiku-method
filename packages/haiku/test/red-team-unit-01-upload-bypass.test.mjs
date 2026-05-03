@@ -26,7 +26,9 @@ const intentSlug = "redteam-unit01"
 const intentDirPath = join(haikuRoot, "intents", intentSlug)
 const stageName = "design"
 
-mkdirSync(join(intentDirPath, "stages", stageName, "units"), { recursive: true })
+mkdirSync(join(intentDirPath, "stages", stageName, "units"), {
+	recursive: true,
+})
 mkdirSync(join(intentDirPath, "stages", stageName, "artifacts"), {
 	recursive: true,
 })
@@ -122,272 +124,251 @@ async function run() {
 		"\n=== Red-team regression guards: V-01/V-02 bypasses closed in bolt 3 ===",
 	)
 
-	await test(
-		"R-01 closed: .js upload via application/octet-stream now rejected with 415",
-		async () => {
-			const payload = Buffer.from("alert(document.cookie); // pwn.js")
-			const { body, contentType } = buildMultipart(
+	await test("R-01 closed: .js upload via application/octet-stream now rejected with 415", async () => {
+		const payload = Buffer.from("alert(document.cookie); // pwn.js")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/pwn.js",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/pwn.js",
-					mode: "upsert",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "pwn.js",
+					content: payload,
+					contentType: "application/octet-stream",
 				},
-				[
-					{
-						name: "file",
-						filename: "pwn.js",
-						content: payload,
-						contentType: "application/octet-stream",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`R-01: .js + octet-stream MUST be rejected with 415 (bolt 3 closure of V-01/V-02 equivalent-class bypass). Got ${res.status}.`,
-			)
-			const data = await res.json()
-			assert.ok(
-				data.error === "unsupported_media_type" ||
-					data.code === "unsupported_media_type",
-				`Expected unsupported_media_type, got ${JSON.stringify(data)}`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-01: .js + octet-stream MUST be rejected with 415 (bolt 3 closure of V-01/V-02 equivalent-class bypass). Got ${res.status}.`,
+		)
+		const data = await res.json()
+		assert.ok(
+			data.error === "unsupported_media_type" ||
+				data.code === "unsupported_media_type",
+			`Expected unsupported_media_type, got ${JSON.stringify(data)}`,
+		)
+	})
 
-	await test(
-		"R-02 closed: .css upload via application/octet-stream now rejected with 415",
-		async () => {
-			const payload = Buffer.from(
-				"input[type=password] { background: url(https://evil/x); }",
-			)
-			const { body, contentType } = buildMultipart(
+	await test("R-02 closed: .css upload via application/octet-stream now rejected with 415", async () => {
+		const payload = Buffer.from(
+			"input[type=password] { background: url(https://evil/x); }",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/pwn.css",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/pwn.css",
-					mode: "upsert",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "pwn.css",
+					content: payload,
+					contentType: "application/octet-stream",
 				},
-				[
-					{
-						name: "file",
-						filename: "pwn.css",
-						content: payload,
-						contentType: "application/octet-stream",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`R-02: .css + octet-stream MUST be rejected (stylesheet injection vector). Got ${res.status}.`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-02: .css + octet-stream MUST be rejected (stylesheet injection vector). Got ${res.status}.`,
+		)
+	})
 
-	await test(
-		"R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist",
-		async () => {
-			const payload = Buffer.from("alert('via markdown MIME spoof');")
-			const { body, contentType } = buildMultipart(
+	await test("R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist", async () => {
+		const payload = Buffer.from("alert('via markdown MIME spoof');")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/spoof.js",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/spoof.js",
-					mode: "upsert",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "spoof.js",
+					content: payload,
+					contentType: "text/markdown",
 				},
-				[
-					{
-						name: "file",
-						filename: "spoof.js",
-						content: payload,
-						contentType: "text/markdown",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`R-03: .js extension MUST be rejected even when MIME claims text/markdown. Got ${res.status}.`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-03: .js extension MUST be rejected even when MIME claims text/markdown. Got ${res.status}.`,
+		)
+	})
 
-	await test(
-		"R-04 (positive control): the V-02 fix DOES still reject .html + text/plain",
-		async () => {
-			const payload = Buffer.from("<script>alert(1)</script>")
-			const { body, contentType } = buildMultipart(
+	await test("R-04 (positive control): the V-02 fix DOES still reject .html + text/plain", async () => {
+		const payload = Buffer.from("<script>alert(1)</script>")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/control.html",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/control.html",
-					mode: "upsert",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "control.html",
+					content: payload,
+					contentType: "text/plain",
 				},
-				[
-					{
-						name: "file",
-						filename: "control.html",
-						content: payload,
-						contentType: "text/plain",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`Positive control: V-02 fix should still reject .html. Got ${res.status}.`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`Positive control: V-02 fix should still reject .html. Got ${res.status}.`,
+		)
+	})
 
-	await test(
-		"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route",
-		async () => {
-			const payload = Buffer.from("alert('knowledge .js')")
-			const { body, contentType } = buildMultipart(
+	await test("R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route", async () => {
+		const payload = Buffer.from("alert('knowledge .js')")
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "pwn-knowledge.js",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					target_filename: "pwn-knowledge.js",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "pwn-knowledge.js",
+					content: payload,
+					contentType: "application/octet-stream",
 				},
-				[
-					{
-						name: "file",
-						filename: "pwn-knowledge.js",
-						content: payload,
-						contentType: "application/octet-stream",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`R-05: .js + octet-stream on knowledge route MUST be rejected. Got ${res.status}.`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-05: .js + octet-stream on knowledge route MUST be rejected. Got ${res.status}.`,
+		)
+	})
 
-	await test(
-		"R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it",
-		async () => {
-			// .bin extension is not in BLOCKED_EXTENSIONS, but octet-stream is
-			// no longer on ALLOWED_MIMES_STAGE_OUTPUT, so the allowlist now
-			// rejects this payload. Closes red-team R-03 (allowlist no-op).
-			const payload = Buffer.from("opaque binary blob")
-			const { body, contentType } = buildMultipart(
+	await test("R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it", async () => {
+		// .bin extension is not in BLOCKED_EXTENSIONS, but octet-stream is
+		// no longer on ALLOWED_MIMES_STAGE_OUTPUT, so the allowlist now
+		// rejects this payload. Closes red-team R-03 (allowlist no-op).
+		const payload = Buffer.from("opaque binary blob")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/blob.bin",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/blob.bin",
-					mode: "upsert",
-					attribute_to_user: "attacker",
+					name: "file",
+					filename: "blob.bin",
+					content: payload,
+					contentType: "application/octet-stream",
 				},
-				[
-					{
-						name: "file",
-						filename: "blob.bin",
-						content: payload,
-						contentType: "application/octet-stream",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				415,
-				`R-06: octet-stream MUST be rejected even on a non-blocked extension. Got ${res.status}.`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`R-06: octet-stream MUST be rejected even on a non-blocked extension. Got ${res.status}.`,
+		)
+	})
 
-	await test(
-		"R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)",
-		async () => {
-			const payload = Buffer.from("legitimate markdown\n")
-			const { body, contentType } = buildMultipart(
+	await test("R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)", async () => {
+		const payload = Buffer.from("legitimate markdown\n")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/doc.md",
+				mode: "upsert",
+				attribute_to_user: "<img src=x onerror=alert(1)>",
+			},
+			[
 				{
-					stage: stageName,
-					target_path: "artifacts/doc.md",
-					mode: "upsert",
-					attribute_to_user: "<img src=x onerror=alert(1)>",
+					name: "file",
+					filename: "doc.md",
+					content: payload,
+					contentType: "text/markdown",
 				},
-				[
-					{
-						name: "file",
-						filename: "doc.md",
-						content: payload,
-						contentType: "text/markdown",
-					},
-				],
-			)
-			const res = await fetch(
-				`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
-				{
-					method: "POST",
-					headers: { "Content-Type": contentType },
-					body,
-				},
-			)
-			assert.strictEqual(
-				res.status,
-				400,
-				`R-07: HTML payload in attribute_to_user MUST be rejected with 400. Got ${res.status}.`,
-			)
-			const data = await res.json()
-			assert.ok(
-				data.error === "bad_attribute_to_user" ||
-					data.code === "bad_attribute_to_user",
-				`Expected bad_attribute_to_user, got ${JSON.stringify(data)}`,
-			)
-		},
-	)
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			400,
+			`R-07: HTML payload in attribute_to_user MUST be rejected with 400. Got ${res.status}.`,
+		)
+		const data = await res.json()
+		assert.ok(
+			data.error === "bad_attribute_to_user" ||
+				data.code === "bad_attribute_to_user",
+			`Expected bad_attribute_to_user, got ${JSON.stringify(data)}`,
+		)
+	})
 
 	await stopHttpServer()
 	console.log(`\n${passed} passed, ${failed} failed`)

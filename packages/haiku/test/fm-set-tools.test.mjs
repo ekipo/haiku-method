@@ -5,7 +5,13 @@
 // can't slip past validation by hand-editing.
 
 import assert from "node:assert"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -13,7 +19,9 @@ import { fileURLToPath } from "node:url"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.CLAUDE_PLUGIN_ROOT = resolve(__dirname, "..", "..", "..", "plugin")
 
-const { handleStateTool, parseFrontmatter } = await import("../src/state-tools.ts")
+const { handleStateTool, parseFrontmatter } = await import(
+	"../src/state-tools.ts"
+)
 
 let passed = 0
 let failed = 0
@@ -156,7 +164,9 @@ test("sets a writable field (title)", () => {
 		assert.strictEqual(r.isError, false, r.parsed.message)
 		assert.strictEqual(r.parsed.ok, true)
 	})
-	const fm = parseFrontmatter(readFileSync(join(iDir, "intent.md"), "utf8")).data
+	const fm = parseFrontmatter(
+		readFileSync(join(iDir, "intent.md"), "utf8"),
+	).data
 	assert.strictEqual(fm.title, "Renamed")
 	rmSync(root, { recursive: true, force: true })
 })
@@ -174,7 +184,9 @@ test("rejects engine-only field (status)", () => {
 		assert.strictEqual(r.parsed.error, "intent_field_engine_only")
 	})
 	// File unchanged.
-	const fm = parseFrontmatter(readFileSync(join(iDir, "intent.md"), "utf8")).data
+	const fm = parseFrontmatter(
+		readFileSync(join(iDir, "intent.md"), "utf8"),
+	).data
 	assert.strictEqual(fm.status, "active")
 	rmSync(root, { recursive: true, force: true })
 })

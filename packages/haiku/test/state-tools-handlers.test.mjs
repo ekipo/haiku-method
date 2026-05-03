@@ -1156,6 +1156,7 @@ body
 		)
 		try {
 			for (const field of [
+				"status",
 				"hat",
 				"bolt",
 				"iterations",

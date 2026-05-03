@@ -137,7 +137,11 @@ export function runWorkflowTick(
 					? "feedback_dispatch"
 					: triageAction.action === "revisited"
 						? "revisited"
-						: "error"
+						: triageAction.action === "review_fix"
+							? "review_fix"
+							: triageAction.action === "escalate"
+								? "escalate"
+								: "error"
 		if (triageState === "error") {
 			return {
 				state: "error",

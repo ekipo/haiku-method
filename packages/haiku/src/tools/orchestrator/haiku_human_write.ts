@@ -18,8 +18,8 @@
 //   - ACCEPTANCE-CRITERIA.md AC-AB1, AC-AB2, AC-TA1–AC-TA4, AC-ALIAS1/2
 
 import { createHash, randomBytes } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
-import { rename, unlink, writeFile } from "node:fs/promises"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import matter from "gray-matter"
 import { appendActionLogEntry } from "../../orchestrator/workflow/action-log.js"
@@ -35,7 +35,13 @@ import {
 	truncateInstruction,
 	type WriteAuditRecord,
 } from "../../orchestrator/workflow/write-audit.js"
-import { findHaikuRoot } from "../../state-tools.js"
+import {
+	findHaikuRoot,
+	getIntentScopeTickCounter,
+	isIntentArchived,
+	isIntentLocked,
+} from "../../state-tools.js"
+import { cleanupTempFile, safeMkdirAndRename } from "../../http/path-safety.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
@@ -112,6 +118,24 @@ const DENY_LIST: Array<{ pattern: RegExp; rule: string; message: string }> = [
 		rule: "drift-markers.json",
 		message:
 			"drift-markers.json is an internal workflow-engine artifact. Do not write directly.",
+	},
+	{
+		// V-11 — the operator-only baseline-corrupt acknowledgement
+		// marker. Only `/haiku:repair --confirm-baseline-reset ...`
+		// (operator-driven) may write this; the agent has no path here.
+		pattern: /(?:^|\/)\.baseline-ack$/,
+		rule: "stages/{stage}/.baseline-ack",
+		message:
+			".baseline-ack is the operator-only baseline-reset acknowledgement marker. Only /haiku:repair --confirm-baseline-reset can write it; the agent has no path. This is the V-11 defence against silent baseline laundering.",
+	},
+	{
+		// V-11 — the thrash counter is workflow-engine-managed. Letting
+		// the agent reset it would let an attacker zero out the thrash
+		// circuit breaker right before each corruption attempt.
+		pattern: /(?:^|\/)baseline-thrash\.json$/,
+		rule: "stages/{stage}/baseline-thrash.json",
+		message:
+			"baseline-thrash.json is the V-11 baseline-corruption circuit breaker. Managed exclusively by the drift-detection gate.",
 	},
 	{
 		pattern: /(?:^|\/)write-audit\.jsonl$/,
@@ -217,8 +241,24 @@ function validatePath(
 	// Re-derive a clean relative path from the resolved absolute.
 	const cleanRel = relative(intentAbs, absCandidate)
 
-	// 4. Symlink escape: if the PARENT directory exists, resolve it and check.
-	//    We can't resolve the full target path since it may not exist yet.
+	// 4. Symlink escape — pre-validation pass.
+	//    Authoritative defence is in `safeMkdirAndRename` (called from
+	//    the write path below) — it walks the parent chain segment by
+	//    segment with `lstatSync`, refusing any pre-existing symlink,
+	//    and re-validates the realpath immediately before the atomic
+	//    rename. That closes the V-04 TOCTOU window the legacy
+	//    "realpath check, then mkdirSync(recursive: true)" idiom left
+	//    open (parent dir didn't exist → realpath check skipped → mkdir
+	//    silently followed planted symlinks).
+	//
+	//    This pre-check stays as a fast-fail for the common case where
+	//    the parent dir already contains a planted symlink (e.g.
+	//    `stages/security/knowledge` is already `→ /tmp/owned` at the
+	//    moment of the request). It returns the same
+	//    `path_outside_tracked_surface` envelope the rest of the
+	//    validation uses, so downstream callers don't have to learn a
+	//    second error shape. Even if this check passes,
+	//    `safeMkdirAndRename` re-validates race-free.
 	const parentDir = dirname(absCandidate)
 	if (existsSync(parentDir)) {
 		try {
@@ -322,10 +362,15 @@ export default defineTool({
 				enum: ["utf-8", "base64"],
 				description: "Encoding of the content field. Default: 'utf-8'.",
 			},
+			claimed_author_id: {
+				type: "string",
+				description:
+					"Self-reported identifier (username, email, UUID) of who the agent BELIEVES gave the instruction. Captured in the audit log as a CLAIM, not an authoritative identity — the server does not cross-check against any session or OS identity. Reviewers reading audit logs MUST treat this as 'what the agent said' rather than 'who did it'. (V-03 mitigation: renamed from `human_author_id` so consumers stop treating it as authoritative.)",
+			},
 			human_author_id: {
 				type: "string",
 				description:
-					"Identifier of the human who gave the instruction (username, email, UUID). Captured in the audit log. Self-reported — not validated.",
+					"DEPRECATED legacy alias for `claimed_author_id`. Accepted for backwards compatibility; the value is mirrored to `claimed_author_id` on persistence. New callers MUST use `claimed_author_id`.",
 			},
 			rationale: {
 				type: "string",
@@ -358,7 +403,13 @@ export default defineTool({
 		const content = args.content as string
 		const contentEncoding =
 			(args.content_encoding as string | undefined) ?? "utf-8"
-		const humanAuthorId = (args.human_author_id as string | undefined) ?? null
+		// V-03: prefer the canonical `claimed_author_id`; fall back to the
+		// legacy `human_author_id` so older callers still work. Either value
+		// is recorded as a CLAIM, not an authoritative identity.
+		const claimedAuthorId =
+			(args.claimed_author_id as string | undefined) ??
+			(args.human_author_id as string | undefined) ??
+			null
 		const rationale = (args.rationale as string | undefined) ?? null
 		const userInstructionRaw =
 			(args.user_instruction_excerpt as string | undefined) ?? null
@@ -395,29 +446,57 @@ export default defineTool({
 		}
 
 		// ── Check for archived intent ─────────────────────────────────────────
-		try {
-			const { data: intentFm } = matter(readFileSync(intentMd, "utf8"))
-			if ((intentFm as Record<string, unknown>).archived === true) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: JSON.stringify(
-								{
-									ok: false,
-									error: "intent_not_active",
-									message: `Intent '${slug}' is archived. Unarchive it first with haiku_intent_unarchive.`,
-								},
-								null,
-								2,
-							),
-						},
-					],
-					isError: true,
-				}
+		// V-06: delegate to the shared `isIntentArchived` helper so both the
+		// MCP tool and the SPA upload route agree on intent state semantics.
+		// The shared helper parses the YAML frontmatter via gray-matter, so
+		// `status: archived` (legacy) and `archived: true` (boolean) classify
+		// identically — no substring scans, no false positives on body text.
+		if (isIntentArchived(intentDir)) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: "intent_not_active",
+								message: `Intent '${slug}' is archived. Unarchive it first with haiku_intent_unarchive.`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
 			}
-		} catch {
-			// Proceed — intent.md parse failure is non-blocking here.
+		}
+
+		// ── Check for locked intent ───────────────────────────────────────────
+		// R-03 (V-06 helper coverage gap): the SPA upload routes check both
+		// `isIntentArchived` AND `isIntentLocked`. Pre-fix the MCP path checked
+		// only archived state, so an operator-locked intent (e.g. mid-revisit
+		// freeze) would reject SPA uploads (423 intent_locked) but happily
+		// accept `haiku_human_write` MCP calls. Mirror the SPA helper coverage
+		// so the V-06 shared-helper rule ("both surfaces use the helpers")
+		// holds for locked AND archived state.
+		if (isIntentLocked(intentDir)) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: "intent_locked",
+								message: `Intent '${slug}' is locked. Unlock it before issuing human-attributed writes.`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
+			}
 		}
 
 		// ── Validate content_encoding ─────────────────────────────────────────
@@ -583,40 +662,51 @@ export default defineTool({
 			}
 		}
 
-		// ── Create intermediate directories + track created dirs ──────────────
+		// ── Track which dirs we'll be creating ────────────────────────────────
+		// We compute the list BEFORE calling safeMkdirAndRename so the audit
+		// log reflects what was actually created. The helper is responsible
+		// for the safe creation; we just enumerate so the audit envelope is
+		// correct.
 		const dirsCreated: string[] = []
 		if (createDirs) {
-			// Walk up from destAbs parent and record dirs that don't exist.
-			const dirsToCreate: string[] = []
 			let cur = parentDir
+			const toCreate: string[] = []
 			while (!existsSync(cur)) {
-				dirsToCreate.unshift(cur)
+				toCreate.unshift(cur)
 				const up = dirname(cur)
 				if (up === cur) break
 				cur = up
 			}
-			if (dirsToCreate.length > 0) {
-				mkdirSync(parentDir, { recursive: true })
-				for (const d of dirsToCreate) {
-					dirsCreated.push(relative(intentDir, d))
-				}
+			for (const d of toCreate) {
+				dirsCreated.push(relative(intentDir, d))
 			}
 		}
 
 		// ── Compute SHA-256 over decoded bytes ────────────────────────────────
 		const sha = createHash("sha256").update(contentBytes).digest("hex")
 
-		// ── Atomic disk write ─────────────────────────────────────────────────
+		// ── Atomic disk write — V-04 TOCTOU-safe ─────────────────────────────
+		// Stream to a tempfile in the intent root (so it's on the same
+		// filesystem as the destination — required for atomic rename), then
+		// hand the (tempPath, parentDir, destPath, intentRoot) tuple to
+		// `safeMkdirAndRename`. The helper:
+		//   1. Refuses any pre-existing symlink in the parent chain.
+		//   2. Creates missing intermediate dirs one segment at a time
+		//      (no `recursive: true`, which would silently follow symlinks).
+		//   3. Re-validates `realpath(parent)` against `realpath(intentRoot)`
+		//      immediately before the atomic rename.
+		//
+		// We stage the tempfile in `intentDir` (not in `parentDir`, which
+		// may not exist yet) so the rename is filesystem-local even when
+		// `parentDir` is brand new.
 		const pid = process.pid
 		const rnd = randomBytes(6).toString("hex")
-		const tmpPath = join(parentDir, `.hwm-tmp-${pid}-${rnd}.tmp`)
+		const tmpPath = join(intentDir, `.hwm-tmp-${pid}-${rnd}.tmp`)
 
 		try {
 			await writeFile(tmpPath, contentBytes)
-			await rename(tmpPath, destAbs)
 		} catch (err) {
-			// Best-effort cleanup.
-			await unlink(tmpPath).catch(() => {})
+			cleanupTempFile(tmpPath)
 			return {
 				content: [
 					{
@@ -626,7 +716,7 @@ export default defineTool({
 								ok: false,
 								error: "disk_write_failed",
 								path: canonicalPath,
-								message: `Failed to write '${canonicalPath}': ${String(err)}`,
+								message: `Failed to write tempfile for '${canonicalPath}': ${String(err)}`,
 							},
 							null,
 							2,
@@ -637,9 +727,59 @@ export default defineTool({
 			}
 		}
 
+		const safeResult = safeMkdirAndRename(intentDir, parentDir, tmpPath, destAbs)
+		if (!safeResult.ok) {
+			// V-04 defence triggered, OR rename failed for a benign reason.
+			// Either way: clean up the temp file and surface a structured
+			// error envelope. Symlink/escape paths return a distinct error
+			// code so callers and audits can distinguish a planted attack
+			// from an I/O failure.
+			cleanupTempFile(tmpPath)
+			const isSymlinkAttack =
+				safeResult.code === "parent_chain_contains_symlink" ||
+				safeResult.code === "parent_chain_escape"
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: isSymlinkAttack ? "path_outside_tracked_surface" : "disk_write_failed",
+								path: canonicalPath,
+								reason: isSymlinkAttack ? safeResult.code : undefined,
+								message: isSymlinkAttack
+									? `Refused to write '${canonicalPath}': parent directory chain failed symlink-safety check (${safeResult.code}).`
+									: `Failed to write '${canonicalPath}': ${safeResult.detail}`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
+			}
+		}
+		// Tempfile has been atomically moved; nothing to clean up on success.
+
 		// ── Timestamps + entry IDs ────────────────────────────────────────────
+		// R-02 (V-05 producer fix on MCP path): mirror the SPA branch.
+		// Intent-scope writes (`knowledge/...`, no `stages/` prefix) go
+		// through the deterministic `getIntentScopeTickCounter` so two
+		// consecutive MCP-side intent-scope writes never share a counter
+		// value. Stage-scope writes (`stages/{X}/...`) parse the stage slug
+		// out of the canonical path and pass it to `getCurrentTickCounter`
+		// so the no-arg `readdirSync` lottery can never pick the wrong
+		// stage. `tick_scope` is stamped on both action-log and audit-log
+		// entries so the drift-gate consumer's union (per-stage ∪
+		// intent-scope) routes the entry into the right read.
+		const stageMatch = canonicalPath.match(/^stages\/([^/]+)\//)
+		const isIntentScope = stageMatch === null
+		const tickCounter = isIntentScope
+			? getIntentScopeTickCounter(intentDir)
+			: getCurrentTickCounter(intentDir, stageMatch[1])
+		const tickScope: "intent" | "stage" = isIntentScope ? "intent" : "stage"
 		const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
-		const tickCounter = getCurrentTickCounter(intentDir)
 		const seqNumber = getNextAuditSequenceNumber(intentDir)
 		const entryId = nextEntryId(tickCounter, seqNumber)
 
@@ -649,15 +789,20 @@ export default defineTool({
 		// ── Action-log entry (always stamped — even when kill-switch is set) ───
 		// Per ARCHITECTURE.md §8.5: "tool still writes the file and stamps the
 		// action log, but skips the audit-log append."
+		// V-03: write `claimed_author_id` (canonical) AND `human_author_id`
+		// (legacy alias) so the rename is non-breaking — readers may pick up
+		// either key during the migration window.
 		await appendActionLogEntry(intentDir, tickCounter, {
 			entry_type: "human_write",
 			path: canonicalPath,
 			sha,
 			author_class: "human-via-mcp",
 			timestamp,
-			human_author_id: humanAuthorId,
+			claimed_author_id: claimedAuthorId,
+			human_author_id: claimedAuthorId,
 			entry_id: entryId,
 			tick_counter: tickCounter,
+			tick_scope: tickScope,
 		})
 
 		// ── Audit-log append (only when drift detection is enabled) ───────────
@@ -678,7 +823,8 @@ export default defineTool({
 				path: canonicalPath,
 				sha,
 				author_class: "human-via-mcp",
-				human_author_id: humanAuthorId,
+				claimed_author_id: claimedAuthorId,
+				human_author_id: claimedAuthorId,
 				rationale,
 				user_instruction_excerpt: userInstructionExcerpt,
 				tick_counter: tickCounter,
@@ -686,6 +832,7 @@ export default defineTool({
 				overwrite,
 				dirs_created: dirsCreated,
 				audit_log_appended: true,
+				tick_scope: tickScope,
 			}
 
 			const auditResult = await appendWriteAudit(intentDir, auditRecord)
@@ -693,13 +840,17 @@ export default defineTool({
 		}
 
 		// ── Success response ──────────────────────────────────────────────────
+		// V-03: surface BOTH `claimed_author_id` (canonical) and
+		// `human_author_id` (legacy alias) so callers using either key see
+		// the value the audit log just received.
 		const responseBody: Record<string, unknown> = {
 			ok: true,
 			path: canonicalPath,
 			sha,
 			author_class: "human-via-mcp",
 			timestamp,
-			human_author_id: humanAuthorId,
+			claimed_author_id: claimedAuthorId,
+			human_author_id: claimedAuthorId,
 			dirs_created: dirsCreated,
 			action_log_entry_id: entryId,
 			audit_log_appended: auditLogAppended,

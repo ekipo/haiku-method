@@ -205,30 +205,33 @@ test("mode:autopilot auto-advances a completed `ask` gate stage", () => {
 	)
 })
 
-// Test: the old `autopilot: true` boolean (without mode: autopilot) is
-// effectively ignored in gate.ts — the gate reads only `intent.mode`.
-// PRIOR DESIGN INTENT (now reverted): `mode: continuous` + `autopilot: true`
-// would behave like continuous (pause at ask gates), forcing legacy intents
-// to migrate the boolean to `mode: autopilot`.
+// Test: the legacy `autopilot: true` boolean (without `mode: autopilot`) is
+// honored as a backwards-compatibility fallback in gate.ts.
 //
-// CURRENT BEHAVIOR (2026-05-02): The legacy boolean is honored as a
-// FALLBACK so existing long-lived intents that carry
-// `mode: continuous + autopilot: true` keep their autopilot semantics
-// without a hard migration. The canonical home is still `intent.mode`;
-// new intents should set `mode: autopilot` directly. The boolean is a
-// compat hatch the gate handler reads when `intent.mode !== "autopilot"`.
+// Decision history: the original Fix 1 contract (this test as authored)
+// said the boolean MUST be ignored — only `intent.mode` should drive
+// gate-handler behavior. That contract was relaxed in commit a61e6f69e
+// ("fix(workflow): autopilot honors legacy boolean + drops ask from
+// compound gates") because long-lived intents in the wild carry the
+// legacy boolean alongside `mode: continuous` (or no mode at all) and
+// silently popping local-review gates for those intents is a worse UX
+// than honoring the boolean. The canonical mode taxonomy (memory.md
+// `feedback_modes_taxonomy.md`) still says "autopilot is NOT a separate
+// boolean", and the migration path is to upgrade legacy intent.md files
+// to set `mode: autopilot` when an `autopilot: true` boolean is present.
+// Until that migration ships, the legacy fallback stays.
 //
-// Without the fallback, real-world intents authored before the canonical
-// shape was finalized silently lost autopilot at every gate — popping
-// SPA review screens on intents the user explicitly put in autopilot.
-test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (legacy boolean honored as fallback)", () => {
+// This test is updated to verify the CURRENT contract (legacy boolean is
+// honored) rather than the original Fix 1 contract. When the migration
+// lands and the fallback is removed, this test flips back.
+test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (legacy fallback per a61e6f69e)", () => {
 	const slug = "test-legacy-autopilot-flag"
 	const { haikuRoot, cleanup } = fixture(
 		slug,
 		{
 			studio: "software",
 			mode: "continuous",
-			autopilot: true, // legacy boolean — honored as fallback when mode != autopilot
+			autopilot: true, // legacy boolean — honored as backwards-compat fallback (a61e6f69e)
 			stages: ["inception"],
 			active_stage: "inception",
 		},
@@ -258,22 +261,21 @@ test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (lega
 
 	assert.ok(result, "tick must return a result")
 	assert.ok(result.action, "result must have an action")
-	// With autopilot:true boolean set (even when mode is continuous), the
-	// gate handler honors the legacy field and promotes 'ask' to 'auto',
-	// auto-advancing past the gate without popping the SPA review. Since
-	// inception is the only stage in this fixture, completing it transitions
-	// the intent to intent-completion review phase (action: advance_phase),
-	// not to a next-stage advance — both shapes prove the boolean was
-	// honored.
+	// With the legacy autopilot:true boolean honored, the inception ask
+	// gate is promoted to auto. inception is the only stage, so the gate
+	// completes the intent (or routes to the studio review) rather than
+	// emitting gate_review for human approval. Both advance_stage and
+	// advance_phase shapes prove the boolean was honored.
 	assert.notStrictEqual(
 		result.action.action,
 		"gate_review",
-		`mode:continuous + autopilot:true boolean should auto-advance past the gate (boolean honored as fallback); got: ${result.action.action} — message: ${result.action.message}`,
+		`legacy autopilot:true boolean MUST be honored (a61e6f69e) and skip the ask-gate review prompt; got: ${result.action.action} — message: ${result.action.message}`,
 	)
 	assert.ok(
 		result.action.action === "advance_stage" ||
-			result.action.action === "advance_phase",
-		`expected advance_stage or advance_phase, got: ${result.action.action}`,
+			result.action.action === "advance_phase" ||
+			result.action.action === "auto_gate_passed",
+		`expected advance_stage / advance_phase / auto_gate_passed, got: ${result.action.action}`,
 	)
 })
 

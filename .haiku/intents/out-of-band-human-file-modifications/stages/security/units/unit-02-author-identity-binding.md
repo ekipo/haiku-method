@@ -1,7 +1,7 @@
 ---
 title: >-
-  Bind human author identity from JWT, not from agent-supplied params (V-03,
-  V-05, V-06)
+  Bind human author identity from authoritative source; correct status checks
+  (V-03, V-05, V-06)
 depends_on: []
 inputs:
   - .haiku/intents/out-of-band-human-file-modifications/knowledge/VULN-REPORT.md
@@ -10,62 +10,95 @@ inputs:
   - packages/haiku/src/state-tools.ts
   - packages/haiku/src/http/upload-routes.ts
   - packages/haiku/src/http/feedback-api.ts
+  - packages/haiku/src/http/auth.ts
+  - packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
 outputs: []
 model: sonnet
 quality_gates:
-  - name: human-write-uses-jwt-author-not-agent-supplied
-    command: >-
-      bash -c 'grep -nE "human_author_id" packages/haiku/src/state-tools.ts |
-      grep -qE "jwt|fromToken|claims|sessionUser" || grep -nE
-      "function.*haiku_human_write" packages/haiku/src/state-tools.ts | grep -qE
-      "author.*claim|jwt.*author"'
-  - name: spa-upload-binds-author-from-jwt
-    command: >-
-      grep -qE 'reqUser|jwtUser|claims\.sub|claims\.user|sessionUser'
-      packages/haiku/src/http/upload-routes.ts
-  - name: stage-substring-locked-check-uses-frontmatter-parse
-    command: >-
-      bash -c 'grep -qE "matter\\(" packages/haiku/src/http/upload-routes.ts ||
-      grep -qE "parseFrontmatter" packages/haiku/src/http/upload-routes.ts'
-  - name: tick-counter-deterministic-for-null-stage
+  - name: v03-spa-author-bound-from-session-or-renamed
     command: >-
       bash -c 'grep -qE
-      "getCurrentTickCounter.*intent.*stage|globalTickCounter|intentTickCounter"
-      packages/haiku/src/state-tools.ts || grep -qE
-      "intentScope.*tick|tick.*intent.*scope" packages/haiku/src/state-tools.ts'
+      "reqUser|sessionUser|claims\\.sub|resolveAuthorFromSession"
+      packages/haiku/src/http/upload-routes.ts || grep -qE "claimed_author_id"
+      packages/haiku/src/state-tools.ts'
+  - name: v03-mcp-author-bound-from-os-user-or-renamed
+    command: >-
+      bash -c 'grep -qE "os\\.userInfo|process\\.env\\.USER"
+      packages/haiku/src/state-tools.ts || grep -qE "claimed_author_id"
+      packages/haiku/src/state-tools.ts'
+  - name: v03-author-mismatch-rejected-test-named
+    command: >-
+      grep -qE 'unauthorized.*author|author.*mismatch.*reject|claimed_author_id'
+      packages/haiku/test/state-tools-handlers.test.mjs
+  - name: v05-intent-scope-tick-counter
+    command: >-
+      grep -qE 'getIntentScopeTickCounter|globalTickCounter|intentScopeTick'
+      packages/haiku/src/state-tools.ts
+  - name: v05-drift-gate-unions-stage-and-intent-action-log
+    command: >-
+      grep -qE
+      'intentScopeActionLog|readActionLogForIntent|union.*action.*log|intent.*scope.*lookup'
+      packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
+  - name: v06-frontmatter-parser-not-substring
+    command: >-
+      bash -c '! grep -qE "raw\\.includes\\(\\\"status:"
+      packages/haiku/src/http/upload-routes.ts'
+  - name: v06-no-substring-status-checks-anywhere
+    command: >-
+      bash -c '! rg -nE "raw\\.includes\\(\"status:" packages/haiku/src
+      2>/dev/null'
+  - name: v06-shared-locked-archived-helper
+    command: >-
+      grep -qE 'isIntentLocked|isIntentArchived'
+      packages/haiku/src/state-tools.ts
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
 status: pending
 ---
-# Unit 02 — Author identity binding
+# Unit 02 — Author identity binding + status-check correctness
 
 ## Scope
 
-Close three vuln-report findings about authentication trust in the human-attribution and SPA upload paths:
+Close three vuln-report findings about authentication/integrity in the human-attribution and SPA upload paths:
 
-- **V-03 (MED)** `human_author_id`, `attribute_to_user`, `rationale`, `user_instruction_excerpt` are self-reported by the agent and copied into `write-audit.jsonl` and `action-log.jsonl` with no JWT cross-check. The hardcoded-author pattern from FB-01 (feedback-reply path) exists but isn't applied here.
-- **V-05 (MED)** `getCurrentTickCounter(intentDir)` for `stage=null` SPA uploads picks a non-deterministic stage's iteration; entry-IDs collide and drift gate's per-tick action-log lookup misses, downgrading provenance from `human-via-mcp` to `human-implicit`.
-- **V-06 (MED)** SPA archived/locked checks use `raw.includes("status: locked")` substring match — false-positives on body content, false-negatives on `status: 'locked'`. Asymmetric with `haiku_human_write`'s `gray-matter` parse.
+- **V-03 (MED)** `human_author_id`, `attribute_to_user`, `rationale`, `user_instruction_excerpt` are self-reported by the agent and copied into `write-audit.jsonl` and `action-log.jsonl` with no JWT cross-check.
+- **V-05 (MED)** `getCurrentTickCounter(intentDir)` for `stage=null` SPA uploads picks a non-deterministic stage's iteration; entry-IDs collide and drift gate's per-tick action-log lookup misses.
+- **V-06 (MED)** SPA archived/locked checks use `raw.includes("status: locked")` substring match — false-positives on body content, false-negatives on `status: 'locked'`.
 
-## Approach
+## V-03 mitigation — explicit decision required (the spec was wrong before)
 
-For V-03: in `haiku_human_write` (state-tools.ts), pull `human_author_id` from the request session/JWT claims, not from the tool's `args`. Same for the SPA upload routes — bind from `reqUser`/`claims.sub`. Reject the tool call with `unauthorized_author_attribution` when the agent-supplied value disagrees with the JWT.
+Pre-execute review flagged that "JWT claims" was hand-waved for SPA and that the MCP path has no JWT at all. Fix: pick ONE of these two paths AND apply consistently to both surfaces:
 
-For V-05: introduce an intent-scope tick counter (`globalTickCounter` per intent dir) so SPA uploads with `stage=null` write entries with a deterministic, collision-free counter. The drift gate's action-log lookup learns the new key shape.
+**Option A — Resolve to a real reviewer identity:**
+- SPA path: extend session bootstrap to capture a reviewer email/handle into the session table keyed by `sid`. `resolveAuthorFromSession(sid)` returns the email; `human_author_id` is set from the resolved value, agent-supplied values rejected with `unauthorized_author_attribution`.
+- MCP path: derive from `os.userInfo().username` (Claude Code runs as the local user). Same rejection on agent override.
 
-For V-06: replace substring matching on intent.md frontmatter with `gray-matter` parsing (already imported in state-tools.ts). Use the parsed `status` field directly.
+**Option B — Rename the field to reflect reality:**
+- Rename `human_author_id` → `claimed_author_id` everywhere it's persisted (audit logs, classification records, SPA UI). Stop pretending it's authoritative; this matches VULN-REPORT V-03 fix #2.
+
+The implementer picks A or B based on whether reviewer email/identity actually exists today. The frontmatter gates accept either — the unit is closed when one path is consistently applied to both SPA and MCP surfaces.
+
+**Out-of-scope deferred to unit-04 ASSESSMENTS.md residual risk:** audit-log hash-chaining (VULN-REPORT V-03 fix #3). This is integrity-on-the-log-itself defense-in-depth, separate from attribution binding. Unit-04 MUST file a `stage_revisit` FB tagged "follow-up: audit-log hash-chaining" and document V-03 as "partially closed (attribution bound; integrity deferred)".
+
+## V-05 mitigation — both producer AND consumer fix required
+
+Pre-execute review flagged that the producer-side counter fix isn't enough — the drift-gate consumer must learn the new key shape too:
+
+1. **Producer**: `getIntentScopeTickCounter(intentDir)` returns a deterministic intent-scope counter when `stage === null`. SPA uploads with no stage write entries with this counter.
+2. **Consumer**: `drift-detection-gate.ts` action-log lookup unions per-stage and intent-scope entries when classifying any tracked file, so SPA uploads at intent.iteration=N appear as `human-via-mcp` on a drift-gate tick fired from stage X with stage.iteration=M.
+
+## V-06 mitigation — repo-wide cleanup, shared helper
+
+1. Replace `raw.includes("status: locked")` substring patterns with `gray-matter` parsing in `upload-routes.ts`.
+2. Centralize: add `isIntentLocked(intentDir)` / `isIntentArchived(intentDir)` helpers in `state-tools.ts`. Both `upload-routes.ts` and `haiku_human_write` (state-tools.ts) call the shared helper. The frontmatter gate `v06-no-substring-status-checks-anywhere` asserts repo-wide elimination of the anti-pattern.
 
 ## Completion criteria
 
-- `haiku_human_write` and SPA upload routes derive `human_author_id` from JWT claims; agent-supplied values that disagree are rejected with `unauthorized_author_attribution` (HTTP 403 / MCP error).
-- `getCurrentTickCounter(intentDir, stage = null)` returns a deterministic intent-scope counter when `stage === null`.
-- Archive/lock checks use `gray-matter` (or equivalent frontmatter parser) — no `raw.includes(...)` against intent.md content.
-- New tests in `packages/haiku/test/state-tools-handlers.test.mjs` cover: JWT/agent-author mismatch rejected, intent-scope tick determinism, gray-matter status check.
-- Full `bun run --cwd packages/haiku test` passes.
+See `quality_gates:` in frontmatter. Each finding has at least one executable gate. Plus full `bun run --cwd packages/haiku test` passes.
 
 ## References
 
 - VULN-REPORT.md V-03, V-05, V-06
-- `packages/haiku/src/state-tools.ts` (haiku_human_write handler)
-- `packages/haiku/src/http/upload-routes.ts`
-- `packages/haiku/src/http/feedback-api.ts` (FB-01 hardcoded-author pattern reference)
+- `packages/haiku/src/state-tools.ts` (haiku_human_write, haiku_classify_drift, append-audit/action-log helpers)
+- `packages/haiku/src/http/upload-routes.ts`, `feedback-api.ts`, `auth.ts`
+- `packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts` (action-log consumer)

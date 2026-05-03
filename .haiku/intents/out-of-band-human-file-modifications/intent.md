@@ -1,7 +1,7 @@
 ---
 title: Out-of-band human file modifications
 studio: software
-mode: continuous
+mode: autopilot
 autopilot: true
 status: active
 created_at: '2026-04-28'

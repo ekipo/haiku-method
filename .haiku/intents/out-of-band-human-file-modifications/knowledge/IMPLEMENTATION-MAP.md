@@ -192,3 +192,27 @@ This map is internally consistent with DISCOVERY.md and DESIGN-DECISIONS.md:
 - The eventual-consistency stance (no locking, next-tick reconciliation) maps directly to DESIGN-DECISIONS.md Decision 4 and appears in Paper Surface 3 and Website Surface 4.
 - Design decisions left open at inception (tracked-surface boundary, baseline storage location, baseline establishment on upgrade, ambiguous-diff default, human-write-path integrity, SPA availability per stage, assessment record location, binary file behavior) are preserved as open items in the relevant plugin surfaces above and are not pre-decided by this map.
 - No surface maps to a concept that contradicts a recorded decision in DESIGN-DECISIONS.md.
+
+---
+
+## Annex: Out-of-Scope Subsystem on the Same Branch — Upstream-Reconciliation Pre-Tick Gate
+
+The 5 paper / 8 plugin / 5 website surfaces above describe **only** the out-of-band human-file-modification feature. A second subsystem — **upstream-artifact reconciliation** — also lives on this intent's branch but is NOT covered by the surfaces above. This annex declares that omission explicitly so the implementation map does not claim more than it owns.
+
+**Why it is excluded from the surfaces table:** The reconciliation subsystem entered this branch transitively (repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged into repo main 2026-04-30, then into this intent's main on 2026-05-01). It was not derived from this intent's discovery or design decisions. Including it in the Paper / Plugin / Website Surfaces tables above would falsify the implementation map by attributing surfaces to this intent that this intent did not commission.
+
+**What lives on the branch but is not mapped above:**
+
+| Subsystem Surface | Implementation Location | Mapped Above? |
+|---|---|---|
+| Reconciliation pre-tick gate (corpus fingerprinting, divergence detection) | `packages/haiku/src/orchestrator/workflow/upstream-reconciliation.ts` | NO |
+| `upstream_reconciliation_required` workflow action | `packages/haiku/src/orchestrator/workflow/run-tick.ts` | NO |
+| `haiku_reconciliation_acknowledge` MCP tool | (referenced in operations runbook; sourced in PR #283) | NO |
+| Reconciliation telemetry metrics | `packages/haiku/src/telemetry.ts` (`haiku.reconciliation.*`) | NO |
+| Reconciliation alert rules | `deploy/operations/drift-detection-alerts.yaml` (reconciliation-* rules) | NO |
+| Reconciliation tests | `packages/haiku/test/upstream-reconciliation.test.mjs` | NO |
+| Reconciliation operations runbook scenarios | `stages/operations/units/unit-01-operational-runbook.md` (scenarios 5, 11) | NO (operations stage adopted reconciliation as inherited surface, not as derived from this map) |
+
+**Pre-tick gate ordering note:** The Cross-Component Sync Table row for "Pre-tick gate ordering" describes ordering between the existing **feedback-triage gate** and the new **drift-detection gate** introduced by this intent. The reconciliation gate is a **third pre-tick gate** that lives in the implementation but whose ordering, error model, and gate-chain interaction were not mapped here. If a future intent takes ownership of reconciliation, that intent's IMPLEMENTATION-MAP should add the reconciliation gate to the gate-chain ordering row and re-document the surfaces above.
+
+**Cross-references:** See DISCOVERY.md § "Annexed Subsystem: Upstream-Reconciliation Pre-Tick Gate" for full provenance and scope-orthogonality justification; DESIGN-DECISIONS.md Annex A for the explicit "decisions not made" record.

@@ -553,3 +553,38 @@ The following are out of scope for this architecture and the development stage t
 - Tracking human edits to workflow-managed files (units, feedback, intent.md, state.json).
 - Auto-throttling of drift events (coalescing rapid edits into a single assessment).
 - A SPA affordance for manually resetting the baseline ("accept current state as baseline").
+
+---
+
+## 12. Annex: Co-Located Upstream-Reconciliation Gate (Not Designed by This Intent)
+
+§3.1 specifies the post-this-intent pre-tick gate chain as `tamper-detection → feedback-triage → drift-detection → per-state dispatch`. A second new pre-tick gate — **upstream-artifact reconciliation** — also exists on this intent's branch (entered via the 2026-05-01 main-merge from repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30). This annex documents its presence so the design-stage cross-stage trace is unbroken without re-attributing it to this intent's elaboration.
+
+**Effective gate chain on the branch:**
+
+```
+tamper-detection → feedback-triage → drift-detection → upstream-reconciliation → per-state dispatch
+```
+
+**Distinction from the drift-detection gate this architecture specifies:**
+
+| Concern | drift-detection (§3, this intent) | upstream-reconciliation (annexed) |
+|---|---|---|
+| Detects | Per-file SHA mismatch vs `baseline.json` (human-vs-agent author drift) | Cross-document divergence between agent-authored upstream artifacts (tool-name, http-status, field-name) |
+| Inputs | `baseline.json` (per-stage), tracked surface, pending-marker store | Corpus walk of `stages/<prior>/artifacts/`, `discovery/`, `outputs/`, `<intent>/knowledge/`, `product/`, `features/` |
+| Persisted state | `baseline.json` per stage; `drift-markers.json` intent-scoped | `corpus_fingerprint` value in per-stage `state.json` |
+| Action emitted | `manual_change_assessment` (§4) | `upstream_reconciliation_required` |
+| Resolution path | Agent classifies (4 outcomes), `haiku_human_write` is the sanctioned write tool | Agent reconciles upstream artifacts and re-ticks, OR calls `haiku_reconciliation_acknowledge` |
+| Telemetry | `haiku.drift.*` (this intent) | `haiku.reconciliation.*` (annexed) |
+| Tests | `drift-detection-gate.test.mjs`, `drift-baseline.test.mjs`, `drift-markers.test.mjs` | `upstream-reconciliation.test.mjs` |
+| Designed by | This intent | PR #283 |
+
+**Action enumeration update for §4.1:** §4.1 lists `manual_change_assessment` as a NEW entry alongside existing actions. The action enum on the branch as of this architecture's ship date also contains `upstream_reconciliation_required` (annexed). It dispatches under the same pre-tick model as `manual_change_assessment` (autonomous; no user-facing button) but on the basis of corpus-fingerprint divergence rather than per-file SHA drift.
+
+**MCP tool list update for sibling MCP-TOOL-CONTRACT.md:** The sibling MCP-TOOL-CONTRACT.md specifies `haiku_human_write` as the sole new tool authored by this intent's design. The branch also contains `haiku_reconciliation_acknowledge` (annexed). Its contract is NOT specified here — see PR #283 for the source.
+
+**Why this gate is annexed rather than incorporated:** Incorporating reconciliation into §3 (Pre-Tick Drift-Detection Gate), §4 (`manual_change_assessment` Workflow Action), and §6 (Author-Class Tracking) would require this intent's design stage to assume ownership of a subsystem its product-stage acceptance criteria do not cover and its inception-stage decisions did not consider. The reconciler-style honest path is to acknowledge the gate's presence and disjoint scope without claiming design authorship.
+
+**Future ownership path:** A future intent scoped to upstream-reconciliation should produce its own ARCHITECTURE.md sections specifying the reconciliation gate's position in the gate chain, its inputs and computation, the `upstream_reconciliation_required` action's input/output shape, the `haiku_reconciliation_acknowledge` MCP tool's contract, and its failure-mode catalog. Those sections do not belong here.
+
+**Cross-references:** See `knowledge/DISCOVERY.md` § "Annexed Subsystem", `knowledge/DESIGN-DECISIONS.md` Annex A, `knowledge/IMPLEMENTATION-MAP.md` § "Annex: Out-of-Scope Subsystem", `knowledge/ARCHITECTURE.md` § "Annex: Upstream-Reconciliation Pre-Tick Gate".

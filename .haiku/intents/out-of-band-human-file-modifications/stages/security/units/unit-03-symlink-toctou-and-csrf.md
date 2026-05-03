@@ -68,7 +68,8 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts'
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: completed
+completed_at: '2026-05-03T08:10:20Z'
 ---
 # Unit 03 — Symlink TOCTOU + layered CSRF + feedback sanitization + baseline-corrupt operator gate
 

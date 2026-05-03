@@ -64,10 +64,10 @@ quality_gates:
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
 status: active
-bolt: 3
+bolt: 4
 hat: security-engineer
 started_at: '2026-05-03T02:09:52Z'
-hat_started_at: '2026-05-03T08:01:00Z'
+hat_started_at: '2026-05-03T08:28:13Z'
 iterations:
   - hat: threat-modeler
     started_at: '2026-05-03T02:09:52Z'
@@ -166,6 +166,76 @@ iterations:
       threats), security-reviewer cannot advance.
   - hat: security-engineer
     started_at: '2026-05-03T08:01:00Z'
+    completed_at: '2026-05-03T08:26:00Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T08:26:00Z'
+    completed_at: '2026-05-03T08:28:13Z'
+    result: reject
+    reason: >-
+      REJECT — artifact substance is now correct (SECURITY-CONTROLS-unit-01.md
+      §2 closes R-01/R-02/R-03/R-04 with impl + test refs, §5.0 records the
+      bolt-3 closure), BUT the prior rejection's hard requirement #4 is still
+      unmet: FB-01/FB-02/FB-03/FB-04 remain at status `fixing`. The prior
+      reviewer explicitly stated "Mark FB-01/FB-02/FB-03/FB-04 as closed via the
+      fix-loop hat dispatch. Open FBs at status `fixing` cannot be left for the
+      next bolt." Per the prompt's "Treat each item as a hard requirement"
+      instruction, this hat cannot advance while those FBs remain open.
+
+
+      What's outstanding (security-engineer bolt 4 must close):
+
+      1. FB-01 (R-01 .js bypass) — code is fixed, FB needs to be closed via
+      fix-loop hat dispatch (haiku_feedback_advance_hat through the fix_hats
+      sequence ending at feedback-assessor).
+
+      2. FB-02 (R-02 .css bypass) — same as FB-01.
+
+      3. FB-03 (R-03 octet-stream allowlist no-op) — same.
+
+      4. FB-04 (R-04 attribute_to_user XSS) — same.
+
+
+      Note: FB-05 ("V-11 baseline gate bypassable via state.json tamper") is
+      out-of-scope for unit-01 (which closes V-01/V-02/V-07/V-09 only). It
+      belongs against a different unit/stage. Move it via haiku_feedback_move to
+      the appropriate target rather than blocking this unit on it.
+
+
+      Code-side verdict: PASS (would advance if FBs were closed). Body
+      verification:
+
+      - Check #1 (surface scope concrete and bounded): PASS — §1 names two
+      routes with clear boundaries.
+
+      - Check #2 (every threat-modeler threat accounted for): PASS — §2 maps
+      every threat from THREAT-MODEL-unit-01.md §4/§8, including the
+      equivalent-class extensions (.js/.mjs/.cjs/.css/.htc/.hta/.htaccess),
+      octet-stream allowlist removal, and attribute_to_user bound.
+      Implementation in upload-routes.ts:122-138 (BLOCKED_EXTENSIONS), :149-172
+      (ALLOWED_MIMES_*), :188-199
+      (ATTRIBUTE_TO_USER_PATTERN/isValidAttributeToUser) confirms the claims.
+
+      - Check #3 (controls cite real implementation references): PASS — §3 cites
+      specific functions, constants, and ordered handler steps that match the
+      source.
+
+      - Check #4 (controls cite tests OR note gaps): PASS — §4 cites named tests
+      in upload-routes.test.mjs, red-team-unit-01-upload-bypass.test.mjs,
+      state-tools-handlers.test.mjs, assessments-routes.test.mjs.
+
+      - Check #5 (decision-register consistency): PASS — no contradictions.
+
+      - Check #6 (residual risk specific): PASS — §5.1 enumerates concrete
+      residuals with named targets (unit-04 follow-up FB, CSP proposal,
+      sandboxed sub-origin) and explicit acceptance rationale for telemetry-only
+      clamp signal and UTF-8 byte counting.
+
+
+      The blocker is purely the FB-lifecycle requirement carried forward from
+      the prior rejection.
+  - hat: security-engineer
+    started_at: '2026-05-03T08:28:13Z'
     completed_at: null
     result: null
 model_original: sonnet

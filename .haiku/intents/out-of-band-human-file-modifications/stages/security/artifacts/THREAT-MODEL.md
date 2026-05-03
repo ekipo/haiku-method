@@ -451,6 +451,108 @@ write), so a hostile agent's blast radius is capped at the schema edge.
   is a concrete reason to take the dependency; if added later, audit the
   verify call site for explicit `algorithms` allowlist.
 
+### 6.5. `@sentry/node`
+
+In-tree at `packages/haiku/package.json:29` (`"@sentry/node": "^10.47.0"`),
+consumed by `packages/haiku/src/sentry.ts:1-80`. Initialized at
+`sentry.ts:9-15` with the operator-supplied `observability.sentryDsn`;
+when unset every export short-circuits and no network traffic is emitted
+(`sentry.ts:42, 59, 78`). When set, the client opens an outbound HTTPS
+channel to the Sentry SaaS endpoint encoded in the DSN. This is the
+fourth third-party telemetry/transport surface in the dependency set
+(alongside `@fastify/multipart`, OTel, and the hand-rolled HMAC tunnel)
+and was previously omitted from this enumeration; closing the gap now.
+
+- **Outbound exfiltration (DSN reconfiguration)**: an attacker who can
+  set `HAIKU_SENTRY_DSN` (the env var read by `config.ts` and surfaced
+  as `observability.sentryDsn`, see `sentry.ts:7`) at process start
+  redirects every captured exception and every captured feedback body
+  to their own Sentry project. The threat model and operator surface
+  match §6.3 OTel exactly (`OTEL_EXPORTER_OTLP_ENDPOINT`): env vars are
+  read once at process start, no runtime API exists to swap the DSN
+  after `Sentry.init` has been called (`sentry.ts:10-14` is the only
+  init site). Mitigation in place: env vars are operator-controlled at
+  process start; no MCP tool, hook, or HTTP route exposes DSN
+  reconfiguration, and `grep -rn 'HAIKU_SENTRY_DSN\|sentryDsn' packages/haiku/src/`
+  returns only `config.ts` (read) and `sentry.ts` (consumed at init) —
+  no write path. Residual risk: identical to OTel — an operator running
+  the MCP under an env file that an attacker can edit is compromised
+  pre-process; out of scope for application-layer controls.
+- **PII leak via `extra: context` (captureException)**:
+  `reportError(err, context, sessionCtx)` at `sentry.ts:37-47` ships
+  the entire `context` object outbound as Sentry's `extra` field
+  (`sentry.ts:45 Sentry.captureException(err, { extra: context })`).
+  Unlike OTel `recordEvent` payloads (which we constrain to enums,
+  counts, and path-tail hashes per §6.3), `extra: context` is an
+  **unconstrained `Record<string, unknown>`** at the type level — every
+  `reportError` call site decides what goes in. Today's call sites
+  pass file paths, intent slugs, and `claimed_author_id`-class
+  identifiers; a future call site could pass raw rationale, feedback
+  body content, or unit body excerpts and the type system will not
+  catch it. The §6.3 OTel mitigation ("never log raw rationale /
+  feedback body / file content as a span attribute; restrict to
+  enums + hashes") does NOT extend to this path because there is no
+  central chokepoint — `reportError` is the chokepoint, but it accepts
+  arbitrary `unknown`. **Mitigation in place: NONE.** Recommended
+  control: tighten the `context` parameter type from
+  `Record<string, unknown>` to a discriminated union of approved keys
+  (e.g. `{ error_code: string; surface: string; path_tail_hash?: string }`),
+  OR introduce a `sanitizeSentryExtra(context)` helper at the
+  `reportError` chokepoint that allowlists keys and hashes path-tail
+  values before handing off to `Sentry.captureException`. Either route
+  produces a typecheck-enforced control that mirrors §6.3 OTel's
+  guarantee.
+- **Feedback-body leak (captureFeedback)**:
+  `reportFeedback(message, sessionCtx, contactEmail, name)` at
+  `sentry.ts:53-69` calls `Sentry.captureFeedback({ message, ... })` at
+  line 63, sending the user/agent feedback body verbatim to the Sentry
+  SaaS. The V-10 fix landed a server-side sanitizer for the
+  disk-stored copy of feedback (see `I-3` row in §7 and the unit-03
+  feedback-sanitizer quality gate), but that sanitizer runs on the
+  filesystem-write path and does NOT cover the
+  `Sentry.captureFeedback` call here — `reportFeedback` is invoked
+  from the SPA review-server feedback-submission route directly with
+  the raw body string, bypassing the disk-sanitizer entirely. Threat:
+  the same XSS / control-character / oversize-payload class V-10
+  closed for the disk-stored copy still flows through to Sentry.
+  Worse, contact email and submitter-supplied `name` (lines 65-66) are
+  also sent — these can carry attacker-controlled values that surface
+  on the Sentry triage UI for whoever reads the inbox. **Mitigation in
+  place: NONE.** Recommended control (one of):
+  (a) **Operator opt-in gate** — wrap the `Sentry.captureFeedback`
+      call in `if (observability.sentryShipFeedbackBodies) { ... }`
+      and default to `false`; the existing tag (`scope.setTag("feedback", "true")`
+      at line 62) still fires so operators see *that* feedback was
+      submitted without leaking content.
+  (b) **Sanitize before send** — invoke the same sanitizer V-10 uses
+      on the disk-write path (the helper exported from
+      `feedback-sanitizer.ts` per the unit-03 quality gate) on
+      `message`, `contactEmail`, and `name` before passing to
+      `Sentry.captureFeedback`. This is the lower-friction path and
+      keeps the existing default-on behavior.
+  Either mitigation MUST land alongside the unit-fix that addresses
+  this finding; recommend (b) as the default and document (a) as the
+  operator-escape-hatch in `observability` config docs.
+- **Supply-chain footprint**: `@sentry/node` pulls a transitive tree
+  (`@sentry/core`, `@sentry/types`, `@sentry/utils`, plus Node-runtime
+  integrations like `@sentry/profiling-node` if enabled). Comparable in
+  depth to the `@opentelemetry/*` tree called out in §6.3. Adds a
+  separate auth-token surface: the `SENTRY_AUTH_TOKEN` env var read by
+  `package.json:10`'s `postbuild` script for sourcemap upload runs only
+  in CI/release contexts, never on a user machine, so no runtime auth-
+  token leak path exists from the consumer side — but operators
+  building the plugin from source MUST treat that token as a release
+  credential. Mitigation: lockfile review on bumps; `npm audit` in CI
+  (already covers all third-party deps).
+- **Recommendation**: pin minor version, watch GHSA advisories,
+  re-audit on every `@sentry/node` major bump. NEVER ship raw
+  rationale, feedback body, or file content as `extra: context`. Land
+  the `extra`-allowlist (or chokepoint sanitizer) and the
+  `captureFeedback` sanitizer-or-opt-in gate in the unit that closes
+  this finding. Add a code-review checklist item: any new call to
+  `reportError(err, context, ...)` MUST justify every key in
+  `context`.
+
 ---
 
 ## 7. Threat-to-control matrix (summary)

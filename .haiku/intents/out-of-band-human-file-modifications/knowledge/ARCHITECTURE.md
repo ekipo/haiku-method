@@ -352,7 +352,7 @@ haiku_select_studio    # Pre-intent studio selection.
 haiku_settings_get
 haiku_stage_get / haiku_studio_get / haiku_studio_list
 haiku_human_write      # NEW: human-attributed write through agent.
-haiku_drift_classify   # NEW (working name): record manual_change_assessment outcomes.
+haiku_classify_drift   # NEW: record manual_change_assessment outcomes.
 ```
 
 The resource-tool shape was chosen deliberately. Command-shaped tools ("write this thing for the agent") leak implementation: the caller has to know what frontmatter the call needs to populate, what lifecycle the resource is in, what side effects are required. Resource-shaped tools ("create a unit," "advance a unit's hat") let the workflow engine own those concerns; the agent only specifies *what resource* and *what intent*.
@@ -547,7 +547,7 @@ The siblings in `packages/haiku/src/`:
 packages/haiku/src/
 ├── tools/orchestrator/
 │   ├── haiku_human_write.ts      # NEW: MCP tool for conversational human writes.
-│   └── haiku_drift_classify.ts   # NEW: MCP tool the agent calls to record outcomes
+│   └── haiku_classify_drift.ts   # NEW: MCP tool the agent calls to record outcomes
 │                                 #      from manual_change_assessment.
 ├── http/
 │   └── upload-routes.ts          # NEW (or extension): SPA upload endpoint that
@@ -577,7 +577,7 @@ tools/orchestrator/haiku_human_write.ts ──→  state-tools.ts (path resoluti
                                           ──→  drift-baseline.ts (action-log write)
                                           ──→  (writes write-audit.jsonl directly)
 
-tools/orchestrator/haiku_drift_classify.ts ──→  drift-markers.ts
+tools/orchestrator/haiku_classify_drift.ts ──→  drift-markers.ts
                                             ──→  drift-baseline.ts (terminal-outcome update)
                                             ──→  haiku_feedback (for surface-as-feedback outcomes)
                                             ──→  revisit (for trigger-revisit outcomes)
@@ -587,7 +587,7 @@ Three integration points in existing code:
 
 1. **`run-tick.ts`** — adds the drift gate to the pre-tick chain after feedback triage. The action-mapping switch grows by one entry (`manual_change_assessment`).
 2. **`orchestrator/actions.ts`** — adds `manual_change_assessment` to the discriminated union and the prompt-scaffolding registry.
-3. **`tools/orchestrator/index.ts`** — registers `haiku_human_write` and `haiku_drift_classify` in the tool registry.
+3. **`tools/orchestrator/index.ts`** — registers `haiku_human_write` and `haiku_classify_drift` in the tool registry.
 
 The architecture-prototype map (in `website/app/studios/[slug]/architecture/_data/`) and the Mermaid `stateDiagram-v2` regeneration are downstream sync surfaces, not dependencies of the subsystem itself.
 
@@ -603,7 +603,7 @@ When the drift-detection subsystem ships, the following surfaces must move toget
 | Plugin studios | No new studio. The `software` studio's `development/STAGE.md` may reference the new MCP tools in hat instructions if the tools are useful to specific hats. |
 | Plugin schemas/providers | No changes. |
 | Plugin hooks | No new hooks (deliberate — see §7). The `guard-workflow-fields` hook's deny-list does not change; the new drift-subsystem files (`baseline.json`, `drift-markers.json`, `write-audit.jsonl`, `drift-assessments/*`) are not in the hook's allowed-write zone for agents. The `haiku_human_write` MCP tool is the sanctioned write path for human-attributed writes; its allow/deny list is enforced inside the tool itself, not via the hook. |
-| MCP server | New module under `orchestrator/workflow/` (drift gate + baseline + markers). New handler (`manual_change_assessment`). Two new MCP tools (`haiku_human_write`, `haiku_drift_classify`). One new HTTP endpoint (SPA upload). Modifications to `run-tick.ts`, `orchestrator/actions.ts`, `tools/orchestrator/index.ts`. |
+| MCP server | New module under `orchestrator/workflow/` (drift gate + baseline + markers). New handler (`manual_change_assessment`). Two new MCP tools (`haiku_human_write`, `haiku_classify_drift`). One new HTTP endpoint (SPA upload). Modifications to `run-tick.ts`, `orchestrator/actions.ts`, `tools/orchestrator/index.ts`. |
 | Website docs | New page (or section) explaining drift detection to users. Glossary entries for `manual_change_assessment` and the author-class taxonomy. |
 | Website architecture map | New action node (`manual_change_assessment`) in `_data/payload-for.ts`. New transitions on the gate handler. New actor notes on the orchestrator describing pre-tick drift behavior. New SPA actor notes on the upload endpoint. |
 | Website Mermaid diagrams | Auto-regenerated via `bun run --cwd packages/haiku export:workflow-diagrams`. Verify post-regeneration that the new pre-tick branch appears for every studio. |

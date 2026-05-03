@@ -122,38 +122,79 @@ security stage's elaborate phase for a follow-up wave.
 - **Recommended target iteration**: Next security wave.
 - **`stage_revisit` FB ID**: **FB-07** (`feedback/07-residual-r-02-audit-log-hash-chain.md`)
 
-### R-3. Rate limiting (mandate gap — partial cover for V-08, V-09, D-3, D-4)
+### R-3. Rate limiting (registered, partial cover for V-08, V-09, D-3, D-4 — slowloris + per-token gaps remain)
 
 - **Owning vuln(s)**: V-08 (CSRF defense Layer 4), V-09 (per-session
   classify cap), and threat rows D-3 (slowloris on multipart) + D-4
   (rapid-fire `haiku_classify_drift`).
-- **Rationale for deferral**: The chosen CSRF defense (origin allowlist +
-  query-param ban + nonce) closes the cross-origin form-post path, which
-  is the V-08 direct exploitation. Per-IP rate-limit is the
-  abuse-prevention layer that protects against credential-stuffing /
-  brute-force / sustained-abuse patterns by an attacker who already has
-  a valid token. Lower priority than the direct-exploit close.
-- **Severity if unfixed**: Medium-High (token leak + sustained abuse
-  becomes amplified; additionally, slowloris on `@fastify/multipart` is
-  **completely unmitigated** — fastify default `connectionTimeout = 0`
-  is not overridden in `packages/haiku/src/http.ts:107-136`). Today:
-  Medium (slowloris is exploitable from any tunnel-mode reachability;
-  token TTL + EPHEMERAL_SECRET process rotation cap CSRF / credential
-  abuse but do not constrain a single attacker holding open
-  connections).
-- **Recommended target iteration**: Next security wave; co-locate with
-  `unit-05-rate-limiting` (referenced in unit-03 spec's "Out of scope"
-  section).
-- **Slowloris escalation note (RT-FB-12)**: THREAT-MODEL.md §6.1
-  originally claimed a fictional 60-second `connectionTimeout`
-  mitigation. That claim has been retracted (see THREAT-MODEL.md §6.1
-  and §3.5 D-3 row). Slowloris on the upload routes is now tracked as
-  an **unmitigated** risk pending the R-3 rate-limit + connection-timeout
-  work. The fix unit MUST set `connectionTimeout` (suggested:
-  30 000 ms) and `requestTimeout` (suggested: 60 000 ms) on the
-  `Fastify({ ... })` call in `packages/haiku/src/http.ts:107-136`, and
-  add a regression test that asserts a stalled multipart upload is
-  killed within the timeout.
+- **Status update (FB-29)**: `@fastify/rate-limit` IS registered today
+  in tunnel mode (`packages/haiku/src/http.ts:228-243`) — see
+  THREAT-MODEL.md §6.6 for the full per-key/per-route/store
+  characterization. The earlier "rate-limit is missing" framing was
+  stale relative to the FB-06 wiring. Present coverage and remaining
+  gaps are now tracked separately below.
+- **Present coverage** (registered limiter):
+  - Plugin-wide scope: every HTTP route under tunnel mode
+    (feedback CRUD, intent-mutation routes, upload routes, asset
+    serves, assessments reads, CSRF nonce-mint, WebSocket upgrade
+    handshake) shares one `(IP, window)` bucket. There is no per-route
+    allowlist.
+  - Defaults: `max=60` requests per `timeWindow=60_000` ms, overridable
+    via `HAIKU_HTTP_RATE_MAX` / `HAIKU_HTTP_RATE_WINDOW_MS`.
+  - Per-key derivation: defaults to `req.ip`, which is the socket peer
+    because `Fastify({...})` does NOT set `trustProxy`
+    (`packages/haiku/src/http.ts:107-137`). Under localtunnel this
+    means the bucket effectively keys on "all-of-tunnel", not per
+    upstream internet client. This is intentional (trusting
+    `X-Forwarded-For` from an attacker-reachable surface would let
+    attackers spoof their key) — caps the AGGREGATE tunnel-mode
+    request rate, which is sufficient against single-attacker flood.
+  - Error shape: HTTP 429 with the `@fastify/rate-limit` default body
+    + `Retry-After` header (no override).
+  - V-08 Layer 4 is closed for the direct-flood case (a single
+    attacker cannot exceed `HAIKU_HTTP_RATE_MAX` per minute against
+    any mutating route, including the CSRF nonce-mint endpoint).
+- **Remaining gaps** (the parts that remain "deferred"):
+  - **Per-token / per-session keying**: V-09 (per-session classify
+    cap) is NOT directly enforced — the limiter buckets by IP, not
+    by JWT `sid`. A single hostile token still falls under the
+    aggregate IP cap (sufficient when the only authenticated client
+    is the tunnel) but does not isolate one session's abuse from
+    another session sharing the same egress IP.
+  - **Distributed flood**: a multi-source attack from many residential
+    IPs landing on the same tunnel is constrained by the aggregate
+    `max` cap, which can starve legitimate use rather than isolating
+    the bad sources. Distributed flood remains an accepted residual.
+  - **WebSocket frame stream**: only the upgrade handshake counts
+    against the bucket; in-stream messages are not rate-limited.
+    Tracked but accepted (frame-level rate-limit is a follow-up — see
+    THREAT-MODEL.md §6.6 recommendation (a)).
+  - **Store backend**: in-memory LRU; process restart resets every
+    bucket. Mitigated by JWT process-local lifetime (a restart also
+    invalidates the JWT, capping the post-restart abuse window).
+- **Severity today**: Low-Medium for the V-08/V-09 surface (the
+  registered limiter closes the direct-flood path; gaps are
+  per-token differentiation + distributed-flood isolation).
+  Medium-High remains for the **independent slowloris (D-3)** sub-
+  surface — see the slowloris escalation note below; that fix is
+  `connectionTimeout` + `requestTimeout`, NOT rate-limit, and
+  remains outstanding.
+- **Recommended target iteration**: Next security wave for the
+  per-token / WebSocket-frame extensions and the slowloris timeout
+  fix. The aggregate IP cap is acceptable interim coverage.
+- **Slowloris escalation note (RT-FB-12) — INDEPENDENT OF RATE-LIMIT
+  REGISTRATION**: THREAT-MODEL.md §6.1 originally claimed a fictional
+  60-second `connectionTimeout` mitigation. That claim has been
+  retracted (see THREAT-MODEL.md §6.1 and §3.5 D-3 row). Slowloris on
+  the upload routes is **unmitigated by the rate-limit registration**
+  (the limiter rejects the 61st request, but the attacker's open
+  trickling connections are not closed by it) and remains tracked as
+  an unmitigated risk pending the connection-timeout work. The fix
+  unit MUST set `connectionTimeout` (suggested: 30 000 ms) and
+  `requestTimeout` (suggested: 60 000 ms) on the `Fastify({ ... })`
+  call in `packages/haiku/src/http.ts:107-136`, and add a regression
+  test that asserts a stalled multipart upload is killed within the
+  timeout.
 - **`stage_revisit` FB ID**: **FB-08** (`feedback/08-residual-r-03-rate-limiting.md`)
 
 ### R-4. Race-free `O_NOFOLLOW`-everywhere (V-04 fix #1 — full migration)

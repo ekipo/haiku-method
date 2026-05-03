@@ -25,6 +25,11 @@ import {
 import { join } from "node:path"
 import matter from "gray-matter"
 import { getCurrentState } from "../../current-state.js"
+import {
+	branchExists,
+	isBranchMerged,
+	mergeUnitWorktree,
+} from "../../git-worktree.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
 import { resolveIntentStages, resolveStudioStages } from "../../orchestrator.js"
 import {
@@ -114,6 +119,64 @@ export function preTickConsistency(
 	const activeStage = (intent.active_stage as string) || ""
 	const currentStage = activeStage || studioStages[0]
 	const activeIdx = studioStages.indexOf(currentStage)
+
+	// Orphan-completed-unit merge-retry pass.
+	//
+	// When advance_hat completes a unit's last hat, it tries to merge the
+	// unit branch into the stage branch via mergeUnitWorktree. When the
+	// stage worktree is dirty (typical: the engine just wrote feedback
+	// files, unit FM updates, or stage state.json from a prior tick),
+	// the merge returns merge_failed. The agent commits the dirty files
+	// per the structured error and re-ticks — but nothing in the engine
+	// re-attempts the merge. The unit's status is `completed` in its FM,
+	// so the execute handler treats the unit as done; the stage outputs
+	// validation then fails because the deliverables only exist on the
+	// orphaned unit branch. The workflow loops on `outputs_missing`.
+	//
+	// This pass walks the active stage's units, identifies those whose
+	// status is `completed` AND whose branch is not yet merged into the
+	// stage branch, and re-runs mergeUnitWorktree. Each re-attempt picks
+	// up the now-clean stage worktree and lands the merge.
+	//
+	// Runs early so subsequent pre-tick repairs and the per-state
+	// dispatch see the post-merge stage tip. Best-effort: any merge that
+	// still fails (real conflict, missing branch, etc.) leaves the unit
+	// orphaned and downstream `outputs_missing` will surface it; the
+	// agent then has the structured error path to act on.
+	if (currentStage) {
+		const unitsDirRetry = join(iDir, "stages", currentStage, "units")
+		if (existsSync(unitsDirRetry)) {
+			const stageBranch = `haiku/${slug}/${currentStage}`
+			const unitFiles = readdirSync(unitsDirRetry).filter((f) =>
+				f.endsWith(".md"),
+			)
+			for (const f of unitFiles) {
+				const unitName = f.replace(/\.md$/, "")
+				const unitFm = readFm(join(unitsDirRetry, f))
+				if ((unitFm.status as string) !== "completed") continue
+				const unitBranch = `haiku/${slug}/${unitName}`
+				if (!branchExists(unitBranch)) continue
+				if (!branchExists(stageBranch)) continue
+				if (isBranchMerged(unitBranch, stageBranch)) continue
+
+				// Branch exists, status is completed, but the merge into
+				// stage hasn't happened. Re-attempt.
+				const result = mergeUnitWorktree(slug, unitName, currentStage)
+				emitTelemetry("haiku.workflow.orphan_unit_merge_retry", {
+					intent: slug,
+					stage: currentStage,
+					unit: unitName,
+					ok: String(result.success),
+					message: result.message,
+				})
+				// On success the next isBranchMerged in this loop iteration
+				// would skip subsequent retries cleanly. On failure, we
+				// leave the orphan and let the downstream handler surface
+				// the issue with its own structured error — the agent's
+				// recovery path already handles merge_failed shapes.
+			}
+		}
+	}
 
 	// Pre-walk: sync intent.md.active_stage from state.json reality.
 	// state.json is the single source of truth for stage position

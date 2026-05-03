@@ -100,7 +100,8 @@ quality_gates:
     command: >-
       bash -c '! grep -nE "^- *(improve security|harden|review|investigate)$"
       .haiku/intents/out-of-band-human-file-modifications/stages/security/artifacts/ASSESSMENTS.md'
-status: pending
+status: completed
+completed_at: '2026-05-03T09:33:47Z'
 ---
 # Unit 04 — Threat model + assessments + deferred-risk register
 

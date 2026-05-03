@@ -119,7 +119,13 @@ security stage's elaborate phase for a follow-up wave.
 - **Severity if unfixed**: Medium (an attacker who can write to disk can
   rewrite prior log lines without detection). Today: Low (intent
   directory write-access is already a meaningful breach).
-- **Recommended target iteration**: Next security wave.
+- **Sequencing dependency**: hash-chaining is meaningless if upstream
+  records can be silently lost or interleaved before the chain is
+  computed. R-7 (write-time atomicity + parse-error fail-closed + per-
+  field caps) is a **prerequisite** for R-2 — landing R-2 without R-7
+  produces a hash chain over a corruptible substrate. Order the next
+  security wave R-7 → R-2.
+- **Recommended target iteration**: Next security wave (after R-7).
 - **`stage_revisit` FB ID**: **FB-07** (`feedback/07-residual-r-02-audit-log-hash-chain.md`)
 
 ### R-3. Rate limiting (registered, partial cover for V-08, V-09, D-3, D-4 — slowloris + per-token gaps remain)
@@ -295,6 +301,113 @@ security stage's elaborate phase for a follow-up wave.
   the pre-tick triage gate routes the cursor to the security
   stage's elaborate phase exactly once for the whole serve+upload
   hardening pass).
+
+### R-7. Audit-log write-time atomicity + per-field caps + parser fail-closed (FB-28 surface)
+
+- **Owning vuln(s)**: V-03 (integrity of the audit log itself), V-09
+  (rationale bloat). Companion to R-2 (post-write tampering). **Triggering
+  finding**: FB-28 (security stage,
+  `feedback/28-audit-log-atomicity-claim-broken-by-unbounded-rationale-path.md`),
+  with sibling findings FB-26 (rationale uncapped on MCP path) and
+  FB-30 (haiku_human_write content uncapped).
+- **Defect characterization**: `appendJsonlLine` (`packages/haiku/src/orchestrator/workflow/write-audit.ts:131-163`),
+  `appendWriteAudit` (`write-audit.ts:165-182`), and `appendActionLogEntry`
+  (`packages/haiku/src/orchestrator/workflow/action-log.ts:36-73`)
+  document an atomicity contract that depends on each record's serialized
+  JSON line being ≤ PIPE_BUF. Three independent ways the contract is
+  silently wrong today:
+    1. **PIPE_BUF on macOS is 512 bytes**, not the 4 KiB the comment
+       cites. Any record whose JSON exceeds 512 B (the common case once
+       a non-trivial `path`, `rationale`, or `dirs_created` is present)
+       loses the atomicity guarantee on every macOS dev / CI / operator
+       host.
+    2. **`WriteAuditRecord` carries unbounded variable-length fields**:
+       `rationale` (no cap on the MCP path — see FB-26 for the missing
+       `validateRationaleCaps` call in `haiku_human_write.ts:413`),
+       `dirs_created: string[]` (proportional to created-dir-chain depth,
+       `haiku_human_write.ts:670-683`), `path` (bounded only by
+       filesystem `PATH_MAX` — already exceeds macOS PIPE_BUF on its
+       own at ~1 KiB), and `claimed_author_id` / `human_author_id`
+       (unbounded on the MCP path). Even on Linux (PIPE_BUF = 4 KiB) a
+       single oversize-rationale write blows the bound.
+    3. **Concurrent writers exist for both files**: SPA upload route
+       (`packages/haiku/src/http/upload-routes.ts:726, 729, 1027, 1030`),
+       MCP `haiku_human_write` (`haiku_human_write.ts:795, 838`), and
+       drift baseline / V-11 markers (`drift-baseline.ts:1218, 1241`)
+       all O_APPEND the **same** `write-audit.jsonl` and
+       `action-log.jsonl` per intent. Concurrent ticks + concurrent SPA
+       uploads + concurrent agent calls can interleave bytes mid-line.
+- **Consumer behavior compounds the silence**: `readActionLogForTick`
+  (`action-log.ts:97-109`) wraps `JSON.parse` in `try { ... } catch
+  { /* skip */ }`. A malformed line caused by interleaved-write
+  corruption is silently dropped — the entry vanishes from the
+  drift-detection gate's per-tick action-log union. A `human-via-mcp`
+  write whose audit line was corrupted gets re-classified
+  `human-implicit` because the entry no longer exists. The whole
+  trust-and-audit story in ARCHITECTURE.md §6.1-§6.3 (and this
+  stage's §3.3 R-1..R-4 mitigations) rests on log integrity that is
+  not actually guaranteed at write time.
+- **Why it's recorded as a residual rather than fixed in this wave**:
+  the fix is a producer-side rewrite spanning three files
+  (`write-audit.ts`, `action-log.ts`, `haiku_human_write.ts`) plus a
+  consumer-side change (`readActionLogForTick` semantics — promoting
+  parse errors from "skip" to "tamper signal"), plus per-field caps
+  on every variable-length record field. That's a coherent wave on
+  its own and should not be folded into a documentation iteration.
+  The triage decision is to record it as a tracked residual with R-2
+  (hash-chain) sequenced to follow.
+- **Severity if unfixed**: **Medium-High**. The harm is structural:
+  every audit-log analysis (drift-gate classification, post-incident
+  attribution, BLUE-TEAM-VERIFICATION.md `git show`-based replay) is
+  silently downgraded from "guaranteed log fidelity" to "best-effort
+  fidelity" on macOS for nearly every record, and on Linux for any
+  long-rationale record. Today this manifests as occasional
+  misattribution under concurrent load; an attacker aware of the
+  asymmetry can deliberately race a high-volume oversize write against
+  a target write to suppress its audit trail.
+- **Recommended fix (in priority order)**:
+  1. **Per-field caps at the chokepoint** — push `validateRationaleCaps`
+     (already 10 KiB) and a new `MAX_PATH_BYTES` (e.g. 1 KiB),
+     `MAX_DIRS_CREATED_COUNT` (e.g. 32), and `MAX_AUTHOR_ID_BYTES`
+     (e.g. 128) into `appendWriteAudit` / `appendActionLogEntry` so
+     every writer is forced through the same boundary. Bounds the
+     serialized line length to a known maximum (~12 KiB worst case)
+     so atomicity can be reasoned about per-platform.
+  2. **Stop relying on PIPE_BUF for atomicity** — wrap every append
+     in a userspace lock against `<log>.lock` (e.g.
+     `proper-lockfile`) or use a single-writer in-process queue
+     plus advisory `flock` for cross-process writers. Either
+     approach removes the platform-dependent silent failure.
+     `proper-lockfile` is the lower-risk choice (no FFI, well-
+     audited, already used in similar Node shops) and is the same
+     primitive RED-TEAM-unit-02 §R-05 recommended for the
+     `intent-tick.json` race.
+  3. **Fail-closed on JSONL parse errors in the consumer** — replace
+     the `try { JSON.parse(line) } catch { /* skip */ }` in
+     `readActionLogForTick` with a structured tampering signal
+     (emit `haiku.audit.parse_failure` telemetry, include the
+     malformed line's offset, refuse to advance the drift-gate tick
+     until an operator acknowledges the corruption — same shape as
+     V-11 baseline-corrupt operator-ack). A malformed line is a
+     security signal, not a parsing inconvenience.
+  4. **Per-platform PIPE_BUF audit comment** — replace the "4 KiB on
+     most platforms" comment in `write-audit.ts:165-182` and
+     `action-log.ts:36-73` with the actual per-platform value (Linux
+     4096, macOS 512, NetBSD 512, FreeBSD 512) plus a note that the
+     cap is enforced at the producer side via the field-cap chokepoint.
+  5. **Cross-reference R-2** — once R-7 lands, R-2 (hash-chain) can
+     be implemented over a substrate that is actually atomic.
+- **Severity ranking**: R-7 is Medium-High; R-2 is Medium. R-7 is
+  prerequisite to R-2.
+- **Recommended target iteration**: Next security wave, sequenced
+  before R-2 (hash-chain). Implementation site is the three append
+  helpers + the `haiku_human_write` argument-extraction site +
+  `readActionLogForTick` consumer.
+- **`stage_revisit` FB ID**: FB-28 (this finding) becomes the seed
+  FB for R-7 once it closes; the next security iteration's
+  elaborate phase fans out per-component subagents (producer caps,
+  lockfile primitive, consumer fail-closed, comment correction)
+  from the closed FB-28 + sibling FB-26 + FB-30 surface.
 
 ---
 

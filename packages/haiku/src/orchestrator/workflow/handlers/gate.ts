@@ -458,6 +458,35 @@ const emit: WorkflowHandler = (ctx) => {
 
 	// ── External review reconciliation ─────────────────────────────────
 	const gateOutcomeInGate = (stageState.gate_outcome as string) || ""
+	// Self-heal: if the saved blocked state contradicts the intent's
+	// current mode (e.g., the intent is autopilot now, where per-stage
+	// external gates are never opened), the saved `blocked` is stale —
+	// clear it so the gate re-evaluates fresh below. This catches the
+	// case where the engine emitted a per-stage external gate under an
+	// older interpretation of autopilot, the agent opened (and possibly
+	// closed) a per-stage PR, and the user wants the workflow to resume
+	// under the corrected semantics without manual state surgery.
+	const intentModeForReconcile =
+		((intent.mode as string) || "continuous").toLowerCase()
+	const autopilotForReconcile =
+		intentModeForReconcile === "autopilot" || intent.autopilot === true
+	if (
+		autopilotForReconcile &&
+		stageStatus === "completed" &&
+		gateOutcomeInGate === "blocked"
+	) {
+		const statePath = stageStatePath(slug, currentStage)
+		const stateData = readJson(statePath)
+		stateData.gate_outcome = ""
+		stateData.status = "active"
+		stateData.external_review_url = ""
+		writeJson(statePath, stateData)
+		emitTelemetry("haiku.gate.autopilot_blocked_self_heal", {
+			intent: slug,
+			stage: currentStage,
+		})
+		// Fall through to re-evaluate the gate under the current mode.
+	}
 	if (stageStatus === "completed" && gateOutcomeInGate === "blocked") {
 		let extApproved = false
 		let externalState: ExternalReviewState = { status: "unknown" }
@@ -565,20 +594,22 @@ const emit: WorkflowHandler = (ctx) => {
 		coercedReviewType =
 			rawReviewType === "auto" ? "external" : `${rawReviewType},external`
 	}
-	// Autopilot promotion: drop `ask` from any review-type spec so
-	// the workflow advances without human review. Both shapes need
-	// handling — bare `ask` and compound forms like `external,ask` or
-	// `ask,external`. For compound forms, strip the `ask` segment and
-	// keep the rest (e.g. `external,ask` → `external`); a pure `ask`
-	// becomes `auto`. External and `await` gates still block — autopilot
-	// can't fake real external signals.
+	// Mode contract for per-stage gates:
+	//   - discrete    → ALWAYS external (handled above by isDiscrete coercion)
+	//   - continuous  → follows STAGE.md `review:` verbatim (no override)
+	//   - autopilot   → ALWAYS auto (no human review, no per-stage PR)
+	// The intent-completion gate is a separate code path; it owns the
+	// single delivery PR for autopilot intents (see user memory
+	// `feedback_open_pr_post_intent_gate`). `await` gates remain reserved
+	// for "wait on a real external event" — they are not review types and
+	// cannot be promoted to auto without breaking the wait semantics, so
+	// they are left untouched.
 	let reviewType = coercedReviewType
 	if (autopilot) {
 		const segments = coercedReviewType
 			.split(",")
 			.map((t) => t.trim())
-			.filter((t) => t !== "ask")
-		reviewType = segments.length === 0 ? "auto" : segments.join(",")
+		reviewType = segments.includes("await") ? "await" : "auto"
 	}
 	const stageIdx = studioStages.indexOf(currentStage)
 	const nextStage =
@@ -624,6 +655,7 @@ const emit: WorkflowHandler = (ctx) => {
 			`Auto-gate passed — all stages complete for intent '${slug}'.`,
 		)
 	}
+
 
 	let effectiveGateType: string
 	if (!gitAvailable && reviewType.includes("external")) {

@@ -2,7 +2,7 @@
 title: >-
   MCP tool name divergence: `haiku_human_write_file` (product DATA-CONTRACTS) vs
   `haiku_human_write` (design + impl)
-status: fixing
+status: addressed
 origin: studio-review
 author: cross-stage-consistency
 author_type: agent
@@ -15,8 +15,13 @@ bolt: 1
 triaged_at: '2026-05-03T21:55:00Z'
 resolution: null
 replies: []
+hat: reconciler
+iterations:
+  - bolt: 1
+    hat: reconciler
+    completed_at: '2026-05-03T21:59:51Z'
+    result: advanced
 ---
-
 ## Finding
 
 The same tool is named two different things across stages, which is precisely the cross-stage naming consistency check the studio review mandate requires.

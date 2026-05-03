@@ -2,7 +2,7 @@
 title: >-
   MCP tool name divergence: `haiku_drift_classify` (knowledge/ARCH) vs
   `haiku_classify_drift` (design + impl)
-status: fixing
+status: closed
 origin: studio-review
 author: cross-stage-consistency
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-05-03T21:55:36Z'
 iteration: 0
 visit: 0
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-04:bolt-1'
 bolt: 1
 triaged_at: '2026-05-03T21:55:36Z'
 resolution: null
 replies: []
+hat: validator
+iterations:
+  - bolt: 1
+    hat: reconciler
+    completed_at: '2026-05-03T21:58:27Z'
+    result: advanced
+  - bolt: 1
+    hat: validator
+    completed_at: '2026-05-03T21:59:20Z'
+    result: closed
 ---
-
 ## Finding
 
 Second tool-naming divergence across stages, mirroring the `haiku_human_write_file` finding but inverted: this time it's the development stage's discovery artifact that uses a different name from the rest of the chain.

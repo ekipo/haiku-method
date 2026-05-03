@@ -2,7 +2,7 @@
 title: >-
   Upstream-reconciliation subsystem implemented but absent from
   inception/product/design specs
-status: fixing
+status: addressed
 origin: studio-review
 author: cross-stage-consistency
 author_type: agent
@@ -15,8 +15,13 @@ bolt: 1
 triaged_at: '2026-05-03T21:53:39Z'
 resolution: null
 replies: []
+hat: reconciler
+iterations:
+  - bolt: 1
+    hat: reconciler
+    completed_at: '2026-05-03T22:03:39Z'
+    result: advanced
 ---
-
 ## Finding
 
 A substantial pre-tick reconciliation subsystem was built and operationalized as part of this intent, but it does not appear anywhere in the upstream specifications. The cross-stage trace is broken.

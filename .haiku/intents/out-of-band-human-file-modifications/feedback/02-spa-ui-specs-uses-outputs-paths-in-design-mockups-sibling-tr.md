@@ -2,7 +2,7 @@
 title: >-
   SPA-UI-SPECS uses `outputs/` paths in design mockups; sibling
   TRACKED-SURFACE-BOUNDARY locks `artifacts/` as canonical
-status: fixing
+status: closed
 origin: studio-review
 author: cross-stage-consistency
 author_type: agent
@@ -10,13 +10,22 @@ created_at: '2026-05-03T21:54:37Z'
 iteration: 0
 visit: 0
 source_ref: null
-closed_by: null
+closed_by: 'fix-loop:FB-02:bolt-1'
 bolt: 1
 triaged_at: '2026-05-03T21:54:37Z'
 resolution: null
 replies: []
+hat: validator
+iterations:
+  - bolt: 1
+    hat: reconciler
+    completed_at: '2026-05-03T21:56:58Z'
+    result: advanced
+  - bolt: 1
+    hat: validator
+    completed_at: '2026-05-03T21:57:56Z'
+    result: closed
 ---
-
 ## Finding
 
 Two design-stage artifacts disagree on the canonical name of the stage output directory shown to users in the SPA.

@@ -1656,15 +1656,24 @@ async function run() {
 	})
 
 	await test("V-06: body text quoting `status: locked` is NOT a false-positive lock", async () => {
+		// V-06 tests YAML status-parsing semantics, NOT upload content-type.
+		// Use a .md file so we don't collide with V-01/V-02's .html block.
 		const fileContent = Buffer.from("content")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/landed.html",
+				target_path: "artifacts/landed.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "landed.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "landed.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 		const res = await fetch(
 			`${baseUrl}/api/intents/${bodyTextSlug}/uploads/stage-output`,
@@ -1680,7 +1689,7 @@ async function run() {
 			"stages",
 			stageName,
 			"artifacts",
-			"landed.html",
+			"landed.md",
 		)
 		assert.ok(existsSync(dest), "Upload should have landed on disk")
 	})
@@ -1690,15 +1699,24 @@ async function run() {
 	console.log("\n=== V-03: claimed_author_id rename (legacy alias mirrored) ===")
 
 	await test("V-03: stage-output upload writes claimed_author_id AND human_author_id (legacy alias)", async () => {
-		const fileContent = Buffer.from("<html><body>Auth-test v1</body></html>")
+		// V-03 tests author-attribution semantics, NOT upload content-type.
+		// Use a .md file so we don't collide with V-01/V-02's .html block.
+		const fileContent = Buffer.from("# Auth-test v1\n")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/auth-test.html",
+				target_path: "artifacts/auth-test.md",
 				mode: "create",
 				attribute_to_user: "alice@example.com",
 			},
-			[{ name: "file", filename: "auth-test.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "auth-test.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 		const res = await fetch(
 			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,

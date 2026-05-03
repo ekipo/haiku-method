@@ -510,13 +510,17 @@ const emit: WorkflowHandler = (ctx) => {
 	const rawReviewType = resolveStageReview(studio, currentStage)
 	const intentMode = (intent.mode as string) || "continuous"
 	// Mode taxonomy: discrete | discrete-hybrid | continuous | autopilot.
-	// Autopilot is NOT a separate boolean — it lives ONLY on `intent.mode`.
-	// The legacy `autopilot: true` boolean (alongside `mode: continuous`)
-	// is intentionally IGNORED here. If a user wants autopilot behavior
-	// they must set `mode: autopilot` explicitly. Honoring the legacy
-	// boolean caused the "continuous + autopilot:true silently auto-
-	// advances ask gates" bug — see test/autopilot-mode.test.mjs's
-	// "mode:continuous + autopilot:true boolean does NOT auto-advance"
+	// The canonical home for autopilot is `intent.mode === "autopilot"`.
+	//
+	// Backward-compat (per a61e6f69e): older intent.md files carry a
+	// separate `autopilot: true` boolean alongside `mode: continuous`
+	// (or no mode at all). Honor the legacy boolean as a fallback so
+	// existing intents keep running in autopilot semantics until they're
+	// migrated. Without this fallback, a long-lived intent with the
+	// boolean+continuous shape pops local-review gates (the ask-promotion
+	// path silently turns off) even though the user authored the intent
+	// expecting autopilot. See test/autopilot-mode.test.mjs's
+	// "mode:continuous + autopilot:true boolean DOES auto-advance"
 	// regression case.
 	//
 	// In autopilot mode the gate handler promotes `ask` gates to `auto`,
@@ -531,7 +535,8 @@ const emit: WorkflowHandler = (ctx) => {
 	// discrete-hybrid behavior, it should derive it from
 	// `intentMode === "continuous" && <some per-stage condition>` rather
 	// than reading a stored field.
-	const autopilot = intentMode === "autopilot"
+	const autopilot =
+		intentMode === "autopilot" || intent.autopilot === true
 	const isDiscrete = intentMode === "discrete"
 
 	// Discrete-mode contract: every stage gate MUST open an external

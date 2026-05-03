@@ -451,6 +451,159 @@ write), so a hostile agent's blast radius is capped at the schema edge.
   is a concrete reason to take the dependency; if added later, audit the
   verify call site for explicit `algorithms` allowlist.
 
+### 6.5. `@fastify/cors`
+
+- **Registration site**: `packages/haiku/src/http.ts:14` (import),
+  `packages/haiku/src/http.ts:192-218` (`instance.register(fastifyCors, …)`).
+  Registered ONLY when `isRemoteReviewEnabled()` is true
+  (`packages/haiku/src/http.ts:192`); local mode emits no CORS headers
+  at all. This is the load-bearing implementation behind THREAT-MODEL
+  §3.6 E-1 ("Origin allowlist") Layer 2 of the CSRF defense and behind
+  ASSESSMENTS R-3's references to origin-based mitigation.
+- **Origin-comparison semantics**: the `origin` callback at
+  `http.ts:194-197` defers to `resolveAllowedCorsOrigin(origin)` at
+  `http.ts:100-105`, which compares the request `Origin` header against
+  the configured allowlist using **exact string equality** (`Array.includes`)
+  with two filters: empty entries dropped, the literal `"*"` dropped
+  (so a wildcard-by-accident in `HAIKU_REVIEW_ALLOWED_ORIGINS` collapses
+  to "no allowed origins" — fail-closed).
+  - The narrower `isOriginAllowed()` helper at
+    `packages/haiku/src/http/csrf.ts:100-126` (used by Layer 3 nonce
+    enforcement, not by `@fastify/cors` directly) supports
+    trailing-port wildcards (`http://localhost:*`) and subdomain
+    wildcards (`https://*.example.com`) for the CSRF Origin check —
+    the CORS allowlist does NOT. The two surfaces are intentionally
+    decoupled: CORS uses exact-match (operator-controlled), CSRF
+    permits the loopback wildcard for dev convenience.
+- **Preflight handling**: `OPTIONS *` is owned globally by
+  `@fastify/cors` (per the explicit comment at
+  `packages/haiku/src/http/default-routes.ts:55-62` referencing
+  `node_modules/@fastify/cors/index.js:79`). For an allowed origin
+  the preflight returns 204 with `Access-Control-Allow-Origin`,
+  `-Allow-Methods`, `-Allow-Headers`, `-Expose-Headers`. For a
+  disallowed origin `@fastify/cors` calls `callNotFound` and the
+  request lands in our `setNotFoundHandler` at
+  `packages/haiku/src/http/default-routes.ts:81-89`, which responds
+  204 with NO ACAO/ACAM/ACAH/ACEH headers — the browser sees no CORS
+  grant and blocks the real request. The bare 204 is intentional so
+  the OPTIONS path does not leak route existence differently from the
+  404 path. **Mitigation tested**: see the existing CSRF + CORS test
+  suite (audit-mutating-routes script) referenced in §7 row E-1.
+- **Methods + headers exposed**: `["GET", "HEAD", "POST", "PUT",
+  "DELETE", "OPTIONS"]` plus `Authorization`, `Content-Type`,
+  `bypass-tunnel-reminder`, `X-Haiku-CSRF` allowed inbound; only
+  `X-E2E-Encrypted` and `X-Original-Content-Type` exposed outbound.
+  `credentials: false` (cookies are not part of the auth model — JWT
+  in `Authorization` header is). `strictPreflight: false` matches the
+  pre-rewrite hand-rolled behaviour (the test contract permits a
+  preflight without an `Access-Control-Request-Method` header).
+- **OPTIONS-route ownership conflict surface**: the only known sharp
+  edge is "do not register a sibling `instance.options('/*')` —
+  `@fastify/cors` already owns the global OPTIONS route and
+  re-declaration throws `Method 'OPTIONS' already declared for route
+  '/*'` at `buildApp` time" (per the comment at
+  `packages/haiku/src/http/default-routes.ts:55-62`). Threat: a
+  future contributor adding a hand-rolled CORS preflight handler on
+  any route would break server boot — caught at build time, not
+  runtime; failure mode is loud, not silent.
+- **Wildcard handling**: `HAIKU_REVIEW_ALLOWED_ORIGINS` is parsed in
+  `config.ts` and consumed via `review.allowedOrigins`; the
+  `resolveAllowedCorsOrigin()` filter explicitly strips both `""` and
+  `"*"` before exact-match. There is NO path by which an operator can
+  configure `@fastify/cors` to echo `Access-Control-Allow-Origin: *`
+  to the client — even if `HAIKU_REVIEW_ALLOWED_ORIGINS=*` is set,
+  the filter drops it and the effective allowlist falls back to
+  `[review.siteUrl]`. Misconfiguration mode (no allowlist + no site
+  URL → empty allowed-set → silent reject of every cross-origin
+  request) is detected at startup by the explicit warning at
+  `packages/haiku/src/http.ts:354-369` (FB-12).
+- **Recommendation**: pin minor version, watch GHSA advisories on
+  `@fastify/cors`. Re-audit the OPTIONS-ownership comment at
+  `default-routes.ts:55-62` whenever `@fastify/cors` major-bumps —
+  the index.js:79 line reference is implementation-specific and may
+  drift across versions. The exact-match origin policy is a
+  deliberate narrowing vs the more permissive `isOriginAllowed`
+  helper used for CSRF Layer 3; if a future change unifies them,
+  audit the CSRF call sites first.
+
+### 6.6. `@fastify/rate-limit`
+
+- **Registration site**: `packages/haiku/src/http.ts:15` (import),
+  `packages/haiku/src/http.ts:228-243` (registration). Registered ONLY
+  when `isRemoteReviewEnabled()` is true; local-loopback mode runs
+  with NO rate limiting (rate-limit value zero is intentional in
+  local mode where the only client is the developer's own browser).
+- **Plugin-wide scope**: registered against the root `instance` AFTER
+  CORS but BEFORE `registerCsrfRoutes`, `registerSessionRoutes`,
+  `registerFileServeRoutes`, `registerFeedbackRoutes`,
+  `registerUploadRoutes`, `registerAssessmentsRoutes`, and
+  `registerWsUpgrade` (see `http.ts:228-306`). This means the
+  per-IP cap covers **every HTTP route** in tunnel mode — feedback
+  CRUD, intent-mutation routes, upload routes, asset serves,
+  assessments reads, the CSRF nonce-mint endpoint, and the WebSocket
+  upgrade handshake. There is NO per-route allowlist today; every
+  route shares the same `(IP, window)` budget.
+  - **Closes ASSESSMENTS R-3 partial gap**: this scope DOES cover
+    "per-IP rate-limit on mutating tunnel-mode routes" (V-08 Layer 4 +
+    D-3/D-4 surface). What it does NOT do: per-token / per-session
+    keying, per-route differentiation, or coverage of the
+    long-running WebSocket frames (only the upgrade handshake counts;
+    in-stream messages are not rate-limited).
+- **Per-key derivation (default IP)**: `@fastify/rate-limit` defaults
+  to `req.ip` for the bucket key. Fastify resolves `req.ip` from
+  `req.socket.remoteAddress` UNLESS `trustProxy` is set on the
+  `Fastify({...})` factory. We do NOT set `trustProxy`
+  (`packages/haiku/src/http.ts:107-137` — full factory call, no
+  `trustProxy` field). **Consequence under localtunnel**: every
+  request's apparent peer is localtunnel's outbound proxy connection
+  (loopback, since localtunnel runs as a sibling process tunnelling
+  to a remote relay). The `X-Forwarded-For` header that the relay
+  injects is **NOT trusted** — Fastify ignores it and the rate-limit
+  bucket effectively becomes "all-of-tunnel" rather than "per
+  internet client". This is **intentional and load-bearing**: trusting
+  `X-Forwarded-For` from an attacker-reachable surface would let
+  attackers spoof their key by injecting their own header. The
+  trade-off is that the rate-limit caps the AGGREGATE tunnel-mode
+  request rate at `HAIKU_HTTP_RATE_MAX/HAIKU_HTTP_RATE_WINDOW_MS`,
+  not per-attacker — sufficient against single-attacker flood but
+  not against distributed flood from one tunnel hop.
+- **Configured `max` and `timeWindow`**: defaults are
+  `max=60` requests, `timeWindow=60_000` ms (1 minute) per
+  `http.ts:229-241`. Operator overrides via `HAIKU_HTTP_RATE_MAX`
+  (int >= 1) and `HAIKU_HTTP_RATE_WINDOW_MS` (int >= 1000); both
+  parsed with `Number.parseInt` + finiteness + lower-bound clamp so
+  malformed env vars fall back to defaults silently.
+- **Store backend**: the default is in-memory (LRU per-IP map).
+  **Process-restart loses the bucket state** — same failure mode as
+  `EPHEMERAL_SECRET` rotation noted in §1.3. An attacker who can
+  trigger a process restart resets every bucket. Mitigation: process
+  restarts under tunnel mode are themselves a meaningful event
+  (operator action or crash); the JWT auth window is process-local
+  too, so a restart already invalidates the JWT, capping the abuse
+  window at "post-restart, pre-mint-of-new-JWT".
+- **Error shape on breach**: `@fastify/rate-limit` defaults to HTTP
+  429 with body `{statusCode: 429, error: "Too Many Requests",
+  message: "Rate limit exceeded, retry in N seconds"}` and a
+  `Retry-After` header. We do NOT override the default error shape;
+  consumers (the SPA fetch wrapper) handle 429 by surfacing a banner
+  and disabling the offending control.
+- **No allowlist for csrf-nonce-mint endpoint**: every route shares
+  the bucket, INCLUDING the `/api/csrf/nonce` mint endpoint. A
+  client that exhausts its rate-limit cannot mint a fresh nonce
+  until the window resets. This is acceptable today (60 req/min is
+  ~10x a reviewer's realistic click rate) but tighten-then-allow is
+  the standard hardening step if the cap is ever lowered.
+- **Recommendation**: pin minor version, watch GHSA advisories. Two
+  follow-ups for the next security wave: (a) add a per-route
+  override for the WebSocket frame stream if rate-limit needs to
+  apply at frame level, not just handshake level; (b) reconsider
+  store backend if the deployment ever moves off the
+  one-process-per-tunnel topology. The deliberate `trustProxy=false`
+  posture MUST be preserved unless the deployment topology gains a
+  trusted reverse proxy in front of tunnel mode — a future change
+  that flips it on without auditing the trust boundary would
+  re-open the IP-spoofing-via-header bypass.
+
 ---
 
 ## 7. Threat-to-control matrix (summary)

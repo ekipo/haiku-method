@@ -153,3 +153,21 @@ The following decisions were not resolved at inception and are explicitly deferr
 **Assessment record durability and location** — Once the agent classifies a drift event, where does the classification record live? It needs to be human-readable (visible in the SPA's drift assessment view) and durable (survives branch operations). The options roughly parallel the feedback mechanism (a new directory alongside feedback/) or a simpler append-log in state.json. Design owns this choice.
 
 **Binary file degraded-mode behavior** — For figma exports, screenshots, and other binary stage outputs where the diff payload is uninformative, what signal does the agent receive and what is it expected to do? DISCOVERY.md § "Risks: Binary diffs are uninformative" flags this. Design should specify the v1 behavior (e.g., "file changed, binary, assume human intent is valid, apply 'acknowledge' classification unless otherwise instructed").
+
+---
+
+## Annex A: Upstream-Reconciliation Subsystem (Out-of-Scope, Co-Located)
+
+The nine decisions above pertain exclusively to **out-of-band human file modifications**. A separate subsystem — **upstream-artifact reconciliation** — was authored on a different branch (`feat/prompt-files-and-validation`, repo PR #283, merged 2026-04-30) and entered this intent's branch via the 2026-05-01 main-merge. Its scope is detection of **cross-document divergence between agent-authored upstream artifacts** (tool-name divergence, HTTP-status-code divergence, field-name divergence) — orthogonal to human-write detection.
+
+This annex exists so the inception decision record on this intent's branch acknowledges that subsystem's presence without conflating it with the nine decisions above.
+
+**Decisions explicitly NOT made by this intent's inception:**
+
+- The reconciliation subsystem's detection model (corpus walking, fingerprinting, divergence-class taxonomy) was not subject to a Decision-1-style alternatives analysis here. Its detection model is recorded only in its source module (`packages/haiku/src/orchestrator/workflow/upstream-reconciliation.ts`) and in the operations runbook scenarios that monitor it.
+- The reconciliation subsystem's reaction mechanism (the `upstream_reconciliation_required` action and the `haiku_reconciliation_acknowledge` MCP tool) was not subject to a Decision-3-style alternatives analysis here. Its alternatives (e.g., piggyback on feedback-triage, harness-only enforcement, no escape-hatch) were not enumerated in this inception. Its reaction model is set by the implementation as it stands.
+- The reconciliation subsystem's concurrency stance, sync surface scope, integrity stance, and open design decisions were not subject to Decisions-4-through-9-style records here.
+
+**Future ownership path:** A future intent scoped specifically to upstream-artifact reconciliation should re-derive these decision rows on its own branch, treating the implementation as legacy and re-justifying the choices (or revising them).
+
+**Cross-references:** See DISCOVERY.md § "Annexed Subsystem: Upstream-Reconciliation Pre-Tick Gate" for the full provenance, scope-orthogonality justification, and implementation pointers.

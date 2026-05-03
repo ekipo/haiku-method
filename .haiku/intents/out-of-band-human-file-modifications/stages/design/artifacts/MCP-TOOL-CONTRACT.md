@@ -445,3 +445,27 @@ This tool's write semantics (§6) and the baseline-update behavior specified in 
 | `"human-via-mcp"` author class | §6.1 — the three author classes defined in full |
 
 Any discrepancy between this document and ARCHITECTURE.md should be resolved by treating ARCHITECTURE.md as authoritative (it is the structural reference produced by unit-01-architecture-spec) and updating this contract to align. The development stage should flag any discrepancy it discovers rather than silently implementing the one that appears easier.
+
+---
+
+## Annex: Co-Located MCP Tool Not Specified by This Contract
+
+`haiku_human_write` is the only MCP tool authored by this intent's design and the only tool whose contract this document specifies in full. A second MCP tool — **`haiku_reconciliation_acknowledge`** — also exists on this intent's branch, sourced from repo PR #283 ("feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30, entered this intent's branch via the 2026-05-01 main-merge). It is **not** specified here.
+
+**Tool purpose (informational only — see implementation for the binding contract):** `haiku_reconciliation_acknowledge` is the proceed-without-fix escape hatch for the upstream-reconciliation pre-tick gate. When the gate detects cross-document divergence between agent-authored upstream artifacts (tool-name divergence, http-status divergence, field-name divergence) and the divergence is intentional (the artifacts describe different surfaces that genuinely need different names), the agent calls this tool to record the acknowledgment and unblock subsequent ticks for the affected stage.
+
+**Why this contract does NOT specify it:**
+
+1. The tool's input shape, output shape, error model, idempotency, and persistence semantics are not derivable from this intent's design decisions or product acceptance criteria.
+2. Specifying it here would imply this intent's design owns it, which would falsify the cross-stage trace the verifier hat checks.
+3. The tool is referenced only by the operations runbook (`stages/operations/units/unit-01-operational-runbook.md` scenarios 5 and 11) and tests authored under PR #283.
+
+**Implementation references (not contracts):**
+
+- Source: `packages/haiku/src/orchestrator/workflow/upstream-reconciliation.ts` and the wire-up in `packages/haiku/src/orchestrator/workflow/run-tick.ts` (search for `haiku_reconciliation_acknowledge`).
+- Tests: `packages/haiku/test/upstream-reconciliation.test.mjs`.
+- Operations references: `stages/operations/units/unit-01-operational-runbook.md` scenarios 5 and 11; `stages/operations/units/unit-04-migration-safety-tests.md` scenario G.
+
+A future intent that takes ownership of upstream-reconciliation should author a sibling MCP-TOOL-CONTRACT for `haiku_reconciliation_acknowledge` with the same rigor this contract applies to `haiku_human_write` (input/output shape, validation, error model, idempotency, audit, security, baseline-update interaction, etc.).
+
+**Cross-references:** See `knowledge/DISCOVERY.md` § "Annexed Subsystem", `stages/design/artifacts/ARCHITECTURE.md` § "Annex: Co-Located Upstream-Reconciliation Gate".

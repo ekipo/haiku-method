@@ -133,12 +133,27 @@ security stage's elaborate phase for a follow-up wave.
   abuse-prevention layer that protects against credential-stuffing /
   brute-force / sustained-abuse patterns by an attacker who already has
   a valid token. Lower priority than the direct-exploit close.
-- **Severity if unfixed**: Medium (token leak + sustained abuse becomes
-  amplified). Today: Low (token TTL plus EPHEMERAL_SECRET process
-  rotation cap the abuse window).
+- **Severity if unfixed**: Medium-High (token leak + sustained abuse
+  becomes amplified; additionally, slowloris on `@fastify/multipart` is
+  **completely unmitigated** — fastify default `connectionTimeout = 0`
+  is not overridden in `packages/haiku/src/http.ts:107-136`). Today:
+  Medium (slowloris is exploitable from any tunnel-mode reachability;
+  token TTL + EPHEMERAL_SECRET process rotation cap CSRF / credential
+  abuse but do not constrain a single attacker holding open
+  connections).
 - **Recommended target iteration**: Next security wave; co-locate with
   `unit-05-rate-limiting` (referenced in unit-03 spec's "Out of scope"
   section).
+- **Slowloris escalation note (RT-FB-12)**: THREAT-MODEL.md §6.1
+  originally claimed a fictional 60-second `connectionTimeout`
+  mitigation. That claim has been retracted (see THREAT-MODEL.md §6.1
+  and §3.5 D-3 row). Slowloris on the upload routes is now tracked as
+  an **unmitigated** risk pending the R-3 rate-limit + connection-timeout
+  work. The fix unit MUST set `connectionTimeout` (suggested:
+  30 000 ms) and `requestTimeout` (suggested: 60 000 ms) on the
+  `Fastify({ ... })` call in `packages/haiku/src/http.ts:107-136`, and
+  add a regression test that asserts a stalled multipart upload is
+  killed within the timeout.
 - **`stage_revisit` FB ID**: **FB-08** (`feedback/08-residual-r-03-rate-limiting.md`)
 
 ### R-4. Race-free `O_NOFOLLOW`-everywhere (V-04 fix #1 — full migration)

@@ -233,7 +233,7 @@ where applicable.
 |---|---|---|---|---|
 | D-1 | Misconfigured `HAIKU_UPLOAD_MAX_BYTES` accepts multi-GB payloads; fastify-multipart buffers + sync SHA in drift gate stalls workflow tick | `explicit-spa-upload.feature` | V-07 | Unit-01 `MAX_UPLOAD_BYTES_HARD_CAP = 50 MiB` (commit `3867608a6`). Effective cap clamps via `Math.min`; `haiku.upload.cap_clamped` telemetry on misconfig. |
 | D-2 | Unbounded `agent_rationale` written to `DA-NN.json`; assessments-list endpoint reads them all into RAM | `manual-change-assessment.feature` | V-09 | Unit-01 schema-validation rejects `>10 KB` rationale / `>1 KB` excerpt; list-endpoint truncates to 256 chars + `…` (commit `0f87ed407`). |
-| D-3 | `@fastify/multipart` decompression bomb / parser-confusion / slowloris on upload routes | `explicit-spa-upload.feature` | (dependency-class) | See §4.1 dependency enumeration. Mitigation: `MAX_UPLOAD_BYTES_HARD_CAP` caps payload size; default body parser timeout. Rate limiting deferred. |
+| D-3 | `@fastify/multipart` decompression bomb / parser-confusion / slowloris on upload routes | `explicit-spa-upload.feature` | (dependency-class) | See §6.1 dependency enumeration. Partial mitigation: `MAX_UPLOAD_BYTES_HARD_CAP = 50 MiB` caps payload size; **no `connectionTimeout` / `requestTimeout` / `keepAliveTimeout` is configured today** (fastify default `connectionTimeout = 0`, no override in `http.ts:107-136`). Slowloris residual risk is **unmitigated** until rate-limiting + connection-timeout work lands (tracked under R-3 / FB-08, escalated from "deferred enhancement" to "tracked unfixed risk"). |
 | D-4 | `haiku_classify_drift` rapid-fire calls bloat assessment store and starve the drift gate | `manual-change-assessment.feature` | (rate-limit gap) | **Deferred** — per-session cap / per-IP rate-limit recorded as residual risk. |
 
 ### 3.6. Elevation of privilege — boundary crossings
@@ -334,12 +334,20 @@ as drift requiring reviewer classification (`haiku_classify_drift`). Bash
 bypass becomes visible exactly because it doesn't go through the MCP
 tool that would have stamped `human-via-mcp` on the action log.
 
-**Residual risk**: if the drift-detection gate is disabled (via
-`HAIKU_DRIFT_DETECTION=0` or operator kill-switch), the compensating
-control evaporates and the agent's Bash bypass becomes silent. ASSESSMENTS
-records this as a deferred risk: operator-alert if the kill-switch is
-enabled, recommended target iteration to fold into the `silent-filesystem-
-drop-detection` follow-up wave.
+**Residual risk**: if the drift-detection gate is disabled (via the
+`settings.drift_detection === false` kill-switch checked at
+`packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts:5`),
+the compensating control evaporates and the agent's Bash bypass becomes
+silent. The disable event is observable on the existing telemetry signal
+`haiku.drift.gate.kill_switch_hit` emitted at
+`drift-detection-gate.ts:403`. ASSESSMENTS records this as a deferred
+risk: operator-alert wired to that telemetry signal whenever the
+kill-switch fires, recommended target iteration to fold into the
+`silent-filesystem-drop-detection` follow-up wave. **(There is no
+`HAIKU_DRIFT_DETECTION` environment variable — `grep -r 'HAIKU_DRIFT_DETECTION' packages/`
+returns zero matches; an alerting implementation that watches for an
+env-var override would never fire. The settings-field path above is the
+only authentic disable surface.)**
 
 **`haiku_classify_drift` as its own MCP-tool entry point**: the tool
 itself is the trust boundary between "drift observed" and "drift accepted
@@ -366,9 +374,20 @@ write), so a hostile agent's blast radius is capped at the schema edge.
   middleware ahead of the multipart parser; the raw byte cap
   (`MAX_UPLOAD_BYTES_HARD_CAP = 50 MiB`) bounds pre-decompression size.
 - **Slowloris**: trickle a multipart body slowly to hold a connection.
-  Mitigation: fastify default `connectionTimeout` (60 s) + Node HTTP
-  parser idle timeout. Residual risk: a determined attacker can hold N
-  connections within the timeout. Rate-limiting (deferred) closes this.
+  **Mitigation in place: NONE.** Fastify's default `connectionTimeout`
+  is `0` (no timeout) per `fastify` docs `Reference/Server.md:142`, and
+  `buildApp()` at `packages/haiku/src/http.ts:107-136` does not override
+  it (`grep -rn 'connectionTimeout\|requestTimeout\|keepAliveTimeout' packages/haiku/src/`
+  returns zero matches). The only payload-bounding control today is
+  `MAX_UPLOAD_BYTES_HARD_CAP = 50 MiB` on the upload routes, which caps
+  total bytes but does NOT bound connection lifetime — a textbook
+  slowloris attacker can hold connections indefinitely. Residual risk:
+  **unmitigated** — escalated from "deferred enhancement" to "tracked
+  unfixed risk" in ASSESSMENTS.md §4 R-3. The fix unit MUST set
+  `connectionTimeout` (suggested: 30 000 ms) and `requestTimeout`
+  (suggested: 60 000 ms) on the `Fastify({ ... })` call in
+  `packages/haiku/src/http.ts:107-136`, paired with a regression test
+  that asserts a stalled multipart upload is killed within the timeout.
 - **Recommendation**: pin minor version, watch GHSA advisories,
   re-audit on every `@fastify/multipart` major bump.
 

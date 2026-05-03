@@ -1301,24 +1301,62 @@ export function writeOnIntentMain(
 		return { ok: false, message: `${mainBranch} does not exist` }
 
 	try {
-		withTempWorktree(mainBranch, (tmpPath) => {
-			const fullPath = join(tmpPath, relPath)
+		// Worktree strategy mirrors mergeStageBranchIntoMain:
+		//   - Primary already on intent-main → write in-place. A temp-worktree
+		//     attempt would fail with "branch already used by worktree."
+		//     Use a path-restricted commit (`git commit -- <relPath>`) so only
+		//     the targeted file is committed, leaving any other dirty state
+		//     on the primary worktree untouched.
+		//   - Primary anywhere else → use a temp worktree (current behavior)
+		//     so the primary's checkout is undisturbed.
+		const current = getCurrentBranch()
+		if (current === mainBranch) {
+			const primaryRoot = primaryRepoRoot()
+			const fullPath = join(primaryRoot, relPath)
 			const dir = fullPath.replace(/\/[^/]+$/, "")
 			mkdirSync(dir, { recursive: true })
-			// Cannot use writeFileSync from node:fs here directly in this
-			// file's current imports — but existsSync/mkdirSync from node:fs
-			// are already imported. Add writeFileSync via require workaround
-			// would be ugly. The file already imports from node:fs at top, so
-			// import writeFileSync there.
 			fsWriteFileSync(fullPath, content)
-			// Stage + commit. --allow-empty handles the no-op write case
-			// gracefully; we'd rather have a no-op commit than bail.
-			run(["git", "-C", tmpPath, "add", relPath])
-			const status = tryRun(["git", "-C", tmpPath, "status", "--porcelain"])
-			if (status.trim()) {
-				run(["git", "-C", tmpPath, "commit", "-m", commitMessage])
+			// Stage just this file (in case there's other unrelated dirty state).
+			run(["git", "-C", primaryRoot, "add", relPath])
+			// Path-restricted commit: only this file's diff is committed,
+			// even if the index has other staged changes from concurrent work.
+			const diff = tryRun([
+				"git",
+				"-C",
+				primaryRoot,
+				"diff",
+				"--cached",
+				"--name-only",
+				"--",
+				relPath,
+			])
+			if (diff.trim()) {
+				run([
+					"git",
+					"-C",
+					primaryRoot,
+					"commit",
+					"-m",
+					commitMessage,
+					"--",
+					relPath,
+				])
 			}
-		})
+		} else {
+			withTempWorktree(mainBranch, (tmpPath) => {
+				const fullPath = join(tmpPath, relPath)
+				const dir = fullPath.replace(/\/[^/]+$/, "")
+				mkdirSync(dir, { recursive: true })
+				fsWriteFileSync(fullPath, content)
+				// Stage + commit. --allow-empty handles the no-op write case
+				// gracefully; we'd rather have a no-op commit than bail.
+				run(["git", "-C", tmpPath, "add", relPath])
+				const status = tryRun(["git", "-C", tmpPath, "status", "--porcelain"])
+				if (status.trim()) {
+					run(["git", "-C", tmpPath, "commit", "-m", commitMessage])
+				}
+			})
+		}
 		return { ok: true, message: `wrote ${relPath} on ${mainBranch}` }
 	} catch (err) {
 		return {

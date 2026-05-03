@@ -509,21 +509,24 @@ const emit: WorkflowHandler = (ctx) => {
 
 	const rawReviewType = resolveStageReview(studio, currentStage)
 	const intentMode = (intent.mode as string) || "continuous"
-	// `autopilot` is one of the three stored intent modes (discrete |
-	// continuous | autopilot). The canonical home is `intent.mode`.
+	// Mode taxonomy: discrete | discrete-hybrid | continuous | autopilot.
+	// The canonical home for autopilot is `intent.mode === "autopilot"`.
 	//
-	// Backward-compat: older intent.md files carry a separate `autopilot:
-	// true` boolean alongside `mode: continuous` (or no mode at all).
-	// Honor the legacy boolean as a fallback so existing intents keep
-	// running in autopilot semantics until they're migrated. Without this
-	// fallback, a long-lived intent with the boolean+continuous shape
-	// pops local-review gates (the ask-promotion path silently turns off)
-	// even though the user authored the intent expecting autopilot.
+	// Backward-compat (per a61e6f69e): older intent.md files carry a
+	// separate `autopilot: true` boolean alongside `mode: continuous`
+	// (or no mode at all). Honor the legacy boolean as a fallback so
+	// existing intents keep running in autopilot semantics until they're
+	// migrated. Without this fallback, a long-lived intent with the
+	// boolean+continuous shape pops local-review gates (the ask-promotion
+	// path silently turns off) even though the user authored the intent
+	// expecting autopilot. See test/autopilot-mode.test.mjs's
+	// "mode:continuous + autopilot:true boolean DOES auto-advance"
+	// regression case.
 	//
-	// In autopilot mode the gate
-	// handler promotes `ask` gates to `auto`, letting the workflow
-	// advance without human intervention. External gates and `await`
-	// gates still block — they require real external signals.
+	// In autopilot mode the gate handler promotes `ask` gates to `auto`,
+	// letting the workflow advance without human intervention. External
+	// gates and `await` gates still block — they require real external
+	// signals.
 	//
 	// `discrete-hybrid` is a DERIVED/VIRTUAL state (not stored). It
 	// represents continuous mode where some stages need discrete-shaped

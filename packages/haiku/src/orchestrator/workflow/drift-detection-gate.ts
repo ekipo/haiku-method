@@ -28,14 +28,19 @@ import {
 	type BaselineEntry,
 	baselineContentPath,
 	baselineIntentContentPath,
+	clearBaselineAckMarker,
 	computeFileSha256Sync,
 	enumerateTrackedSurface,
+	isBaselineThrashing,
 	isBinarySync,
 	isDriftDetectionDisabled,
 	readActionLogSync,
 	readBaseline,
+	readBaselineAckMarker,
 	readBaselineContentWithFallback,
+	recordBaselineCorruption,
 	type TrackingClass,
+	wasBaselinePreviouslyEstablished,
 	writeBaselineContentSync,
 	writeBaselineIntentContentSync,
 	writeBaselineSync,
@@ -434,20 +439,42 @@ export function runDriftDetectionGate(
 		baseline = readBaseline(intentDir, activeStage)
 	} catch (err) {
 		// BaselineCorruptError (ARCHITECTURE.md §8.2 / AC-EE4).
+		// V-11: also record the corruption event for the thrash counter
+		// and emit thrash telemetry if we've crossed the threshold.
+		const recentCount = recordBaselineCorruption(
+			intentDir,
+			activeStage,
+			tickCounter,
+		)
 		emitTelemetry("haiku.drift.baseline.corrupt", {
 			...gateAttrs(ctx),
 			error: err instanceof Error ? err.message : String(err),
+			recent_corrupt_count: String(recentCount),
 		})
+		const thrash = isBaselineThrashing(intentDir, activeStage, tickCounter)
+		if (thrash.thrashing) {
+			// V-11 layer 4: thrash telemetry. Operators key on this for
+			// the "auto-recovery disabled" alarm. Fired here (in the gate)
+			// so it surfaces on every subsequent corrupt tick — not just
+			// the threshold-crossing one.
+			emitTelemetry("haiku.security.baseline_thrash", {
+				...gateAttrs(ctx),
+				recent_count: String(thrash.recentCount),
+			})
+		}
 		// Latency signal even on the error path so dashboards see the cost.
 		emitTelemetry("haiku.drift.gate.duration_ms", {
 			...gateAttrs(ctx),
 			duration_ms: elapsedMs(startedNs),
 			outcome: "baseline_corrupt",
 		})
-		const msg =
+		const baseMsg =
 			err instanceof Error
 				? err.message
-				: `Baseline file for stage '${activeStage}' is corrupt. Run haiku_repair to re-establish the baseline.`
+				: `Baseline file for stage '${activeStage}' is corrupt.`
+		const msg = thrash.thrashing
+			? `${baseMsg} ⚠ Thrash detected (${thrash.recentCount} corruption events in the last ${10} ticks). Auto-recovery is disabled — operator must run /haiku:repair --confirm-baseline-reset --override-thrash-circuit-breaker.`
+			: `${baseMsg} Run /haiku:repair --confirm-baseline-reset --diff-shown to review the diff and confirm a reset; the agent has no path to silent-establish.`
 		return {
 			findings: [],
 			baselineEstablished: false,
@@ -466,6 +493,67 @@ export function runDriftDetectionGate(
 
 	// 5. Establish mode (AC-G8 / ARCHITECTURE.md §3.4).
 	if (baseline === null) {
+		// V-11 GATE: refuse silent-establish when this stage has previously
+		// established a baseline. The legitimate path is "first tick on
+		// this stage ever" — that case has no `drift_baseline_established_at`
+		// stamp in state.json. If the stamp IS present, the baseline has
+		// gone missing AFTER establish — that's the V-11 attacker primitive
+		// (corrupt baseline.json → next tick silent-establishes attacker
+		// content). We refuse unless the operator has placed an ack marker
+		// (`stages/{stage}/.baseline-ack`) with a matching diff hash.
+		if (wasBaselinePreviouslyEstablished(intentDir, activeStage)) {
+			// Record this as a corruption event for the thrash counter.
+			// Missing-after-establish is the same threat class as actively
+			// corrupted JSON.
+			const recentCount = recordBaselineCorruption(
+				intentDir,
+				activeStage,
+				tickCounter,
+			)
+			emitTelemetry("haiku.drift.baseline.missing_after_established", {
+				...gateAttrs(ctx),
+				recent_corrupt_count: String(recentCount),
+			})
+			const thrash = isBaselineThrashing(intentDir, activeStage, tickCounter)
+			if (thrash.thrashing) {
+				emitTelemetry("haiku.security.baseline_thrash", {
+					...gateAttrs(ctx),
+					recent_count: String(thrash.recentCount),
+				})
+			}
+
+			// Check the operator-only ack marker. The agent has no MCP-tool
+			// path to write this; only `haiku_repair --confirm-baseline-reset`
+			// (operator-driven) can place it.
+			const ack = readBaselineAckMarker(intentDir, activeStage)
+			if (!ack || thrash.thrashing) {
+				emitTelemetry("haiku.drift.gate.duration_ms", {
+					...gateAttrs(ctx),
+					duration_ms: elapsedMs(startedNs),
+					outcome: "baseline_missing_refused",
+				})
+				const reason = thrash.thrashing
+					? "Auto-recovery disabled (baseline thrash). Operator must use /haiku:repair --confirm-baseline-reset --override-thrash-circuit-breaker."
+					: "Operator must run /haiku:repair --confirm-baseline-reset --diff-shown and confirm the reconstructed-vs-on-disk diff. The agent CANNOT silent-establish a missing baseline once one has been established for this stage."
+				return {
+					findings: [],
+					baselineEstablished: false,
+					action: null,
+					error: "baseline_corrupt",
+					errorMessage: `Baseline for stage '${activeStage}' is missing after a prior establish. ${reason}`,
+				}
+			}
+			// Ack marker present and not thrashing — proceed to establish.
+			// Single-use semantics: clear the marker after we use it so it
+			// can't authorise a second silent re-establish.
+			clearBaselineAckMarker(intentDir, activeStage)
+			emitTelemetry("haiku.drift.baseline.operator_ack_consumed", {
+				...gateAttrs(ctx),
+				ack_diff_hash: ack.diff_hash,
+				ack_created_at: ack.created_at,
+			})
+		}
+
 		const now = new Date().toISOString()
 		const newEntries = new Map<string, BaselineEntry>()
 

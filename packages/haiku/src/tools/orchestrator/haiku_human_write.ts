@@ -115,6 +115,24 @@ const DENY_LIST: Array<{ pattern: RegExp; rule: string; message: string }> = [
 			"drift-markers.json is an internal workflow-engine artifact. Do not write directly.",
 	},
 	{
+		// V-11 — the operator-only baseline-corrupt acknowledgement
+		// marker. Only `/haiku:repair --confirm-baseline-reset ...`
+		// (operator-driven) may write this; the agent has no path here.
+		pattern: /(?:^|\/)\.baseline-ack$/,
+		rule: "stages/{stage}/.baseline-ack",
+		message:
+			".baseline-ack is the operator-only baseline-reset acknowledgement marker. Only /haiku:repair --confirm-baseline-reset can write it; the agent has no path. This is the V-11 defence against silent baseline laundering.",
+	},
+	{
+		// V-11 — the thrash counter is workflow-engine-managed. Letting
+		// the agent reset it would let an attacker zero out the thrash
+		// circuit breaker right before each corruption attempt.
+		pattern: /(?:^|\/)baseline-thrash\.json$/,
+		rule: "stages/{stage}/baseline-thrash.json",
+		message:
+			"baseline-thrash.json is the V-11 baseline-corruption circuit breaker. Managed exclusively by the drift-detection gate.",
+	},
+	{
 		pattern: /(?:^|\/)write-audit\.jsonl$/,
 		rule: "write-audit.jsonl",
 		message:

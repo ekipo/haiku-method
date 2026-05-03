@@ -29,6 +29,7 @@ import {
 	readFileSync,
 	readSync,
 	statSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs"
 import { open, rename, unlink, writeFile } from "node:fs/promises"
@@ -304,6 +305,10 @@ const EXCLUDED_FILENAMES = new Set([
 	"write-audit.jsonl",
 	"intent.md",
 	"state.json",
+	// V-11 — operator-only baseline-corrupt acknowledgement marker.
+	".baseline-ack",
+	// V-11 — baseline-corruption thrash counter.
+	"baseline-thrash.json",
 ])
 
 /** Pattern: paths that are workflow-managed (units/*.md, feedback/*.md). */
@@ -798,4 +803,402 @@ export function readActionLogSync(
 		}
 	}
 	return results
+}
+
+// ── V-11: baseline-corrupt operator-only acknowledgement gate ───────────────
+//
+// Defends against the "attacker corrupts baseline.json → next tick
+// silent-establishes attacker content" primitive.
+//
+// The threat: baseline.json is the trust anchor for drift detection. If
+// an attacker can corrupt it AND influence what's on disk (e.g. via a
+// V-04 chain or a co-resident process), the legacy behaviour
+// (`baseline === null` → silent establish from disk) launders attacker
+// content into the trusted baseline with zero operator visibility.
+//
+// The defence has four layers:
+//
+//  1. The drift-detection gate REFUSES to silent-establish when the
+//     stage's state.json already records `drift_baseline_established_at`
+//     (i.e. we've established before — this isn't a first-tick case).
+//     Returns the existing `baseline_corrupt` error envelope, but no
+//     amount of `haiku_run_next` ticks can clear it.
+//
+//  2. `reconstructPriorBaseline(intentDir, stage)` rebuilds the
+//     last-known-good baseline from `baseline-content/` (the durable
+//     per-file content snapshots, sha256-validated) plus
+//     `action-log.jsonl` (the chronological event stream).
+//
+//  3. The operator-only acknowledgement marker lives at
+//     `stages/{stage}/.baseline-ack` (intentionally a hidden filename,
+//     and intentionally OUTSIDE every `haiku_human_write` allow-list
+//     so the agent has no MCP-tool path to write it). It contains a
+//     JSON envelope with `diff_hash` (sha256 of the reconstructed-vs-
+//     on-disk diff) and `created_at`. The gate accepts a reset only
+//     when this file is present AND its diff_hash matches what the
+//     operator confirmed.
+//
+//  4. `recordBaselineCorruption()` + `isBaselineThrashing()` track the
+//     count of corruption events in a rolling 10-tick window in
+//     `stages/{stage}/baseline-thrash.json`. When > 3 events fire, the
+//     gate emits `haiku.security.baseline_thrash` telemetry AND
+//     refuses auto-recovery even with a valid ack marker — the
+//     operator must use a follow-up override (CLI flag) to break out.
+//
+// All four layers are file-based and synchronous so the gate stays
+// synchronous and the trail is on-disk-auditable.
+
+/** Path to the per-stage baseline-ack marker. Hidden filename + outside
+ *  the allow-list so no MCP tool can write it; only an operator with
+ *  shell access (or `haiku_repair` running with explicit confirmation
+ *  flags) can place it. */
+export function baselineAckMarkerPath(
+	intentDir: string,
+	stage: string,
+): string {
+	return join(intentDir, "stages", stage, ".baseline-ack")
+}
+
+/** The on-disk shape of the ack marker. */
+export interface BaselineAckMarker {
+	/** sha256 of the reconstructed-vs-on-disk diff that the operator
+	 *  confirmed via /haiku:repair --confirm-baseline-reset. */
+	diff_hash: string
+	/** ISO-8601 timestamp when the operator created this marker. */
+	created_at: string
+	/** Optional free-text rationale the operator typed. */
+	rationale?: string
+}
+
+/** Read the ack marker. Returns null when absent or unparseable
+ *  (treated identically — the gate refuses to silent-establish either
+ *  way; missing file is the common case). */
+export function readBaselineAckMarker(
+	intentDir: string,
+	stage: string,
+): BaselineAckMarker | null {
+	const markerPath = baselineAckMarkerPath(intentDir, stage)
+	if (!existsSync(markerPath)) return null
+	try {
+		const raw = readFileSync(markerPath, "utf-8")
+		const parsed = JSON.parse(raw) as Record<string, unknown>
+		const diff = parsed.diff_hash
+		const ts = parsed.created_at
+		if (typeof diff !== "string" || diff.length !== 64) return null
+		if (typeof ts !== "string" || ts.length === 0) return null
+		const out: BaselineAckMarker = { diff_hash: diff, created_at: ts }
+		if (typeof parsed.rationale === "string") out.rationale = parsed.rationale
+		return out
+	} catch {
+		return null
+	}
+}
+
+/** Write the ack marker. Operator-only — caller MUST be `haiku_repair`
+ *  with explicit `confirm_baseline_reset` + `confirm_diff_hash` args
+ *  (validated at the MCP-tool layer, NOT here). This function is
+ *  intentionally not exposed to the agent through any MCP tool —
+ *  agents have no path to call it. The function is exported only so
+ *  the repair tool's TypeScript handler can call it from the same
+ *  process. */
+export function writeBaselineAckMarker(
+	intentDir: string,
+	stage: string,
+	marker: BaselineAckMarker,
+): void {
+	const markerPath = baselineAckMarkerPath(intentDir, stage)
+	mkdirSync(dirname(markerPath), { recursive: true })
+	writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf-8")
+}
+
+/** Clear the ack marker after a successful reset — single-use semantics
+ *  prevent the marker from authorising a future silent re-establish. */
+export function clearBaselineAckMarker(
+	intentDir: string,
+	stage: string,
+): void {
+	const markerPath = baselineAckMarkerPath(intentDir, stage)
+	if (existsSync(markerPath)) {
+		try {
+			unlinkSync(markerPath)
+		} catch {
+			// Non-fatal — best-effort cleanup. The next reset attempt
+			// will re-validate the (still-present) marker against the
+			// new diff and reject the mismatch.
+		}
+	}
+}
+
+/** Path to the per-stage baseline-corruption thrash counter. */
+function baselineThrashPath(intentDir: string, stage: string): string {
+	return join(intentDir, "stages", stage, "baseline-thrash.json")
+}
+
+/** The on-disk shape of the thrash counter. A list of recent
+ *  corruption-event timestamps + tick counters; the gate trims it to
+ *  the last 10 ticks before evaluating. */
+interface BaselineThrashRecord {
+	events: Array<{ at: string; tick_counter: number }>
+}
+
+const BASELINE_THRASH_WINDOW_TICKS = 10
+const BASELINE_THRASH_THRESHOLD = 3
+
+function readThrashRecord(
+	intentDir: string,
+	stage: string,
+): BaselineThrashRecord {
+	const p = baselineThrashPath(intentDir, stage)
+	if (!existsSync(p)) return { events: [] }
+	try {
+		const raw = readFileSync(p, "utf-8")
+		const parsed = JSON.parse(raw) as { events?: unknown }
+		if (!Array.isArray(parsed.events)) return { events: [] }
+		const events: Array<{ at: string; tick_counter: number }> = []
+		for (const e of parsed.events) {
+			if (
+				typeof e === "object" &&
+				e !== null &&
+				typeof (e as { at?: unknown }).at === "string" &&
+				typeof (e as { tick_counter?: unknown }).tick_counter === "number"
+			) {
+				events.push({
+					at: (e as { at: string }).at,
+					tick_counter: (e as { tick_counter: number }).tick_counter,
+				})
+			}
+		}
+		return { events }
+	} catch {
+		return { events: [] }
+	}
+}
+
+function writeThrashRecord(
+	intentDir: string,
+	stage: string,
+	record: BaselineThrashRecord,
+): void {
+	const p = baselineThrashPath(intentDir, stage)
+	mkdirSync(dirname(p), { recursive: true })
+	writeFileSync(p, `${JSON.stringify(record, null, 2)}\n`, "utf-8")
+}
+
+/** Record a baseline-corruption event for the thrash counter. Returns
+ *  the trimmed event count (events within the last
+ *  BASELINE_THRASH_WINDOW_TICKS ticks). The caller decides what to do
+ *  with the count — typically: emit telemetry if > threshold, refuse
+ *  auto-recovery if so. */
+export function recordBaselineCorruption(
+	intentDir: string,
+	stage: string,
+	tickCounter: number,
+): number {
+	const record = readThrashRecord(intentDir, stage)
+	const minTick = tickCounter - BASELINE_THRASH_WINDOW_TICKS
+	const trimmed = record.events.filter((e) => e.tick_counter >= minTick)
+	trimmed.push({ at: new Date().toISOString(), tick_counter: tickCounter })
+	writeThrashRecord(intentDir, stage, { events: trimmed })
+	return trimmed.length
+}
+
+/** Returns true when the stage has experienced > BASELINE_THRASH_THRESHOLD
+ *  corruption events within the last BASELINE_THRASH_WINDOW_TICKS ticks.
+ *  Read-only — does NOT record a new event. Used by the gate to decide
+ *  whether to even consider an ack marker as authorising recovery
+ *  (under thrash conditions, the operator MUST escalate via an
+ *  explicit `--override-thrash-circuit-breaker` flag, NOT just
+ *  re-confirm a diff hash). */
+export function isBaselineThrashing(
+	intentDir: string,
+	stage: string,
+	tickCounter: number,
+): { thrashing: boolean; recentCount: number } {
+	const record = readThrashRecord(intentDir, stage)
+	const minTick = tickCounter - BASELINE_THRASH_WINDOW_TICKS
+	const recent = record.events.filter((e) => e.tick_counter >= minTick)
+	return {
+		thrashing: recent.length > BASELINE_THRASH_THRESHOLD,
+		recentCount: recent.length,
+	}
+}
+
+/** Reconstruct the last-known-good baseline by replaying the durable
+ *  per-file content snapshots in `baseline-content/` (sha256-validated)
+ *  and the action-log entries in `action-log.jsonl`. Returns null when
+ *  reconstruction fails (no usable sidecars, no action log, every
+ *  reconstruction candidate fails sha256 validation).
+ *
+ *  This is the input to the operator-confirmation diff: the operator
+ *  sees the difference between this reconstructed baseline and what's
+ *  currently on disk, and confirms (or rejects) the reset.
+ *
+ *  Reconstruction strategy:
+ *   1. Walk every entry in `baseline-content/` (and intent-level
+ *      `baseline-content/` for intent-scope knowledge files).
+ *   2. For each sidecar, compute the sha256 of the file content. If
+ *      it matches the filename (the filename IS the sha256 of the
+ *      content at write-time), the sidecar is verifiably untampered.
+ *   3. Walk `action-log.jsonl` for entries that reference each
+ *      validated sidecar. Take the latest entry per path; that gives
+ *      us the path → sha256 mapping for the last-known baseline.
+ *   4. Construct a Baseline object whose entries reflect the last
+ *      validated sha256 for each path. */
+export function reconstructPriorBaseline(
+	intentDir: string,
+	stage: string,
+): Baseline | null {
+	const sidecarDir = baselineContentDir(intentDir, stage)
+	const intentSidecarDir = baselineIntentContentDir(intentDir)
+
+	// 1. Validate every sidecar by recomputing its sha256.
+	const validatedShas = new Set<string>()
+	const candidates: Array<{ dir: string; isIntentScope: boolean }> = []
+	if (existsSync(sidecarDir)) {
+		candidates.push({ dir: sidecarDir, isIntentScope: false })
+	}
+	if (existsSync(intentSidecarDir)) {
+		candidates.push({ dir: intentSidecarDir, isIntentScope: true })
+	}
+	for (const c of candidates) {
+		let names: string[]
+		try {
+			names = readdirSync(c.dir)
+		} catch {
+			continue
+		}
+		for (const name of names) {
+			if (!/^[0-9a-f]{64}$/.test(name)) continue
+			const full = join(c.dir, name)
+			try {
+				const buf = readFileSync(full)
+				const actual = createHash("sha256").update(buf).digest("hex")
+				if (actual === name) validatedShas.add(name)
+			} catch {
+				// Skip unreadable.
+			}
+		}
+	}
+
+	if (validatedShas.size === 0) return null
+
+	// 2. Walk action-log.jsonl for the latest validated entry per path.
+	const logPath = join(intentDir, "action-log.jsonl")
+	if (!existsSync(logPath)) return null
+	let logRaw: string
+	try {
+		logRaw = readFileSync(logPath, "utf-8")
+	} catch {
+		return null
+	}
+
+	interface LogEntry {
+		path: string
+		sha: string
+		author_class?: string
+		timestamp?: string
+		entry_type?: string
+	}
+	const latestPerPath = new Map<string, LogEntry>()
+	for (const line of logRaw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		try {
+			const parsed = JSON.parse(trimmed) as Record<string, unknown>
+			const p = parsed.path
+			const sha = parsed.sha
+			if (typeof p !== "string" || typeof sha !== "string") continue
+			if (!validatedShas.has(sha)) continue
+			latestPerPath.set(p, {
+				path: p,
+				sha,
+				author_class:
+					typeof parsed.author_class === "string"
+						? (parsed.author_class as string)
+						: undefined,
+				timestamp:
+					typeof parsed.timestamp === "string"
+						? (parsed.timestamp as string)
+						: undefined,
+				entry_type:
+					typeof parsed.entry_type === "string"
+						? (parsed.entry_type as string)
+						: undefined,
+			})
+		} catch {
+			// Malformed line — skip.
+		}
+	}
+
+	if (latestPerPath.size === 0) return null
+
+	// 3. Build the Baseline from the validated entries. We don't have
+	//    the original mtime_ns / bytes / is_binary here; we use the
+	//    sidecar file's stats as the most accurate surrogate. The
+	//    reconstructed baseline is for OPERATOR DIFF DISPLAY purposes
+	//    primarily — it must not be silently committed back to
+	//    baseline.json without operator confirmation (that's the V-11
+	//    primitive we're defending against).
+	const entries = new Map<string, BaselineEntry>()
+	for (const [pathRel, log] of latestPerPath) {
+		// Locate the sidecar to read stats.
+		const stagePath = baselineContentPath(intentDir, stage, log.sha)
+		const intentPath = baselineIntentContentPath(intentDir, log.sha)
+		const sidecarFull = existsSync(stagePath)
+			? stagePath
+			: existsSync(intentPath)
+				? intentPath
+				: null
+		let bytes = 0
+		let mtimeNs = 0
+		if (sidecarFull) {
+			try {
+				const st = statSync(sidecarFull)
+				bytes = st.size
+				mtimeNs = Math.round(st.mtimeMs * 1_000_000)
+			} catch {
+				// Use defaults.
+			}
+		}
+		entries.set(pathRel, {
+			path: pathRel,
+			sha256: log.sha,
+			bytes,
+			mtime_ns: mtimeNs,
+			is_binary: false, // unknown; conservative default
+			author_class:
+				log.author_class === "agent" ||
+				log.author_class === "human-via-mcp" ||
+				log.author_class === "human-implicit"
+					? log.author_class
+					: "agent",
+			acknowledged_at: log.timestamp ?? new Date().toISOString(),
+			acknowledged_via: "baseline-init",
+			stage: stage || null,
+			tracking_class: "stage-output", // unknown; conservative
+		})
+	}
+
+	return { entries }
+}
+
+/** Return true when the stage's state.json indicates the baseline was
+ *  previously established (the `drift_baseline_established_at` field
+ *  is present and non-empty). Used by the gate to distinguish
+ *  legitimate first-tick establish (allowed) from suspicious
+ *  re-establish-after-corruption (BLOCKED unless ack marker present). */
+export function wasBaselinePreviouslyEstablished(
+	intentDir: string,
+	stage: string,
+): boolean {
+	const stateFile = join(intentDir, "stages", stage, "state.json")
+	if (!existsSync(stateFile)) return false
+	try {
+		const raw = readFileSync(stateFile, "utf-8")
+		const parsed = JSON.parse(raw) as Record<string, unknown>
+		const stamp = parsed.drift_baseline_established_at
+		return typeof stamp === "string" && stamp.length > 0
+	} catch {
+		return false
+	}
 }

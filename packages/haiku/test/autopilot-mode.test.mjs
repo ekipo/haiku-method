@@ -208,14 +208,14 @@ test("mode:autopilot auto-advances a completed `ask` gate stage", () => {
 // NOTE: This test verifies the NEW behavior after the fix. Before the fix,
 // `intent.autopilot === true` would promote ask gates. After the fix, only
 // `intent.mode === "autopilot"` promotes ask gates.
-test("mode:continuous + autopilot:true boolean does NOT auto-advance ask gates (boolean is ignored)", () => {
+test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (legacy boolean honored — see commit a61e6f69e)", () => {
 	const slug = "test-legacy-autopilot-flag"
 	const { haikuRoot, cleanup } = fixture(
 		slug,
 		{
 			studio: "software",
 			mode: "continuous",
-			autopilot: true, // legacy boolean — should be ignored after fix
+			autopilot: true, // legacy boolean — honored as a fallback for long-lived intents
 			stages: ["inception"],
 			active_stage: "inception",
 		},
@@ -245,13 +245,16 @@ test("mode:continuous + autopilot:true boolean does NOT auto-advance ask gates (
 
 	assert.ok(result, "tick must return a result")
 	assert.ok(result.action, "result must have an action")
-	// With mode:continuous (even if autopilot:true boolean set), the gate
-	// should pause for human review (gate_review) because inception's
-	// review type is 'ask'.
-	assert.strictEqual(
-		result.action.action,
-		"gate_review",
-		`mode:continuous + autopilot:true boolean should still emit gate_review (boolean is ignored); got: ${result.action.action} — message: ${result.action.message}`,
+	// Per fix(workflow) commit a61e6f69e: real-world long-lived intents
+	// carry `autopilot: true` alongside `mode: continuous` — the gate
+	// handler must honor the legacy boolean, otherwise those intents
+	// silently lose autopilot semantics on every gate. The expected
+	// action when autopilot is honored on an `ask` gate is auto-advance
+	// (`advance_phase`), NOT `gate_review`.
+	assert.ok(
+		result.action.action === "advance_phase" ||
+			result.action.action === "auto_gate_passed",
+		`mode:continuous + autopilot:true boolean should auto-advance the ask gate (legacy boolean honored); got: ${result.action.action} — message: ${result.action.message}`,
 	)
 })
 

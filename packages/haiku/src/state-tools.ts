@@ -67,6 +67,100 @@ import {
 import { emitTelemetry } from "./telemetry.js"
 import { getPluginVersion, MCP_VERSION } from "./version.js"
 
+// ── Drift-assessment rationale caps (VULN-REPORT V-09) ────────────────────
+//
+// V-09: unbounded `agent_rationale` and per-classification `rationale_excerpt`
+// writes bloat `stages/{stage}/drift-assessments/DA-NN.json`. The
+// assessments-list HTTP endpoint reads every record back unsummarized so a
+// 1 MB rationale on each of N assessments produces an N-MB JSON response —
+// trivially exhausts the SPA's parse budget and pegs the Fastify worker
+// while serialising. Worse, the agent has no incentive to keep these short.
+//
+// Two fixes:
+//   1. Reject oversize rationales at schema-validation time — before the
+//      DA-NN.json file is ever written. `agent_rationale` cap = 10 KB
+//      (10 * 1024 bytes), per-classification `rationale_excerpt` cap =
+//      1 KB (1024 bytes). Returned as structured `agent_rationale_too_long`
+//      / `rationale_excerpt_too_long` errors so the agent can shrink and
+//      retry without consuming a bolt.
+//   2. (Companion fix in `assessments-routes.ts`) — list endpoint truncates
+//      both fields to a 256-char preview; full text is only returned by the
+//      per-id detail endpoint.
+//
+// Sizing rationale: assessment rationales are intent-scoped justifications
+// — 10 KB (~1500–2000 words) is comfortably enough for the most complex
+// "why I classified these 60 findings this way" prose; per-finding excerpts
+// are SPA list-row labels — 1 KB (~150 words) is the upper limit before
+// the row stops being a row and starts being a paragraph.
+export const MAX_RATIONALE_BYTES = 10 * 1024 // 10 KB — agent_rationale top-level cap
+export const MAX_RATIONALE_EXCERPT_BYTES = 1024 // 1 KB — per-classification rationale_excerpt cap
+
+/** Byte length of a UTF-8 string. JS string `.length` counts UTF-16 code
+ *  units, not bytes — multi-byte characters undercount. The caps are
+ *  byte-based because that's the disk size we actually pay for. */
+function utf8ByteLength(s: string): number {
+	return Buffer.byteLength(s, "utf-8")
+}
+
+/** Validation outcome for the V-09 rationale caps. The classify-drift
+ *  tool calls `validateRationaleCaps` BEFORE writing DA-NN.json; on any
+ *  violation the structured error returns to the agent so it can shrink
+ *  the rationale and retry without consuming a bolt. */
+export type RationaleCapViolation =
+	| { kind: "agent_rationale_too_long"; bytes: number; cap: number }
+	| {
+			kind: "rationale_excerpt_too_long"
+			index: number
+			path: string
+			bytes: number
+			cap: number
+	  }
+
+/** Per-classification subset used by the rationale cap check. The full
+ *  Classification type carries more fields but only `path` and
+ *  `rationale_excerpt` matter for the V-09 byte-length validation. */
+export interface RationaleCapClassification {
+	path: string
+	rationale_excerpt: string
+}
+
+/**
+ * V-09 rationale cap validator. Returns null when both `agent_rationale`
+ * and every classification's `rationale_excerpt` are within their byte
+ * caps; returns the first violation encountered otherwise.
+ *
+ * Order is deterministic: `agent_rationale` is checked first; classifications
+ * are checked in array order. The agent should fix the surfaced violation
+ * and retry — subsequent calls will surface the next violation if any.
+ */
+export function validateRationaleCaps(args: {
+	agent_rationale: string
+	classifications: ReadonlyArray<RationaleCapClassification>
+}): RationaleCapViolation | null {
+	const agentBytes = utf8ByteLength(args.agent_rationale)
+	if (agentBytes > MAX_RATIONALE_BYTES) {
+		return {
+			kind: "agent_rationale_too_long",
+			bytes: agentBytes,
+			cap: MAX_RATIONALE_BYTES,
+		}
+	}
+	for (let i = 0; i < args.classifications.length; i++) {
+		const c = args.classifications[i]
+		const excerptBytes = utf8ByteLength(c.rationale_excerpt ?? "")
+		if (excerptBytes > MAX_RATIONALE_EXCERPT_BYTES) {
+			return {
+				kind: "rationale_excerpt_too_long",
+				index: i,
+				path: c.path,
+				bytes: excerptBytes,
+				cap: MAX_RATIONALE_EXCERPT_BYTES,
+			}
+		}
+	}
+	return null
+}
+
 // ── Intent title derivation ────────────────────────────────────────────────
 
 /** Maximum length for an intent title. Anything longer is treated as a

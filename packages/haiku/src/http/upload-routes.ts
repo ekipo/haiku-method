@@ -64,6 +64,7 @@ import {
 	isIntentArchived,
 	isIntentLocked,
 } from "../state-tools.js"
+import { emitTelemetry } from "../telemetry.js"
 import { requireTunnelAuth, verifyIntentMutationAuth } from "./auth.js"
 import { cleanupTempFile, safeMkdirAndRename } from "./path-safety.js"
 import { isValidSlug, validateIntent, validateStage } from "./validation.js"
@@ -72,13 +73,189 @@ import { isValidSlug, validateIntent, validateStage } from "./validation.js"
 
 const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024 // 50 MB
 
-function getUploadMaxBytes(): number {
-	const raw = process.env.HAIKU_UPLOAD_MAX_BYTES
-	if (raw === undefined) return DEFAULT_UPLOAD_MAX_BYTES
-	const parsed = Number.parseInt(raw, 10)
-	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_UPLOAD_MAX_BYTES
-	return parsed
+/**
+ * VULN-REPORT V-07: Upload size hard cap.
+ *
+ * `HAIKU_UPLOAD_MAX_BYTES` previously had no upper bound. A misconfigured
+ * 10 GB env value combined with the synchronous SHA-256 in the drift gate
+ * stalls the workflow tick (the gate hashes every uploaded file on every
+ * tick to detect drift; a 10 GB hash blocks the tick for minutes).
+ *
+ * Effective cap = `Math.min(envValue, MAX_UPLOAD_BYTES_HARD_CAP)`.
+ * Configurations exceeding the hard cap are clamped silently from the
+ * client's perspective (still 413 on overrun) and a `haiku.upload.cap_clamped`
+ * telemetry event is emitted so the operator sees the misconfig.
+ */
+const MAX_UPLOAD_BYTES_HARD_CAP = 50 * 1024 * 1024 // 50 MB
+
+/**
+ * VULN-REPORT V-01 / V-02: MIME and extension allowlist for SPA uploads.
+ *
+ * `serveFile`'s MIME map matches `text/html`, `image/svg+xml`, `text/css`,
+ * `application/javascript`, etc., so any uploaded `.html` / `.svg` / `.js` /
+ * `.css` file rendered inline becomes a stored-XSS or stylesheet-injection
+ * vector under the reviewer's privileged tunnel origin.
+ *
+ * The fix has two layers:
+ *   1. `ALLOWED_MIMES_*` — per-route allowlist of MIME types the server
+ *      accepts. Anything else is rejected with 415 BEFORE bytes hit disk.
+ *   2. `BLOCKED_EXTENSIONS` — defence-in-depth blocklist of file extensions
+ *      that render as scripts (or carry script payloads) regardless of the
+ *      claimed MIME. Rejected with 415 even when the MIME is on the
+ *      allowlist (covers MIME-spoof attacks like `text/plain`+`.html`).
+ *
+ * Bolt-3 hardening (closes red-team R-01/R-02/R-03/R-04):
+ *   - `.js`, `.css`, `.htc`, `.hta`, `.htaccess` added to BLOCKED_EXTENSIONS:
+ *     `serveFile` returns `application/javascript` and `text/css` for these
+ *     extensions, so the same threat class V-01/V-02 named (stored XSS in the
+ *     tunnel origin) was reachable via these equivalent extensions while only
+ *     six were blocked. `.htc` (HTML Components, IE-mode-on-Edge), `.hta`
+ *     (HTML Applications), and `.htaccess` (Apache config injection) are
+ *     fellow-traveler vectors for the same threat class.
+ *   - `application/octet-stream` removed from BOTH allowlists: it is the
+ *     default MIME a multipart client uses when no Content-Type is set, which
+ *     made the MIME allowlist effectively a no-op for any extension not in
+ *     BLOCKED_EXTENSIONS. Treat octet-stream as "unknown — reject" rather than
+ *     "binary blob — accept". Legitimate binary uploads (PDFs, images) already
+ *     send their real MIME.
+ *
+ * Defence in depth — the serve-side hardening (CSP, sandbox sub-origin,
+ * inverted MIME map) is deferred to follow-up unit-04 work; this unit
+ * closes the upload-side primary vector.
+ */
+const BLOCKED_EXTENSIONS: ReadonlySet<string> = new Set([
+	".html",
+	".htm",
+	".svg",
+	".xml",
+	".xhtml",
+	".mhtml",
+	// Bolt 3 — close red-team R-01/R-02 (.js/.css render as script/style under
+	// the tunnel origin) and the IE-legacy / Apache-config siblings.
+	".js",
+	".mjs",
+	".cjs",
+	".css",
+	".htc",
+	".hta",
+	".htaccess",
+])
+
+/** Stage-output uploads — the SPA writes designer mockups, screenshots,
+ *  PDFs, and structured data. Markdown is intentionally allowed because
+ *  designers attach `.md` notes alongside binary mockups; markdown is
+ *  rendered as `text/plain` by `serveFile` so it does not execute.
+ *
+ *  Bolt 3 — `application/octet-stream` removed (red-team R-03): it is the
+ *  multipart default when the client omits Content-Type, which made the
+ *  allowlist effectively a no-op. Legitimate binary uploads send their
+ *  real MIME (image/png, application/pdf, etc.); octet-stream is rejected. */
+const ALLOWED_MIMES_STAGE_OUTPUT: ReadonlySet<string> = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"application/pdf",
+	"text/plain",
+	"text/markdown",
+	"application/json",
+])
+
+/** Knowledge uploads — same allowlist as stage-output. Knowledge artifacts
+ *  are documentation + research material; the same MIME set covers them.
+ *  `application/octet-stream` removed in bolt 3 — see stage-output comment. */
+const ALLOWED_MIMES_KNOWLEDGE: ReadonlySet<string> = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"application/pdf",
+	"text/plain",
+	"text/markdown",
+	"application/json",
+])
+
+/**
+ * VULN-REPORT red-team R-04: bounded `attribute_to_user` validator.
+ *
+ * `attribute_to_user` previously flowed verbatim into `action-log.jsonl` and
+ * `write-audit.jsonl`. Any future SPA renderer that displayed those audit
+ * fields without escaping would re-emit attacker-controlled HTML into the
+ * reviewer's session — a stored XSS via the audit log.
+ *
+ * Bound the field at upload time to a slug-with-spaces pattern: starts with a
+ * word char, followed by 0-127 word chars, hyphens, dots, at-signs, or spaces.
+ * This is wide enough to cover real human author IDs (`alice`, `Alice Smith`,
+ * `alice.smith@example.com`, `product-owner-2`) but rejects every HTML / JS
+ * sigil and every shell metacharacter.
+ */
+const ATTRIBUTE_TO_USER_PATTERN = /^[\w][\w\-.@ ]{0,127}$/
+
+/** Returns true when the supplied attribution string is safe to write into
+ *  `human_author_id` audit fields. */
+function isValidAttributeToUser(value: string | undefined): boolean {
+	if (typeof value !== "string") return false
+	return ATTRIBUTE_TO_USER_PATTERN.test(value)
 }
+
+/** Exported for tests so the red-team R-04 bound can be exercised without an
+ *  HTTP round trip. */
+export { ATTRIBUTE_TO_USER_PATTERN, isValidAttributeToUser }
+
+/** Extract the lowercase extension (including the leading dot) from a
+ *  filename. Returns "" when the filename has no extension. */
+function fileExtension(filename: string): string {
+	const idx = filename.lastIndexOf(".")
+	if (idx < 0) return ""
+	return filename.slice(idx).toLowerCase()
+}
+
+/** Normalise a MIME type by stripping any `; charset=…` parameter and
+ *  lowercasing. Returns "" when the value is empty/undefined. */
+function normaliseMime(mime: string | undefined): string {
+	if (!mime) return ""
+	const semi = mime.indexOf(";")
+	const head = (semi < 0 ? mime : mime.slice(0, semi)).trim().toLowerCase()
+	return head
+}
+
+/** True when `filename` ends in an extension that we refuse to accept
+ *  regardless of the claimed MIME. Defends against MIME-spoof attacks
+ *  where the client sends `text/plain` with a `.html` filename. */
+function hasBlockedExtension(filename: string): boolean {
+	return BLOCKED_EXTENSIONS.has(fileExtension(filename))
+}
+
+/** Exported for tests so the V-07 hard-cap clamp can be asserted without
+ *  uploading 50 MiB of payload to verify behavior. */
+export function getUploadMaxBytes(): number {
+	const raw = process.env.HAIKU_UPLOAD_MAX_BYTES
+	let envValue: number
+	if (raw === undefined) {
+		envValue = DEFAULT_UPLOAD_MAX_BYTES
+	} else {
+		const parsed = Number.parseInt(raw, 10)
+		envValue =
+			!Number.isFinite(parsed) || parsed <= 0
+				? DEFAULT_UPLOAD_MAX_BYTES
+				: parsed
+	}
+	// V-07: clamp the env value to the hard cap so a misconfigured 10 GB
+	// value cannot stall the workflow tick via the sync SHA-256 in the
+	// drift gate. Emit a telemetry event when clamping fires so the
+	// operator sees the misconfig.
+	if (envValue > MAX_UPLOAD_BYTES_HARD_CAP) {
+		emitTelemetry("haiku.upload.cap_clamped", {
+			env_value: String(envValue),
+			hard_cap: String(MAX_UPLOAD_BYTES_HARD_CAP),
+		})
+		return MAX_UPLOAD_BYTES_HARD_CAP
+	}
+	return Math.min(envValue, MAX_UPLOAD_BYTES_HARD_CAP)
+}
+
+/** Exported for tests — the hard cap that no env value can exceed. */
+export const UPLOAD_MAX_BYTES_HARD_CAP = MAX_UPLOAD_BYTES_HARD_CAP
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -143,6 +320,16 @@ async function streamToTempfile(
 
 	const ws = createWriteStream(tmpPath)
 
+	// Track whether the writestream has finished closing so the rejection
+	// path can wait for the FD to be released before unlinking — otherwise
+	// the writestream's async close can recreate the inode after our sync
+	// unlink lands, leaving an orphaned tempfile in the artifacts dir.
+	const wsClosed = new Promise<void>((resolve) => {
+		ws.on("close", () => {
+			resolve()
+		})
+	})
+
 	await new Promise<void>((res, rej) => {
 		ws.on("error", rej)
 		ws.on("finish", res)
@@ -167,8 +354,14 @@ async function streamToTempfile(
 		})
 		// pipe() would auto-close; manual wiring to get the size check.
 		part.file.pipe(ws)
-	}).catch((err) => {
-		// Clean up the partial tempfile before propagating.
+	}).catch(async (err) => {
+		// Wait for the writestream's underlying FD to close before unlinking
+		// — otherwise the async `close` callback can recreate the file after
+		// our sync unlink (race observed in test/upload-routes.test.mjs's
+		// "Upload exceeds size cap" assertion that no temp files remain).
+		await wsClosed.catch(() => {
+			/* best-effort */
+		})
 		try {
 			unlinkSync(tmpPath)
 		} catch {
@@ -310,6 +503,50 @@ export async function registerUploadRoutes(
 						code: "bad_param",
 						message:
 							"Missing required fields: stage, target_path, mode, attribute_to_user, file",
+					})
+					return
+				}
+
+				// VULN-REPORT red-team R-04: bound `attribute_to_user` to a safe
+				// slug-with-spaces pattern. Unvalidated attributions previously
+				// flowed verbatim into action-log.jsonl + write-audit.jsonl,
+				// creating a stored-XSS sink for any future SPA audit-log viewer.
+				if (!isValidAttributeToUser(attributeToUser)) {
+					reply.status(400).send({
+						error: "bad_attribute_to_user",
+						code: "bad_attribute_to_user",
+						message:
+							"attribute_to_user must match /^[\\w][\\w\\-.@ ]{0,127}$/ — alphanumerics, underscore, hyphen, dot, at-sign, space; max 128 chars; cannot start with a separator.",
+						pattern: ATTRIBUTE_TO_USER_PATTERN.source,
+					})
+					return
+				}
+
+				// VULN-REPORT V-02: stored-XSS via stage-output uploads.
+				// Reject blocked extensions FIRST (defends against MIME-spoofing
+				// where client sends text/plain with a .html filename), then
+				// reject unknown MIME types not on the allowlist. We check the
+				// uploaded multipart filename AND the target_path so neither
+				// alone can sneak a blocked extension through.
+				const stageBlockedFromFilename = hasBlockedExtension(filePart.filename)
+				const stageBlockedFromTarget = hasBlockedExtension(targetPath)
+				if (stageBlockedFromFilename || stageBlockedFromTarget) {
+					reply.status(415).send({
+						error: "unsupported_media_type",
+						code: "unsupported_media_type",
+						message: `Files with extensions ${Array.from(BLOCKED_EXTENSIONS).join(", ")} are rejected — they render inline and become a stored-XSS vector. Convert to a non-executable format (PDF, PNG screenshot, plain text) and retry.`,
+						blocked_extensions: Array.from(BLOCKED_EXTENSIONS),
+					})
+					return
+				}
+				const stageMime = normaliseMime(filePart.mimetype)
+				if (!ALLOWED_MIMES_STAGE_OUTPUT.has(stageMime)) {
+					reply.status(415).send({
+						error: "unsupported_media_type",
+						code: "unsupported_media_type",
+						message: `MIME type '${stageMime || "<none>"}' is not on the stage-output upload allowlist. Allowed: ${Array.from(ALLOWED_MIMES_STAGE_OUTPUT).sort().join(", ")}.`,
+						received_mime: stageMime,
+						allowed_mimes: Array.from(ALLOWED_MIMES_STAGE_OUTPUT).sort(),
 					})
 					return
 				}
@@ -602,6 +839,49 @@ export async function registerUploadRoutes(
 						code: "bad_param",
 						message:
 							"Missing required fields: target_filename, attribute_to_user, file",
+					})
+					return
+				}
+
+				// VULN-REPORT red-team R-04: bound `attribute_to_user` (see
+				// stage-output handler for rationale).
+				if (!isValidAttributeToUser(attributeToUser)) {
+					reply.status(400).send({
+						error: "bad_attribute_to_user",
+						code: "bad_attribute_to_user",
+						message:
+							"attribute_to_user must match /^[\\w][\\w\\-.@ ]{0,127}$/ — alphanumerics, underscore, hyphen, dot, at-sign, space; max 128 chars; cannot start with a separator.",
+						pattern: ATTRIBUTE_TO_USER_PATTERN.source,
+					})
+					return
+				}
+
+				// VULN-REPORT V-01: stored-XSS via knowledge uploads.
+				// Block .html / .svg / .xml etc. at the upload boundary so the
+				// reviewer's tunnel origin cannot be hijacked when the file is
+				// later served back by serveFile. Defends against MIME-spoofing
+				// (text/plain claim with .html extension) by checking BOTH the
+				// uploaded filename and the target_filename. MIME type must be
+				// on the knowledge allowlist.
+				const knowBlockedFromFilename = hasBlockedExtension(filePart.filename)
+				const knowBlockedFromTarget = hasBlockedExtension(targetFilename)
+				if (knowBlockedFromFilename || knowBlockedFromTarget) {
+					reply.status(415).send({
+						error: "unsupported_media_type",
+						code: "unsupported_media_type",
+						message: `Files with extensions ${Array.from(BLOCKED_EXTENSIONS).join(", ")} are rejected — they render inline and become a stored-XSS vector. Convert to a non-executable format (PDF, PNG screenshot, plain text) and retry.`,
+						blocked_extensions: Array.from(BLOCKED_EXTENSIONS),
+					})
+					return
+				}
+				const knowMime = normaliseMime(filePart.mimetype)
+				if (!ALLOWED_MIMES_KNOWLEDGE.has(knowMime)) {
+					reply.status(415).send({
+						error: "unsupported_media_type",
+						code: "unsupported_media_type",
+						message: `MIME type '${knowMime || "<none>"}' is not on the knowledge upload allowlist. Allowed: ${Array.from(ALLOWED_MIMES_KNOWLEDGE).sort().join(", ")}.`,
+						received_mime: knowMime,
+						allowed_mimes: Array.from(ALLOWED_MIMES_KNOWLEDGE).sort(),
 					})
 					return
 				}

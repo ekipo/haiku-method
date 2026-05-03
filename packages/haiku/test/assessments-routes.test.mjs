@@ -135,6 +135,35 @@ writeFileSync(
 	JSON.stringify(da3),
 )
 
+// VULN-REPORT V-09 fixture: an assessment with rationales OVER the
+// list-view truncation cap (256 chars). Verifies the list endpoint
+// truncates while the detail endpoint returns the full text.
+const longRationale = "L".repeat(2000) // 2000 chars > 256 cap
+const longExcerpt = "E".repeat(2000)
+const da4 = {
+	id: "DA-04",
+	created_at: "2026-04-04T10:00:00Z",
+	findings: [
+		{
+			path: "stages/design/artifacts/big.md",
+			stage: stage1,
+			change_kind: "modified",
+		},
+	],
+	classifications: [
+		{
+			outcome: "ignore",
+			path: "stages/design/artifacts/big.md",
+			rationale_excerpt: longExcerpt,
+		},
+	],
+	agent_rationale: longRationale,
+}
+writeFileSync(
+	join(intentDirPath, "stages", stage1, "drift-assessments", "DA-04.json"),
+	JSON.stringify(da4),
+)
+
 // Stub git.
 const fakeBinDir = join(tmp, "fake-bin")
 mkdirSync(fakeBinDir, { recursive: true })
@@ -175,12 +204,14 @@ async function run() {
 		const data = await res.json()
 		assert.ok(data.ok)
 		assert.ok(Array.isArray(data.assessments))
-		assert.strictEqual(data.assessments.length, 3)
-		// Most recent (DA-03) should come first.
-		assert.strictEqual(data.assessments[0].id, "DA-03")
-		assert.strictEqual(data.assessments[1].id, "DA-02")
-		assert.strictEqual(data.assessments[2].id, "DA-01")
-		assert.strictEqual(data.total, 3)
+		assert.strictEqual(data.assessments.length, 4)
+		// Most recent (DA-04) should come first; DA-04 is the V-09 truncation
+		// fixture, then DA-03 / DA-02 / DA-01 by descending created_at.
+		assert.strictEqual(data.assessments[0].id, "DA-04")
+		assert.strictEqual(data.assessments[1].id, "DA-03")
+		assert.strictEqual(data.assessments[2].id, "DA-02")
+		assert.strictEqual(data.assessments[3].id, "DA-01")
+		assert.strictEqual(data.total, 4)
 		assert.strictEqual(data.has_more, false)
 	})
 
@@ -191,11 +222,12 @@ async function run() {
 		assert.strictEqual(res.status, 200)
 		const data = await res.json()
 		assert.ok(data.ok)
-		// DA-01 and DA-03 belong to design stage.
-		assert.strictEqual(data.assessments.length, 2)
+		// DA-01, DA-03, DA-04 belong to design stage.
+		assert.strictEqual(data.assessments.length, 3)
 		const ids = data.assessments.map((a) => a.id)
 		assert.ok(ids.includes("DA-01"))
 		assert.ok(ids.includes("DA-03"))
+		assert.ok(ids.includes("DA-04"))
 		assert.ok(!ids.includes("DA-02"))
 	})
 
@@ -217,7 +249,7 @@ async function run() {
 		assert.strictEqual(res.status, 200)
 		const data = await res.json()
 		assert.strictEqual(data.assessments.length, 2)
-		assert.strictEqual(data.total, 3)
+		assert.strictEqual(data.total, 4)
 		assert.strictEqual(data.has_more, true)
 	})
 
@@ -287,6 +319,86 @@ async function run() {
 		const data = await res.json()
 		assert.ok(
 			data.error === "intent_not_found" || data.code === "intent_not_found",
+		)
+	})
+
+	// ── VULN-REPORT V-09: list endpoint truncates rationale fields ───────────
+
+	console.log(
+		"\n=== VULN-REPORT V-09: list endpoint truncates oversize rationales ===",
+	)
+
+	await test("list endpoint truncates agent_rationale to a list-view-safe preview (V-09)", async () => {
+		const res = await fetch(`${baseUrl}/api/intents/${intentSlug}/assessments`)
+		assert.strictEqual(res.status, 200)
+		const data = await res.json()
+		const da4 = data.assessments.find((a) => a.id === "DA-04")
+		assert.ok(da4, "DA-04 fixture should be present")
+		assert.ok(
+			typeof da4.agent_rationale === "string",
+			"agent_rationale should be a string",
+		)
+		// Original was 2000 chars; truncated form must be much shorter and
+		// end with the '…' marker.
+		assert.ok(
+			da4.agent_rationale.length <= 257,
+			`Expected agent_rationale truncated to ≤ 257 chars (256 + '…'), got ${da4.agent_rationale.length}`,
+		)
+		assert.ok(
+			da4.agent_rationale.endsWith("…"),
+			"Truncated agent_rationale should end with '…'",
+		)
+	})
+
+	await test("list endpoint truncates per-classification rationale_excerpt (V-09)", async () => {
+		const res = await fetch(`${baseUrl}/api/intents/${intentSlug}/assessments`)
+		assert.strictEqual(res.status, 200)
+		const data = await res.json()
+		const da4 = data.assessments.find((a) => a.id === "DA-04")
+		assert.ok(da4)
+		const cls = da4.classifications[0]
+		assert.ok(cls)
+		assert.ok(typeof cls.rationale_excerpt === "string")
+		assert.ok(
+			cls.rationale_excerpt.length <= 257,
+			`Expected rationale_excerpt truncated to ≤ 257 chars, got ${cls.rationale_excerpt.length}`,
+		)
+		assert.ok(
+			cls.rationale_excerpt.endsWith("…"),
+			"Truncated rationale_excerpt should end with '…'",
+		)
+	})
+
+	await test("list endpoint leaves short rationales untouched (no spurious truncation)", async () => {
+		const res = await fetch(`${baseUrl}/api/intents/${intentSlug}/assessments`)
+		assert.strictEqual(res.status, 200)
+		const data = await res.json()
+		const da1 = data.assessments.find((a) => a.id === "DA-01")
+		assert.ok(da1)
+		// Original agent_rationale was "Minor tweak." — well under 256 chars.
+		assert.strictEqual(
+			da1.agent_rationale,
+			"Minor tweak.",
+			"Short rationale must be returned untouched",
+		)
+	})
+
+	await test("detail endpoint returns FULL agent_rationale + rationale_excerpt — no truncation (V-09)", async () => {
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/assessments/DA-04`,
+		)
+		assert.strictEqual(res.status, 200)
+		const data = await res.json()
+		assert.ok(data.assessment)
+		assert.strictEqual(
+			data.assessment.agent_rationale.length,
+			2000,
+			"Detail endpoint MUST return the full agent_rationale (no truncation)",
+		)
+		assert.strictEqual(
+			data.assessment.classifications[0].rationale_excerpt.length,
+			2000,
+			"Detail endpoint MUST return the full rationale_excerpt",
 		)
 	})
 

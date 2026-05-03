@@ -509,21 +509,20 @@ const emit: WorkflowHandler = (ctx) => {
 
 	const rawReviewType = resolveStageReview(studio, currentStage)
 	const intentMode = (intent.mode as string) || "continuous"
-	// `autopilot` is one of the three stored intent modes (discrete |
-	// continuous | autopilot). The canonical home is `intent.mode`.
+	// Mode taxonomy: discrete | discrete-hybrid | continuous | autopilot.
+	// Autopilot is NOT a separate boolean — it lives ONLY on `intent.mode`.
+	// The legacy `autopilot: true` boolean (alongside `mode: continuous`)
+	// is intentionally IGNORED here. If a user wants autopilot behavior
+	// they must set `mode: autopilot` explicitly. Honoring the legacy
+	// boolean caused the "continuous + autopilot:true silently auto-
+	// advances ask gates" bug — see test/autopilot-mode.test.mjs's
+	// "mode:continuous + autopilot:true boolean does NOT auto-advance"
+	// regression case.
 	//
-	// Backward-compat: older intent.md files carry a separate `autopilot:
-	// true` boolean alongside `mode: continuous` (or no mode at all).
-	// Honor the legacy boolean as a fallback so existing intents keep
-	// running in autopilot semantics until they're migrated. Without this
-	// fallback, a long-lived intent with the boolean+continuous shape
-	// pops local-review gates (the ask-promotion path silently turns off)
-	// even though the user authored the intent expecting autopilot.
-	//
-	// In autopilot mode the gate
-	// handler promotes `ask` gates to `auto`, letting the workflow
-	// advance without human intervention. External gates and `await`
-	// gates still block — they require real external signals.
+	// In autopilot mode the gate handler promotes `ask` gates to `auto`,
+	// letting the workflow advance without human intervention. External
+	// gates and `await` gates still block — they require real external
+	// signals.
 	//
 	// `discrete-hybrid` is a DERIVED/VIRTUAL state (not stored). It
 	// represents continuous mode where some stages need discrete-shaped
@@ -532,8 +531,7 @@ const emit: WorkflowHandler = (ctx) => {
 	// discrete-hybrid behavior, it should derive it from
 	// `intentMode === "continuous" && <some per-stage condition>` rather
 	// than reading a stored field.
-	const autopilot =
-		intentMode === "autopilot" || intent.autopilot === true
+	const autopilot = intentMode === "autopilot"
 	const isDiscrete = intentMode === "discrete"
 
 	// Discrete-mode contract: every stage gate MUST open an external

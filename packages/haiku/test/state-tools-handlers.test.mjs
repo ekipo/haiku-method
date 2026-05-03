@@ -22,10 +22,13 @@ import {
 	isIntentLocked,
 	listVisibleIntentSlugs,
 	listVisibleIntents,
+	MAX_RATIONALE_BYTES,
+	MAX_RATIONALE_EXCERPT_BYTES,
 	readClaimedAuthorId,
 	setFrontmatterField,
 	stateToolDefs,
 	unitPath,
+	validateRationaleCaps,
 } from "../src/state-tools.ts"
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -2302,6 +2305,109 @@ Test stage.
 				"haiku_human_write.inputSchema MUST advertise claimed_author_id",
 			)
 		}
+	})
+
+	// ── VULN-REPORT V-09: rationale byte caps (validateRationaleCaps) ──────
+
+	console.log(
+		"\n=== VULN-REPORT V-09: validateRationaleCaps — rationale too long rejected ===",
+	)
+
+	test("validateRationaleCaps: passes when both fields are within caps", () => {
+		const result = validateRationaleCaps({
+			agent_rationale: "Brief rationale.",
+			classifications: [
+				{ path: "stages/design/artifacts/spec.md", rationale_excerpt: "ok" },
+			],
+		})
+		assert.strictEqual(
+			result,
+			null,
+			"Expected null violation for in-cap rationale, got: " +
+				JSON.stringify(result),
+		)
+	})
+
+	test("validateRationaleCaps: agent_rationale > 10 KB returns agent_rationale_too_long structured error (V-09 agent_rationale reject)", () => {
+		// 10 KB + 1 byte — must reject.
+		const oversize = "x".repeat(MAX_RATIONALE_BYTES + 1)
+		const result = validateRationaleCaps({
+			agent_rationale: oversize,
+			classifications: [
+				{ path: "stages/design/artifacts/spec.md", rationale_excerpt: "ok" },
+			],
+		})
+		assert.ok(result !== null, "Expected a violation, got null")
+		assert.strictEqual(result.kind, "agent_rationale_too_long")
+		assert.strictEqual(result.bytes, MAX_RATIONALE_BYTES + 1)
+		assert.strictEqual(result.cap, MAX_RATIONALE_BYTES)
+		assert.strictEqual(
+			MAX_RATIONALE_BYTES,
+			10 * 1024,
+			"agent_rationale cap MUST be exactly 10 KB per V-09 spec",
+		)
+	})
+
+	test("validateRationaleCaps: rationale_excerpt over 1KB returns rationale_excerpt_too_long structured error (V-09: rationale over KB reject)", () => {
+		// 1 KB + 1 byte excerpt — must reject.
+		const oversize = "y".repeat(MAX_RATIONALE_EXCERPT_BYTES + 1)
+		const result = validateRationaleCaps({
+			agent_rationale: "Short top-level rationale.",
+			classifications: [
+				{ path: "stages/design/artifacts/spec.md", rationale_excerpt: "ok" },
+				{ path: "stages/design/artifacts/foo.md", rationale_excerpt: oversize },
+			],
+		})
+		assert.ok(result !== null, "Expected a violation, got null")
+		assert.strictEqual(result.kind, "rationale_excerpt_too_long")
+		assert.strictEqual(result.index, 1)
+		assert.strictEqual(result.path, "stages/design/artifacts/foo.md")
+		assert.strictEqual(result.bytes, MAX_RATIONALE_EXCERPT_BYTES + 1)
+		assert.strictEqual(result.cap, MAX_RATIONALE_EXCERPT_BYTES)
+		assert.strictEqual(
+			MAX_RATIONALE_EXCERPT_BYTES,
+			1024,
+			"rationale_excerpt cap MUST be exactly 1 KB per V-09 spec",
+		)
+	})
+
+	test("validateRationaleCaps: agent_rationale checked BEFORE per-finding excerpts (deterministic order)", () => {
+		// Both fields oversize — must surface agent_rationale_too_long first.
+		const result = validateRationaleCaps({
+			agent_rationale: "z".repeat(MAX_RATIONALE_BYTES + 1),
+			classifications: [
+				{
+					path: "p",
+					rationale_excerpt: "y".repeat(MAX_RATIONALE_EXCERPT_BYTES + 1),
+				},
+			],
+		})
+		assert.ok(result !== null)
+		assert.strictEqual(
+			result.kind,
+			"agent_rationale_too_long",
+			"agent_rationale violation MUST be reported first when both are oversize",
+		)
+	})
+
+	test("validateRationaleCaps: byte-counting is UTF-8, not UTF-16 (multi-byte char that fits in code units but not bytes is rejected)", () => {
+		// Each '🔥' is 4 bytes in UTF-8, 2 UTF-16 code units. We pick a count
+		// that's UNDER the 1024 char-length cap but OVER the 1024 BYTE cap.
+		// 300 fire emojis = 600 UTF-16 code units, 1200 UTF-8 bytes (>1024).
+		const fires = "🔥".repeat(300)
+		assert.ok(
+			fires.length < MAX_RATIONALE_EXCERPT_BYTES,
+			"sanity: char-count must be under cap so we exercise the byte-count path",
+		)
+		const result = validateRationaleCaps({
+			agent_rationale: "ok",
+			classifications: [{ path: "p", rationale_excerpt: fires }],
+		})
+		assert.ok(
+			result !== null,
+			"Expected a violation — UTF-8 byte length 1200 > 1024 cap",
+		)
+		assert.strictEqual(result.kind, "rationale_excerpt_too_long")
 	})
 
 	// ── unknown tool ──────────────────────────────────────────────────────────

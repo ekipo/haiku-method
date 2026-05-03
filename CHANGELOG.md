@@ -5,10 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.4.1] - 2026-05-03
 
-### Added
-- **Skill alignment**: elaborator now surfaces relevant Claude Code skills (slash commands) to units during elaboration. The new `haiku_skill_list` MCP tool introspects installed skills from the plugin root, project-local `.claude/skills/`, and global `~/.claude/plugins/*/skills/`. Each unit can declare `applicable_skills:` in its frontmatter; hat subagent prompts automatically include a "Skills available" section when applicable skills are annotated.
+This release contains only internal test coverage improvements with no user-facing changes to report.
 
 ## [3.4.0] - 2026-05-01
 

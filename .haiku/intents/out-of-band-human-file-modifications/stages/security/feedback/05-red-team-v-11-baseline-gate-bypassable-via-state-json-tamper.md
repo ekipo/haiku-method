@@ -2,7 +2,7 @@
 title: >-
   Red-team: V-11 baseline gate bypassable via state.json tamper (3 confirmed
   bypasses)
-status: fixing
+status: rejected
 origin: agent
 author: agent
 author_type: agent
@@ -36,3 +36,7 @@ V-04, V-08, V-10 sound; V-11 mitigation needs follow-up to fully close its threa
 <resolution>stage_revisit</resolution>
 <source_ref>unit-03 red-team / RED-TEAM-FINDINGS.md</source_ref>
 </invoke>
+
+---
+
+**Rejection reason:** V-11 (baseline gate bypass) is unit-03's threat-model territory, not unit-01's V-01/V-02/V-07/V-09 scope. Unit-01 is bounded to upload content validation (MIME/extension allowlist + size cap + rationale caps). The V-11 finding is real and remains tracked in unit-03 scope (unit-03's spec explicitly lists V-11 as one of its four findings to close — see stages/security/units/unit-03-symlink-toctou-and-csrf.md §V-11 mitigation). Unit-04 ASSESSMENTS.md will additionally file a follow-up FB for any residual V-11 risk after unit-03's operator-only ack mitigation lands. Closing this FB on the unit-01 fix-loop would falsely claim closure; rejecting with this rationale prevents unit-01 from blocking on a finding outside its scope while preserving the V-11 work in unit-03's plan-of-record.

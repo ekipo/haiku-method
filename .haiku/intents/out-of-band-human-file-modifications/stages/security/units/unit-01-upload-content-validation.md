@@ -63,11 +63,11 @@ quality_gates:
       packages/haiku/test/state-tools-handlers.test.mjs
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: active
+status: completed
 bolt: 4
-hat: red-team
+hat: blue-team
 started_at: '2026-05-03T02:09:52Z'
-hat_started_at: '2026-05-03T08:36:37Z'
+hat_started_at: '2026-05-03T08:48:25Z'
 iterations:
   - hat: threat-modeler
     started_at: '2026-05-03T02:09:52Z'
@@ -244,9 +244,14 @@ iterations:
     result: advance
   - hat: red-team
     started_at: '2026-05-03T08:36:37Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-05-03T08:48:25Z'
+    result: advance
+  - hat: blue-team
+    started_at: '2026-05-03T08:48:25Z'
+    completed_at: '2026-05-03T08:51:24Z'
+    result: advance
 model_original: sonnet
+completed_at: '2026-05-03T08:51:24Z'
 ---
 # Unit 01 — Upload content validation
 

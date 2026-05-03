@@ -697,3 +697,20 @@ These contracts are written to be implementable, but the following choices are o
 - **Human-write tool security stance** — trust + audit vs explicit confirmation. Owned by DESIGN-DECISIONS Decision 9; contract here assumes trust + audit (no `confirm` argument), but a follow-up addendum can add a `requires_confirmation: boolean` request field without breaking shape.
 
 None of these affect the field-level shapes above. They affect *where* the data lives, not *what* it looks like.
+
+---
+
+## 9. Annex: Co-Located Subsystem with Independent Data Shapes
+
+A separate subsystem — **upstream-artifact reconciliation** — exists on this intent's branch (entered via the 2026-05-01 main-merge from repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30). It has its own data shapes that are **not** specified in this contract:
+
+- **`corpus_fingerprint`** — SHA-256 hex digest persisted in per-stage `state.json`, computed over (sorted relPath, file content sha) pairs across the upstream-artifact corpus (`stages/<prior>/artifacts/`, `stages/<prior>/discovery/`, `stages/<prior>/outputs/`, `<intent>/knowledge/`, `<intent>/product/`, `<intent>/features/`).
+- **`ReconciliationFinding`** — finding shape with discriminator `kind: "tool_name" | "http_status" | "field_name"`, plus `concept`, `occurrences[]` (with `name`, `file`, `line`, `excerpt`), and `message`. Defined in `packages/haiku/src/orchestrator/workflow/upstream-reconciliation.ts`.
+- **`upstream_reconciliation_required` action payload** — the agent-facing payload for the reconciliation gate's findings. Wire shape lives in `run-tick.ts` lines 428-472.
+- **`haiku_reconciliation_acknowledge` MCP tool input/output** — the proceed-without-fix tool's contract; defined alongside the implementation, not here.
+
+These shapes are **out of scope** for this product-stage data contracts deliverable because the reconciliation subsystem was not derived from this intent's product elaboration. The shapes that ARE in scope (sections 1-7 above) cover only baseline.json, drift-markers.json, write-audit.jsonl, drift-assessments/DA-NN.json, the `manual_change_assessment` payload, and the `haiku_human_write` MCP tool input/output. The author-class enumeration in §6.1 (`agent | human-via-mcp | human-implicit`) is about WRITE attribution, not about reconciliation findings.
+
+A future intent that takes ownership of upstream-reconciliation should author its own DATA-CONTRACTS.md formalizing the four shapes above and any corresponding telemetry-event shapes.
+
+**Cross-references:** See `knowledge/DISCOVERY.md` § "Annexed Subsystem", `knowledge/IMPLEMENTATION-MAP.md` § "Annex: Out-of-Scope Subsystem".

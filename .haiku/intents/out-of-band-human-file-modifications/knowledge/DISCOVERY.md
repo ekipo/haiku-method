@@ -160,3 +160,28 @@ A scan of active H·AI·K·U branches at discovery time (2026-04-28) identified 
 **`origin/haiku/unit-metrics-and-browse-dashboards/main`** — No shared file-level overlap with the workflow engine or SPA upload paths detected. Changes appear to be scoped to intent-directory files. Not a concern.
 
 None of these are blockers for inception. They are coordination signals for design (where the upload UI fits into the SPA's component architecture given ongoing cowork and remote-review-spa work) and execution (where adding hooks and orchestrator cases may produce merge complexity with archivable-intents and cascading-model-selection). The design stage should produce a read on the remote-review-spa branch's component structure before speccing the upload UI.
+
+## Annexed Subsystem: Upstream-Reconciliation Pre-Tick Gate
+
+**Provenance:** This subsystem was authored on a separate branch (`feat/prompt-files-and-validation`, repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30) and entered this intent's branch transitively via the 2026-05-01 main-merge into `haiku/out-of-band-human-file-modifications/main`. It was NOT proposed in this intent's discovery or scoped through this intent's elaboration. It is documented here for traceability so the cross-stage chain (inception → product → design → development → operations) is unbroken on the intent branch despite the out-of-band origin.
+
+**Scope orthogonality:** The reconciliation subsystem detects **cross-document divergence between agent-authored upstream artifacts** (tool-name divergence, HTTP-status-code divergence, field-name divergence). Its scope is independent of this intent's `human file modifications` framing — it does not detect human writes, does not consume the SHA baseline this intent introduces, and does not feed the `manual_change_assessment` action. It runs as an **additional pre-tick gate** alongside the drift-detection gate this intent specifies. The inception-stage analysis treats it as an externally-introduced concern co-located on this branch, not as an in-scope discovery deliverable.
+
+**Where it lives in the implementation:**
+
+- Module: `packages/haiku/src/orchestrator/workflow/upstream-reconciliation.ts`
+- Pre-tick wiring: `packages/haiku/src/orchestrator/workflow/run-tick.ts` (emits action `upstream_reconciliation_required`)
+- MCP tool: `haiku_reconciliation_acknowledge` (proceed-without-fix escape hatch when divergence is intentional)
+- Telemetry: `haiku.reconciliation.fingerprint.{matched,drifted,established,duration_ms,write_failed}`, `haiku.reconciliation.corpus.bytes` (`packages/haiku/src/telemetry.ts`)
+- Alerts: `deploy/operations/drift-detection-alerts.yaml` (reconciliation-* rules)
+- Tests: `packages/haiku/test/upstream-reconciliation.test.mjs`
+- Operations runbook: `stages/operations/units/unit-01-operational-runbook.md` scenarios 5 ("Reconciliation fingerprint mismatch") and 11 ("Reconciliation gate fires on stage with stale fingerprint")
+- Operations telemetry coverage: `stages/operations/units/unit-02-telemetry-coverage.md`
+
+**Disposition for downstream stages:**
+
+- Product, design, and development specs in this intent treat reconciliation as **annexed**, not as a v1 deliverable. They reference this section for provenance and do not author fresh acceptance criteria, data contracts, behavioral specs, or unit specs against it.
+- Operations specs reference reconciliation because the subsystem was already on the branch when operations ran; they treat it as an **inherited operational surface** to monitor, not a feature this intent designed.
+- Future product cycles that want to take ownership of reconciliation should open a separate intent ("upstream-artifact reconciliation") that traces it through inception → product → design → development on its own merits.
+
+**Why this is documented as annex rather than retroactively scoped in:** Retroactively framing reconciliation as "always part of this intent's vision" would falsify the discovery record. The original conversation (`knowledge/CONVERSATION-CONTEXT.md`) and the success criteria above are unambiguously about human-authored writes, not about agent-authored cross-document drift. Annexing preserves the honest cross-stage trace this verifier-style finding asked for without inventing a vision the inception stage did not have.

@@ -652,3 +652,51 @@ It is *not* updated for routine implementation changes (new hats, new review age
 **Conflict resolution:** When this document and a more-specific document (e.g., `plugin/studios/ARCHITECTURE.md`, the design-stage architecture spec) disagree, the more-specific document is authoritative for its scope. This document holds the cross-cutting view: how the pieces fit together at the repository level and why those boundaries are where they are.
 
 **Currency:** Outdated sections are updated or removed in the same PR that makes them outdated. Stale architecture documentation is worse than no architecture documentation.
+
+---
+
+## Annex: Upstream-Reconciliation Pre-Tick Gate (Co-Located, Not Derived from This Intent)
+
+The action surface in §2.3 lists `manual_change_assessment` as the only NEW action attributable to this intent. A second new action — `upstream_reconciliation_required` — also exists in the discriminated union as of this branch. It belongs to a separate subsystem co-located on this intent's branch via the 2026-05-01 main-merge (origin: repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30).
+
+**Action surface, including the co-located subsystem:**
+
+```
+"upstream_reconciliation_required"   # NOT FROM THIS INTENT — pre-tick reconciliation gate
+                                     #   dispatched when corpus fingerprint detects
+                                     #   cross-document divergence (tool-name,
+                                     #   http-status, field-name) between agent-authored
+                                     #   upstream artifacts. Implementation:
+                                     #   packages/haiku/src/orchestrator/workflow/
+                                     #     upstream-reconciliation.ts
+                                     #   Wiring: packages/haiku/src/orchestrator/workflow/
+                                     #     run-tick.ts
+                                     #   Resolution path: agent reconciles upstream
+                                     #     artifacts and re-ticks, OR calls
+                                     #     `haiku_reconciliation_acknowledge`.
+```
+
+**MCP tool surface, including the co-located subsystem:**
+
+The `haiku_reconciliation_acknowledge` MCP tool (acknowledge an intentional divergence and proceed) is also part of the co-located subsystem. It is referenced by the operations runbook (`stages/operations/units/unit-01-operational-runbook.md` scenarios 5 and 11). It is NOT a tool this intent's design or development specified.
+
+**Pre-tick gate chain, including the co-located subsystem:**
+
+The pre-tick gate chain on this branch is:
+
+```
+tamper-detection → feedback-triage → drift-detection → upstream-reconciliation → per-state dispatch
+```
+
+The drift-detection gate (this intent) and the upstream-reconciliation gate (the co-located subsystem) are **independent pre-tick gates** with disjoint scopes:
+
+| Gate | Detects | Triggers Action |
+|---|---|---|
+| drift-detection (this intent) | Human writes to tracked-surface files (per-file SHA mismatch vs `baseline.json`) | `manual_change_assessment` |
+| upstream-reconciliation (co-located subsystem) | Cross-document divergence between agent-authored upstream artifacts (corpus fingerprint mismatch) | `upstream_reconciliation_required` |
+
+The two gates do not share state, do not interact, and target different scope classes. The drift-detection gate consumes `baseline.json`; the reconciliation gate consumes a `corpus_fingerprint` value persisted in per-stage `state.json`. The two persistence channels are independent.
+
+**Why this annex exists rather than full integration:** Bringing the reconciliation gate into the architecture proper (assigning it section numbers in §2-§7, adding rows to §3.1's category table, editing the §1 module map's responsibilities) would require this intent to take design ownership of a subsystem its inception did not propose. The reconciler-style honest answer is to acknowledge the gate's presence on the branch and point at its source, leaving full architectural integration to a future intent that explicitly takes ownership of reconciliation.
+
+**Cross-references:** See `knowledge/DISCOVERY.md` § "Annexed Subsystem", `knowledge/DESIGN-DECISIONS.md` Annex A, `knowledge/IMPLEMENTATION-MAP.md` § "Annex: Out-of-Scope Subsystem", and `stages/design/artifacts/ARCHITECTURE.md` § "Annex: Co-Located Upstream-Reconciliation Gate".

@@ -903,3 +903,21 @@ These are observations that surfaced while drafting acceptance criteria but whos
 - **Coverage mapping dependency** — Mapping each AC above to specific test layers (unit, integration, e2e) is COVERAGE-MAPPING.md territory.
 - **Security boundary** — AC-TA1 through AC-TA4 close DEC-9. The broader hook-bypass-as-liability risk (DISCOVERY.md §Risks) that might produce v2 harness-level enforcement lives outside this artifact.
 - **Migration / upgrade story** — AC-G8 covers the user-facing first-tick-after-upgrade behavior; the operations and rollout story (feature flag, staged rollout, telemetry on the first-tick storm) is ROLLOUT-AND-BASELINE-ESTABLISHMENT.md territory.
+
+---
+
+## Annex: Co-Located Subsystem Excluded from These Acceptance Criteria
+
+A separate subsystem — **upstream-artifact reconciliation** — exists on this intent's branch (entered via the 2026-05-01 main-merge from repo PR #283 "feat(orchestrator): file-based dispatch + reconciliation + unit-write validation", merged 2026-04-30). It detects cross-document divergence between agent-authored upstream artifacts and is orthogonal to this intent's human-file-modification scope.
+
+**No acceptance criteria above cover the reconciliation subsystem.** AC-G1 through AC-G13, AC-DR1 through AC-DR9, AC-RF1 through AC-RF6, AC-TA1 through AC-TA4, AC-OS1 through AC-OS4, and AC-NF1 through AC-NF6 all pertain exclusively to drift-detection of human writes, the `manual_change_assessment` action, the `haiku_human_write` MCP tool, the SPA upload paths, and related human-file-modification behavior.
+
+The reconciliation subsystem's own user-observable behaviors — emission of the `upstream_reconciliation_required` action, semantics of the `haiku_reconciliation_acknowledge` MCP tool, fingerprint-mismatch latency budgets — are **not** under acceptance test in this intent. They are:
+
+1. Inherited by the operations stage as an operational surface to monitor (alerts in `deploy/operations/drift-detection-alerts.yaml` and runbook scenarios in `stages/operations/units/unit-01-operational-runbook.md` scenarios 5 and 11).
+2. Validated by the implementation's own test file (`packages/haiku/test/upstream-reconciliation.test.mjs`) authored under PR #283.
+3. Out of scope for the product validation deliverable this artifact represents.
+
+A future intent that takes ownership of upstream-reconciliation should author its own ACCEPTANCE-CRITERIA.md with criteria covering: divergence-detection behavior across the three classes (tool-name, http-status, field-name), `haiku_reconciliation_acknowledge` semantics, false-positive prevention (fingerprint mismatch only when corpus actually changed), and operator-observable telemetry. This intent does not and cannot author those criteria — its product elaboration was scoped to human writes.
+
+**Cross-references:** See `knowledge/DISCOVERY.md` § "Annexed Subsystem", `knowledge/DESIGN-DECISIONS.md` Annex A, `knowledge/IMPLEMENTATION-MAP.md` § "Annex: Out-of-Scope Subsystem".

@@ -430,26 +430,46 @@ write), so a hostile agent's blast radius is capped at the schema edge.
 - **Recommendation**: never log raw rationale / feedback body / file
   content as a span attribute; restrict to enums + hashes.
 
-### 6.4. `jsonwebtoken`
+### 6.4. Forward-looking dependency hygiene (not in `package.json` today)
 
-- **Algorithm-confusion (`alg: none`, RS-vs-HS swap)**: classic
-  jsonwebtoken pitfall. We do *not* use `jsonwebtoken` — we sign and
-  verify in `tunnel.ts` using `crypto.createHmac` directly, with explicit
-  `alg !== "HS256"` rejection and constant-time signature compare. The
-  dependency enumeration here is forward-looking: if a future refactor
-  pulls in `jsonwebtoken` to replace the hand-rolled HMAC path, the
-  sign/verify pair MUST be called with explicit `algorithms: ["HS256"]`
-  on verify (the library defaults to all algorithms allowed pre-9.x).
-- **Key-confusion via `EPHEMERAL_SECRET` rotation**: if the verify path
+This sub-section is **NOT** a present third-party surface. It is a
+code-review checklist for hypothetical future additions that the
+hand-rolled HMAC path in `packages/haiku/src/tunnel.ts` would naturally
+attract. Listing it under §6 with the live deps would misrepresent the
+present surface; surfacing it here keeps the audit checklist near the
+real enumeration without claiming the dependency exists.
+
+(Verification: `grep -n "jsonwebtoken" packages/haiku/package.json` →
+no output; `grep -rn "jsonwebtoken" packages/haiku/src/` → no output.
+Token sign/verify lives in `packages/haiku/src/tunnel.ts` using
+`crypto.createHmac` directly — see §1.3 / §1.4 for the
+`EPHEMERAL_SECRET` lifecycle and JWT claim semantics.)
+
+**If a future refactor adopts `jsonwebtoken`** to replace the
+hand-rolled HMAC path, the audit MUST cover:
+
+- **Algorithm-confusion (`alg: none`, RS-vs-HS swap)**: the verify call
+  MUST be invoked with explicit `algorithms: ["HS256"]` (the library
+  defaults to all algorithms allowed pre-9.x). The current hand-rolled
+  path already enforces `alg !== "HS256"` rejection and constant-time
+  signature compare; the equivalent bar must hold post-refactor.
+- **Key-confusion via `EPHEMERAL_SECRET` rotation**: a verify path that
   is ever passed a stale secret (e.g. token minted under secret-A,
-  verified under secret-B without re-issuing), `bad_signature` is the
-  correct verdict. Today this is impossible because the secret is
+  verified under secret-B without re-issuing) MUST return
+  `bad_signature`. Today this is impossible because the secret is
   process-local and never rotated within a process. A future refactor
   that adds key rotation MUST track which secret each token was minted
   against and accept verify against any non-revoked key.
 - **Recommendation**: keep using the hand-rolled HMAC path until there
-  is a concrete reason to take the dependency; if added later, audit the
-  verify call site for explicit `algorithms` allowlist.
+  is a concrete reason to take the dependency; if added later, audit
+  the verify call site for the explicit `algorithms` allowlist before
+  the unit's gate passes.
+
+(Tracked separately: the actually-present third-party deps that §6
+should additionally cover — `@sentry/node`, `marked`, `@fastify/cors`,
+`@fastify/rate-limit` — are surfaced in their own findings on this
+artifact and will be folded into §6.1 – §6.3's enumeration in those
+fix loops.)
 
 ---
 

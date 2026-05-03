@@ -201,6 +201,10 @@ async function streamToTempfile(
 export async function registerUploadRoutes(
 	instance: FastifyInstance,
 ): Promise<void> {
+	// audit-allow: this file mentions fastify-plugin in commentary only;
+	// the wrapper below is an anonymous inner plugin (NOT fastify-plugin)
+	// so global hooks (including the V-08 csrfPreHandler) propagate.
+	//
 	// Wrap the upload routes in an encapsulated child plugin so that
 	// @fastify/multipart's content-type parser and request decorators
 	// (req.parts, req.isMultipart, etc.) are scoped to this sub-tree

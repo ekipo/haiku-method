@@ -83,15 +83,19 @@ writeFileSync(
 )
 
 // Pre-create a file to test replace mode.
+// NOTE: VULN-REPORT V-01/V-02 — `.html` is now a blocked extension on
+// upload (renders inline → stored-XSS). Use `.md` for the test fixture
+// since markdown has the same "designer attaches notes" semantics
+// without the script-execution vector.
 writeFileSync(
 	join(
 		intentDirPath,
 		"stages",
 		stageName,
 		"artifacts",
-		"dashboard-layout.html",
+		"dashboard-layout.md",
 	),
-	"<html><body>Original</body></html>",
+	"# Dashboard layout — original\n",
 )
 
 // Create a second intent for archived/locked tests.
@@ -270,15 +274,22 @@ async function run() {
 	console.log("\n=== POST /api/intents/:intent/uploads/stage-output ===")
 
 	await test("Designer replaces a stage output: file written, action-log + audit-log stamped, no baseline update", async () => {
-		const fileContent = Buffer.from("<html><body>Dashboard v2</body></html>")
+		const fileContent = Buffer.from("# Dashboard layout — v2\n")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/dashboard-layout.html",
+				target_path: "artifacts/dashboard-layout.md",
 				mode: "replace",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "dashboard-v2.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "dashboard-v2.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -319,12 +330,12 @@ async function run() {
 			"stages",
 			stageName,
 			"artifacts",
-			"dashboard-layout.html",
+			"dashboard-layout.md",
 		)
 		assert.ok(existsSync(dest), "Destination file should exist")
 		const written = readFileSync(dest, "utf-8")
 		assert.ok(
-			written.includes("Dashboard v2"),
+			written.includes("Dashboard layout — v2"),
 			"File should contain new content",
 		)
 
@@ -364,16 +375,23 @@ async function run() {
 	})
 
 	await test("Replace preserves filename; uploaded file is renamed to the original target name", async () => {
-		// The target is "dashboard-layout.html"; we upload "dashboard-v3.html"
-		const fileContent = Buffer.from("<html><body>Dashboard v3</body></html>")
+		// The target is "dashboard-layout.md"; we upload "dashboard-v3.md"
+		const fileContent = Buffer.from("# Dashboard layout — v3\n")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/dashboard-layout.html",
+				target_path: "artifacts/dashboard-layout.md",
 				mode: "replace",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "dashboard-v3.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "dashboard-v3.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -388,39 +406,40 @@ async function run() {
 		const data = await res.json()
 		// Response path must use the TARGET name, not the uploaded filename.
 		assert.ok(
-			data.path.endsWith("dashboard-layout.html"),
-			`path should end with dashboard-layout.html, got: ${data.path}`,
+			data.path.endsWith("dashboard-layout.md"),
+			`path should end with dashboard-layout.md, got: ${data.path}`,
 		)
 
-		// No extra "dashboard-v3.html" created.
+		// No extra "dashboard-v3.md" created.
 		const extraFile = join(
 			intentDirPath,
 			"stages",
 			stageName,
 			"artifacts",
-			"dashboard-v3.html",
+			"dashboard-v3.md",
 		)
 		assert.ok(
 			!existsSync(extraFile),
-			"dashboard-v3.html must NOT be created in the worktree",
+			"dashboard-v3.md must NOT be created in the worktree",
 		)
 	})
 
 	await test("mode=create with colliding filename returns 409 filename_collision", async () => {
-		// dashboard-layout.html already exists.
+		// dashboard-layout.md already exists.
 		const fileContent = Buffer.from("collision content")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/dashboard-layout.html",
+				target_path: "artifacts/dashboard-layout.md",
 				mode: "create",
 				attribute_to_user: "bob",
 			},
 			[
 				{
 					name: "file",
-					filename: "dashboard-layout.html",
+					filename: "dashboard-layout.md",
 					content: fileContent,
+					contentType: "text/markdown",
 				},
 			],
 		)
@@ -446,7 +465,7 @@ async function run() {
 			"stages",
 			stageName,
 			"artifacts",
-			"dashboard-layout.html",
+			"dashboard-layout.md",
 		)
 		assert.ok(existsSync(dest))
 	})
@@ -460,11 +479,18 @@ async function run() {
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/too-large.html",
+				target_path: "artifacts/too-large.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "too-large.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "too-large.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -506,11 +532,18 @@ async function run() {
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/new-file.html",
+				target_path: "artifacts/new-file.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "new-file.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "new-file.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -534,7 +567,7 @@ async function run() {
 			"stages",
 			stageName,
 			"artifacts",
-			"new-file.html",
+			"new-file.md",
 		)
 		assert.ok(
 			!existsSync(destFile),
@@ -547,11 +580,18 @@ async function run() {
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/some-file.html",
+				target_path: "artifacts/some-file.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "some-file.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "some-file.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -574,11 +614,18 @@ async function run() {
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/some-file.html",
+				target_path: "artifacts/some-file.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "some-file.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "some-file.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(
@@ -671,6 +718,214 @@ async function run() {
 			data.error === "bad_target_path" || data.code === "bad_target_path",
 			`Expected bad_target_path, got: ${JSON.stringify(data)}`,
 		)
+	})
+
+	// ── VULN-REPORT V-01/V-02: extension/MIME allowlist ───────────────────────
+
+	console.log(
+		"\n=== VULN-REPORT V-01/V-02: extension + MIME allowlist (stage-output) ===",
+	)
+
+	await test("stage-output: text/html upload rejected with 415 unsupported_media_type (V-02)", async () => {
+		// V-02: stored XSS via stage-output `.html` upload. The server MUST
+		// reject `.html` files at the upload boundary regardless of any
+		// out-of-scope serve-side hardening.
+		const fileContent = Buffer.from(
+			"<html><script>alert('xss')</script></html>",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/evil-mockup.html",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "evil-mockup.html",
+					content: fileContent,
+					contentType: "text/html",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+		const data = await res.json()
+		assert.ok(
+			data.error === "unsupported_media_type" ||
+				data.code === "unsupported_media_type",
+			`Expected unsupported_media_type, got: ${JSON.stringify(data)}`,
+		)
+		// File must NOT be on disk.
+		const dest = join(
+			intentDirPath,
+			"stages",
+			stageName,
+			"artifacts",
+			"evil-mockup.html",
+		)
+		assert.ok(
+			!existsSync(dest),
+			"Rejected `.html` upload must not land on disk",
+		)
+	})
+
+	await test("stage-output: MIME spoof — text/plain claim with .html filename rejected (V-02 defence-in-depth)", async () => {
+		// MIME-spoof attack: client claims text/plain but ships a .html
+		// filename, hoping the allowlist passes since text/plain IS allowed.
+		// The extension blocklist must catch this before the MIME allowlist.
+		const fileContent = Buffer.from(
+			"<html><script>alert('spoof')</script></html>",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/spoofed.html",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "spoofed.html",
+					content: fileContent,
+					contentType: "text/plain",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`MIME spoof should still reject — expected 415, got ${res.status}`,
+		)
+		const data = await res.json()
+		assert.ok(
+			data.error === "unsupported_media_type" ||
+				data.code === "unsupported_media_type",
+		)
+	})
+
+	await test("stage-output: .svg upload rejected even when MIME claims image/svg+xml (V-02)", async () => {
+		const fileContent = Buffer.from(
+			'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/icon.svg",
+				mode: "upsert",
+				attribute_to_user: "designer",
+			},
+			[
+				{
+					name: "file",
+					filename: "icon.svg",
+					content: fileContent,
+					contentType: "image/svg+xml",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+	})
+
+	await test("stage-output: target_path with .html extension rejected even when uploaded filename is safe (V-02)", async () => {
+		// Defence-in-depth — uploaded filename is safe (.md), but target_path
+		// names a `.html` extension on disk. After atomic rename the file
+		// would land as `.html` and be served as text/html. Must reject.
+		const fileContent = Buffer.from("# innocent markdown\n")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/landed-as.html",
+				mode: "upsert",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "innocent.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+	})
+
+	// ── VULN-REPORT V-07: hard cap clamp on HAIKU_UPLOAD_MAX_BYTES ────────────
+
+	console.log("\n=== VULN-REPORT V-07: hard cap clamps oversize env value ===")
+
+	await test("HAIKU_UPLOAD_MAX_BYTES clamps to MAX_UPLOAD_BYTES_HARD_CAP (50 MiB) when env exceeds the hard cap (V-07: hard cap upload clamp)", async () => {
+		// Direct unit-level assertion on getUploadMaxBytes() — uploading
+		// 50 MiB+1 of payload over loopback HTTP would dominate the test
+		// suite runtime. The behaviour we care about is "any env value
+		// above the hard cap clamps to the hard cap"; the streaming path
+		// already has its own 413 coverage in the smaller-cap test above.
+		const { getUploadMaxBytes, UPLOAD_MAX_BYTES_HARD_CAP } = await import(
+			"../src/http/upload-routes.ts"
+		)
+		const originalMax = process.env.HAIKU_UPLOAD_MAX_BYTES
+		try {
+			process.env.HAIKU_UPLOAD_MAX_BYTES = String(10 * 1024 * 1024 * 1024) // 10 GB
+			const clamped = getUploadMaxBytes()
+			assert.strictEqual(
+				clamped,
+				UPLOAD_MAX_BYTES_HARD_CAP,
+				`oversize env (10GB) must clamp to hard cap (${UPLOAD_MAX_BYTES_HARD_CAP}); got ${clamped}`,
+			)
+			assert.strictEqual(
+				UPLOAD_MAX_BYTES_HARD_CAP,
+				50 * 1024 * 1024,
+				"hard cap must be exactly 50 MiB (per V-07 design)",
+			)
+
+			// Sanity: a value below the hard cap is honoured untouched.
+			process.env.HAIKU_UPLOAD_MAX_BYTES = "1024"
+			assert.strictEqual(
+				getUploadMaxBytes(),
+				1024,
+				"env value below hard cap should be returned unchanged",
+			)
+		} finally {
+			if (originalMax !== undefined) {
+				process.env.HAIKU_UPLOAD_MAX_BYTES = originalMax
+			} else {
+				delete process.env.HAIKU_UPLOAD_MAX_BYTES
+			}
+		}
 	})
 
 	// ── Knowledge upload ───────────────────────────────────────────────────────
@@ -769,6 +1024,105 @@ async function run() {
 		)
 	})
 
+	// ── VULN-REPORT V-01: knowledge-route extension/MIME allowlist ───────────
+
+	console.log(
+		"\n=== VULN-REPORT V-01: extension + MIME allowlist (knowledge) ===",
+	)
+
+	await test("knowledge: text/html upload rejected with 415 (V-01: html upload rejected)", async () => {
+		const fileContent = Buffer.from(
+			"<html><script>alert('xss')</script></html>",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "evil-doc.html",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "evil-doc.html",
+					content: fileContent,
+					contentType: "text/html",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+		const dest = join(intentDirPath, "knowledge", "evil-doc.html")
+		assert.ok(!existsSync(dest), "Rejected `.html` file must not land on disk")
+	})
+
+	await test("knowledge: MIME spoof rejected — text/plain claim with .html target_filename (V-01 defence-in-depth)", async () => {
+		const fileContent = Buffer.from(
+			"<html><script>alert('spoof')</script></html>",
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "spoofed.html",
+				attribute_to_user: "attacker",
+			},
+			[
+				{
+					name: "file",
+					filename: "innocent.txt",
+					content: fileContent,
+					contentType: "text/plain",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(
+			res.status,
+			415,
+			`MIME spoof should still reject — expected 415, got ${res.status}`,
+		)
+	})
+
+	await test("knowledge: .svg upload rejected even when MIME claims image/svg+xml (V-01)", async () => {
+		const fileContent = Buffer.from(
+			'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+		)
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "diagram.svg",
+				attribute_to_user: "po",
+			},
+			[
+				{
+					name: "file",
+					filename: "diagram.svg",
+					content: fileContent,
+					contentType: "image/svg+xml",
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{
+				method: "POST",
+				headers: { "Content-Type": contentType },
+				body,
+			},
+		)
+		assert.strictEqual(res.status, 415, `Expected 415, got ${res.status}`)
+	})
+
 	// ── tick_counter correctness (Finding 2) ──────────────────────────────────
 
 	console.log(
@@ -777,15 +1131,22 @@ async function run() {
 
 	await test("stage-output upload action-log entry tick_counter matches active stage iteration", async () => {
 		// state.json has iteration: 3 (set during fixture setup at top of file).
-		const fileContent = Buffer.from("<html>tick counter test</html>")
+		const fileContent = Buffer.from("# tick counter test\n")
 		const { body, contentType } = buildMultipart(
 			{
 				stage: stageName,
-				target_path: "artifacts/tick-test.html",
+				target_path: "artifacts/tick-test.md",
 				mode: "upsert",
 				attribute_to_user: "alice",
 			},
-			[{ name: "file", filename: "tick-test.html", content: fileContent }],
+			[
+				{
+					name: "file",
+					filename: "tick-test.md",
+					content: fileContent,
+					contentType: "text/markdown",
+				},
+			],
 		)
 
 		const res = await fetch(

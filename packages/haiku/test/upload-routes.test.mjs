@@ -155,6 +155,79 @@ writeFileSync(
 	}),
 )
 
+// V-06 fixture: intent with `status: 'locked'` (single-quoted YAML) — the
+// pre-fix substring scan missed this and let uploads through. The shared
+// gray-matter helper MUST classify it as locked.
+const singleQuotedLockedSlug = "test-singlequoted-locked-intent"
+const singleQuotedLockedPath = join(haikuRoot, "intents", singleQuotedLockedSlug)
+mkdirSync(join(singleQuotedLockedPath, "stages", stageName, "artifacts"), {
+	recursive: true,
+})
+writeFileSync(
+	join(singleQuotedLockedPath, "intent.md"),
+	`---
+title: Single-Quoted Locked Intent
+studio: software
+mode: continuous
+active_stage: ${stageName}
+status: 'locked'
+stages:
+  - ${stageName}
+started_at: 2026-04-15T18:00:00Z
+completed_at: null
+---
+`,
+)
+writeFileSync(
+	join(singleQuotedLockedPath, "stages", stageName, "state.json"),
+	JSON.stringify({
+		stage: stageName,
+		status: "active",
+		phase: "execute",
+		visits: 0,
+	}),
+)
+
+// V-06 fixture: intent with `status: active` in frontmatter but body text
+// that quotes the literal string `status: locked` (e.g. an operator runbook
+// excerpt). The pre-fix substring scan tripped a false positive here. The
+// shared gray-matter helper MUST classify it as NOT locked.
+const bodyTextSlug = "test-bodytext-falsepositive-intent"
+const bodyTextPath = join(haikuRoot, "intents", bodyTextSlug)
+mkdirSync(join(bodyTextPath, "stages", stageName, "artifacts"), {
+	recursive: true,
+})
+writeFileSync(
+	join(bodyTextPath, "intent.md"),
+	`---
+title: Active Intent (with locked-status excerpt in body)
+studio: software
+mode: continuous
+active_stage: ${stageName}
+status: active
+stages:
+  - ${stageName}
+started_at: 2026-04-15T18:00:00Z
+completed_at: null
+---
+
+# Operator Runbook
+
+When the operator sees \`status: locked\` in an intent.md, they should
+investigate before unlocking — the body text MUST NOT trip the SPA
+upload route's locked-intent gate (V-06).
+`,
+)
+writeFileSync(
+	join(bodyTextPath, "stages", stageName, "state.json"),
+	JSON.stringify({
+		stage: stageName,
+		status: "active",
+		phase: "execute",
+		visits: 0,
+	}),
+)
+
 // Create a completed-stage intent for stage_not_writable test.
 const sealedSlug = "test-sealed-stage-intent"
 const sealedDirPath = join(haikuRoot, "intents", sealedSlug)
@@ -856,6 +929,196 @@ async function run() {
 			entry.tick_counter,
 			3,
 			`Expected tick_counter 3 for knowledge upload (stage-scoped), got ${entry.tick_counter}`,
+		)
+	})
+
+	// ── V-06: shared frontmatter parser, no substring checks ──────────────────
+	console.log(
+		"\n=== V-06: frontmatter-status checks (gray-matter, not raw.includes) ===",
+	)
+
+	await test("V-06: single-quoted `status: 'locked'` returns 423 intent_locked", async () => {
+		const fileContent = Buffer.from("content")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/should-not-land.html",
+				mode: "upsert",
+				attribute_to_user: "alice",
+			},
+			[
+				{
+					name: "file",
+					filename: "should-not-land.html",
+					content: fileContent,
+				},
+			],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${singleQuotedLockedSlug}/uploads/stage-output`,
+			{ method: "POST", headers: { "Content-Type": contentType }, body },
+		)
+		assert.strictEqual(
+			res.status,
+			423,
+			`single-quoted YAML status: 'locked' MUST classify as locked; got ${res.status}`,
+		)
+	})
+
+	await test("V-06: body text quoting `status: locked` is NOT a false-positive lock", async () => {
+		const fileContent = Buffer.from("content")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/landed.html",
+				mode: "upsert",
+				attribute_to_user: "alice",
+			},
+			[{ name: "file", filename: "landed.html", content: fileContent }],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${bodyTextSlug}/uploads/stage-output`,
+			{ method: "POST", headers: { "Content-Type": contentType }, body },
+		)
+		assert.strictEqual(
+			res.status,
+			200,
+			`intent body containing literal "status: locked" prose MUST NOT trip the locked gate; got ${res.status}`,
+		)
+		const dest = join(
+			bodyTextPath,
+			"stages",
+			stageName,
+			"artifacts",
+			"landed.html",
+		)
+		assert.ok(existsSync(dest), "Upload should have landed on disk")
+	})
+
+	// ── V-03: claimed_author_id (canonical) is written alongside the legacy
+	//         human_author_id alias on every new audit-log + action-log entry.
+	console.log("\n=== V-03: claimed_author_id rename (legacy alias mirrored) ===")
+
+	await test("V-03: stage-output upload writes claimed_author_id AND human_author_id (legacy alias)", async () => {
+		const fileContent = Buffer.from("<html><body>Auth-test v1</body></html>")
+		const { body, contentType } = buildMultipart(
+			{
+				stage: stageName,
+				target_path: "artifacts/auth-test.html",
+				mode: "create",
+				attribute_to_user: "alice@example.com",
+			},
+			[{ name: "file", filename: "auth-test.html", content: fileContent }],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/stage-output`,
+			{ method: "POST", headers: { "Content-Type": contentType }, body },
+		)
+		assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`)
+
+		const actionLog = join(intentDirPath, "action-log.jsonl")
+		const lines = readFileSync(actionLog, "utf-8").split("\n").filter(Boolean)
+		const entry = JSON.parse(lines[lines.length - 1])
+		assert.strictEqual(
+			entry.claimed_author_id,
+			"alice@example.com",
+			"claimed_author_id MUST carry the SPA-supplied attribute_to_user",
+		)
+		assert.strictEqual(
+			entry.human_author_id,
+			"alice@example.com",
+			"human_author_id legacy alias MUST mirror claimed_author_id during the rename window",
+		)
+	})
+
+	await test("V-03: knowledge upload writes claimed_author_id AND human_author_id (legacy alias)", async () => {
+		const fileContent = Buffer.from("# Auth Test Knowledge")
+		const { body, contentType } = buildMultipart(
+			{
+				target_filename: "v03-claim-test.md",
+				attribute_to_user: "po@example.com",
+			},
+			[{ name: "file", filename: "v03-claim-test.md", content: fileContent }],
+		)
+		const res = await fetch(
+			`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+			{ method: "POST", headers: { "Content-Type": contentType }, body },
+		)
+		assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`)
+
+		const actionLog = join(intentDirPath, "action-log.jsonl")
+		const lines = readFileSync(actionLog, "utf-8").split("\n").filter(Boolean)
+		const entry = JSON.parse(lines[lines.length - 1])
+		assert.strictEqual(entry.claimed_author_id, "po@example.com")
+		assert.strictEqual(entry.human_author_id, "po@example.com")
+		assert.strictEqual(
+			entry.tick_scope,
+			"intent",
+			"intent-scope knowledge upload MUST stamp tick_scope: 'intent' (V-05)",
+		)
+	})
+
+	// ── V-05: intent-scope knowledge upload uses the deterministic
+	//         intent-scope tick counter (NOT the non-deterministic
+	//         readdir-order per-stage tick), so two concurrent intent-scope
+	//         uploads cannot share an entry_id and the drift gate's
+	//         consumer can union per-stage and intent-scope action-log
+	//         entries when classifying a tracked file.
+	console.log(
+		"\n=== V-05: intent-scope knowledge upload uses deterministic tick ===",
+	)
+
+	await test("V-05: two consecutive intent-scope knowledge uploads get distinct, monotonic tick_counter values", async () => {
+		const upload = async (filename) => {
+			const { body, contentType } = buildMultipart(
+				{
+					target_filename: filename,
+					attribute_to_user: "po",
+				},
+				[
+					{
+						name: "file",
+						filename,
+						content: Buffer.from(`content for ${filename}`),
+					},
+				],
+			)
+			const res = await fetch(
+				`${baseUrl}/api/intents/${intentSlug}/uploads/knowledge`,
+				{ method: "POST", headers: { "Content-Type": contentType }, body },
+			)
+			assert.strictEqual(
+				res.status,
+				200,
+				`Expected 200 for ${filename}, got ${res.status}`,
+			)
+		}
+		await upload("v05-tick-a.md")
+		await upload("v05-tick-b.md")
+
+		const actionLog = join(intentDirPath, "action-log.jsonl")
+		const allLines = readFileSync(actionLog, "utf-8")
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l))
+		const aEntry = allLines.find((e) => e.path === "knowledge/v05-tick-a.md")
+		const bEntry = allLines.find((e) => e.path === "knowledge/v05-tick-b.md")
+		assert.ok(aEntry, "Action-log entry for v05-tick-a.md should exist")
+		assert.ok(bEntry, "Action-log entry for v05-tick-b.md should exist")
+		assert.strictEqual(
+			aEntry.tick_scope,
+			"intent",
+			"intent-scope upload MUST stamp tick_scope: 'intent'",
+		)
+		assert.strictEqual(bEntry.tick_scope, "intent")
+		assert.ok(
+			bEntry.tick_counter > aEntry.tick_counter,
+			`Second upload MUST have a higher intent-scope tick than the first; got a=${aEntry.tick_counter} b=${bEntry.tick_counter}`,
+		)
+		assert.notStrictEqual(
+			aEntry.entry_id,
+			bEntry.entry_id,
+			"entry_id collision is what V-05 set out to prevent",
 		)
 	})
 

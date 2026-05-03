@@ -2031,6 +2031,171 @@ export function intentDir(slug: string): string {
 	return join(findHaikuRoot(), "intents", slug)
 }
 
+// ── Intent-status helpers (V-06: shared parser, no substring checks) ───────
+//
+// `isIntentLocked(intentDir)` and `isIntentArchived(intentDir)` are the
+// canonical shared helpers used by every code path that asks "is this
+// intent locked?" or "is this intent archived?". They parse the
+// `intent.md` frontmatter via `gray-matter` so YAML quoting / whitespace
+// variants (`status: 'locked'`, `status:    locked`, `status: "archived"`,
+// etc.) all classify correctly, and so body text containing the literal
+// substring `status: locked` (e.g. an operator runbook excerpt) does NOT
+// trip a false positive.
+//
+// `intentDirAbsPath` is the absolute path returned by `intentDir(slug)`
+// (or unitIntentDir, etc.). Both helpers swallow filesystem and parse
+// errors and return `false` on any failure — caller treats unknown state
+// as "not locked / not archived" so missing files don't block writes.
+//
+// Locked check inspects `status === "locked"`. Archived check inspects
+// EITHER `status === "archived"` (legacy/terminal path) OR
+// `archived === true` (new boolean field used by haiku_intent_archive /
+// haiku_intent_unarchive). Both forms have to classify as archived for
+// upload-route + MCP-tool gates to agree on intent state.
+
+/** Return true when the intent at `intentDirAbsPath` has frontmatter
+ *  `status: locked` (any YAML quoting). False on parse error or missing
+ *  file — callers treat unknown state as "not locked". */
+export function isIntentLocked(intentDirAbsPath: string): boolean {
+	try {
+		const intentFile = join(intentDirAbsPath, "intent.md")
+		if (!existsSync(intentFile)) return false
+		const raw = readFileSync(intentFile, "utf-8")
+		const { data } = matter(raw)
+		return (data as Record<string, unknown>).status === "locked"
+	} catch {
+		return false
+	}
+}
+
+/** Return true when the intent at `intentDirAbsPath` is archived via
+ *  EITHER `status: archived` (legacy) OR `archived: true` (boolean
+ *  field). False on parse error or missing file. */
+export function isIntentArchived(intentDirAbsPath: string): boolean {
+	try {
+		const intentFile = join(intentDirAbsPath, "intent.md")
+		if (!existsSync(intentFile)) return false
+		const raw = readFileSync(intentFile, "utf-8")
+		const { data } = matter(raw)
+		const fm = data as Record<string, unknown>
+		return fm.status === "archived" || fm.archived === true
+	} catch {
+		return false
+	}
+}
+
+// ── Author-identity attribution (V-03: claim, not authority) ───────────────
+//
+// `claimed_author_id` is the canonical attribution field on
+// `write-audit.jsonl` and `action-log.jsonl` entries written by both
+// `haiku_human_write` (MCP) and the SPA upload routes (HTTP). It is
+// SELF-REPORTED — the agent or the SPA submitter says who they are, the
+// server records it as a CLAIM, no cross-check is performed. The legacy
+// field name `human_author_id` was misleading because consumers (and
+// reviewers reading audit logs) treated it as an authoritative identity
+// when it has always been agent-supplied. The rename matches VULN-REPORT
+// V-03 fix #2.
+//
+// Forward-only audit semantics: existing on-disk lines retain their
+// legacy `human_author_id` key unchanged (audit logs are append-only).
+// Readers MUST honour `claimed_author_id ?? human_author_id` so legacy
+// records continue to surface attribution. Writers MUST stamp the new
+// `claimed_author_id` field on every new line.
+//
+// Server-side identity binding (Option A) is explicitly OUT OF SCOPE
+// here and tracked as a follow-up: the SPA session table has no
+// reviewer-email field today, and capturing one requires a session-
+// bootstrap UI flow + ReviewSession schema extension. Until that lands,
+// renaming the field is the integrity-honest path: consumers see "this
+// is what the caller claimed" rather than "this is who wrote the file".
+
+/** Read the attribution claim from an audit-log or action-log record,
+ *  honouring the rename precedence: `claimed_author_id ?? human_author_id`.
+ *  Returns null when neither field is present or both are null. */
+export function readClaimedAuthorId(
+	record: Record<string, unknown>,
+): string | null {
+	const claimed = record.claimed_author_id
+	if (typeof claimed === "string" && claimed.length > 0) return claimed
+	const legacy = record.human_author_id
+	if (typeof legacy === "string" && legacy.length > 0) return legacy
+	return null
+}
+
+// ── Intent-scope tick counter (V-05: deterministic SPA-upload tick) ────────
+//
+// `getIntentScopeTickCounter(intentDirAbsPath)` returns a deterministic
+// monotonically-increasing counter scoped to the intent (NOT to any
+// individual stage). Used by the SPA upload route when `stage === null`
+// (intent-scope `knowledge/` uploads) so two consecutive uploads in the
+// same wall-clock millisecond can't pick non-deterministic tick values
+// from `readdirSync` order across stage state.json files.
+//
+// Storage: a single integer in `.haiku/intents/{slug}/intent-tick.json`
+// alongside intent.md. Each call atomically increments and returns the
+// new value. The counter is independent from per-stage `state.json
+// .iteration` counters — the drift gate's consumer-side fix unions
+// per-stage and intent-scope action-log entries when classifying tracked
+// files, so the two counters never need to share a key space.
+//
+// The drift gate's per-tick action-log lookup
+// (`drift-detection-gate.ts`) reads BOTH the firing stage's tick AND
+// every intent-scope tick observed for the file via the
+// `intentScopeActionLog` union. That's why the producer-side counter
+// being deterministic is necessary but not sufficient — the consumer
+// fix lives in `drift-detection-gate.ts`.
+//
+// Concurrency: this implementation is a best-effort single-process
+// counter. Two concurrent SPA uploads from the same MCP process see
+// distinct returned values because the read-increment-write happens on
+// the JS single thread before the next `await` boundary. Cross-process
+// races (an attacker spawning a second MCP) are not in scope; a real
+// fix for that lives in the audit-log hash-chaining follow-up.
+
+/** Path to the intent-scope tick counter file. */
+function intentScopeTickPath(intentDirAbsPath: string): string {
+	return join(intentDirAbsPath, "intent-tick.json")
+}
+
+/** Atomically read, increment, and return the intent-scope tick
+ *  counter. Creates the counter file at value 1 on first call. Returns
+ *  the freshly-incremented value (so the first call returns 1, second
+ *  returns 2, etc.) — never returns 0 to avoid colliding with the
+ *  per-stage tick-counter sentinel.
+ *
+ *  Synchronous for the same reason `getCurrentTickCounter` is
+ *  synchronous: the upload-route handler calls it inline and the
+ *  drift-gate consumer reads the resulting action-log entry on the
+ *  next tick (also synchronously). Failures are swallowed and the
+ *  function returns 0 — callers treat 0 as "no intent-scope tick
+ *  available, fall back to per-stage tick" so the route still
+ *  succeeds. */
+export function getIntentScopeTickCounter(intentDirAbsPath: string): number {
+	const tickFile = intentScopeTickPath(intentDirAbsPath)
+	let current = 0
+	try {
+		if (existsSync(tickFile)) {
+			const raw = readFileSync(tickFile, "utf-8")
+			const parsed = JSON.parse(raw) as { tick?: unknown }
+			if (typeof parsed.tick === "number" && parsed.tick >= 0) {
+				current = parsed.tick
+			}
+		}
+	} catch {
+		current = 0
+	}
+	const next = current + 1
+	try {
+		mkdirSync(dirname(tickFile), { recursive: true })
+		writeFileSync(tickFile, JSON.stringify({ tick: next }, null, 2))
+	} catch {
+		// Best-effort persistence — return the increment even if the
+		// write failed so the caller still gets a deterministic value
+		// for THIS process's lifetime.
+	}
+	return next
+}
+
 /**
  * Return the unit's worktree intent dir if the worktree exists on disk,
  * else the main intent dir. Used to validate unit-produced artifacts BEFORE

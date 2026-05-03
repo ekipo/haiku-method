@@ -749,19 +749,41 @@ export function getIntentStages(intentDir: string): string[] {
 	}
 }
 
-/** Read the action log for a specific tick synchronously.
- *  Returns an empty array when the file doesn't exist.
- *  Silently skips malformed lines. */
-export function readActionLogSync(
-	intentDir: string,
-	tickCounter: number,
-): Array<{
+/** Action-log entry shape exposed to in-process consumers (drift gate,
+ *  classifier). The on-disk record carries additional fields (timestamp,
+ *  entry_id, claimed_author_id, human_author_id, tick_scope) — readers
+ *  pluck what they need. */
+export interface ActionLogEntrySync {
 	entry_type: string
 	path: string
 	sha: string
 	author_class: string
 	tick_counter: number
-}> {
+	/** Tick scope discriminator — "stage" (per-stage counter, default) or
+	 *  "intent" (intent-scope counter, written by SPA `stage === null`
+	 *  uploads via `getIntentScopeTickCounter`). Older entries written
+	 *  before V-05 do NOT carry this field — readers MUST treat absent
+	 *  as "stage" for backwards compatibility. */
+	tick_scope?: "stage" | "intent"
+}
+
+/** Read the action log for a specific PER-STAGE tick synchronously.
+ *  Returns entries whose `tick_counter === tickCounter` AND whose
+ *  `tick_scope` is "stage" or absent (legacy default).
+ *
+ *  V-05 split: previously this returned every entry matching the tick
+ *  number, which let intent-scope SPA-upload entries collide with
+ *  per-stage entries that happened to share a counter value. The drift
+ *  gate now calls this for the per-stage half and `readIntentScopeActionLogSync`
+ *  for the intent-scope half, then unions the two for path-based
+ *  classification.
+ *
+ *  Returns an empty array when the file doesn't exist.
+ *  Silently skips malformed lines. */
+export function readActionLogSync(
+	intentDir: string,
+	tickCounter: number,
+): ActionLogEntrySync[] {
 	const filePath = join(intentDir, "action-log.jsonl")
 	if (!existsSync(filePath)) return []
 
@@ -772,25 +794,65 @@ export function readActionLogSync(
 		return []
 	}
 
-	const results: Array<{
-		entry_type: string
-		path: string
-		sha: string
-		author_class: string
-		tick_counter: number
-	}> = []
+	const results: ActionLogEntrySync[] = []
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim()
 		if (!trimmed) continue
 		try {
-			const parsed = JSON.parse(trimmed) as {
-				entry_type: string
-				path: string
-				sha: string
-				author_class: string
-				tick_counter: number
+			const parsed = JSON.parse(trimmed) as ActionLogEntrySync
+			// Stage-scope filter: include legacy entries (no tick_scope) and
+			// explicit "stage" entries; exclude intent-scope entries — those
+			// are read separately and unioned by the consumer.
+			const scope = parsed.tick_scope
+			const isStageEntry = scope === undefined || scope === "stage"
+			if (isStageEntry && parsed.tick_counter === tickCounter) {
+				results.push(parsed)
 			}
-			if (parsed.tick_counter === tickCounter) {
+		} catch {
+			// Malformed line — skip.
+		}
+	}
+	return results
+}
+
+/** Read EVERY intent-scope action-log entry synchronously, regardless of
+ *  tick number. Intent-scope entries are written by the SPA upload route
+ *  for `stage === null` knowledge uploads using the deterministic
+ *  `getIntentScopeTickCounter(intentDir)` counter (V-05 producer fix).
+ *
+ *  The drift gate's per-tick lookup unions per-stage and intent-scope
+ *  entries via `readIntentScopeActionLogSync(...)` so an SPA upload
+ *  written at intent.iteration=N appears as `human-via-mcp` on a drift
+ *  tick fired from stage=X with stage.iteration=M (V-05 consumer fix).
+ *  Without this union, the intent-scope entry's tick counter never
+ *  matches any per-stage tick the gate fires under, the per-tick filter
+ *  drops the entry, and the classification falls back to
+ *  `baselineEntry.author_class` (typically "agent" via the silent
+ *  auto-add path) — losing the `human-via-mcp` provenance.
+ *
+ *  Path-only filter: callers iterate the result by file path; tick
+ *  number is informational. Returns an empty array when the file
+ *  doesn't exist. Silently skips malformed lines. */
+export function readIntentScopeActionLogSync(
+	intentDir: string,
+): ActionLogEntrySync[] {
+	const filePath = join(intentDir, "action-log.jsonl")
+	if (!existsSync(filePath)) return []
+
+	let raw: string
+	try {
+		raw = readFileSync(filePath, "utf-8")
+	} catch {
+		return []
+	}
+
+	const results: ActionLogEntrySync[] = []
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		try {
+			const parsed = JSON.parse(trimmed) as ActionLogEntrySync
+			if (parsed.tick_scope === "intent") {
 				results.push(parsed)
 			}
 		} catch {

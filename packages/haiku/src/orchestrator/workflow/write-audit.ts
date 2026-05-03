@@ -20,13 +20,25 @@ import { dirname, join } from "node:path"
 
 /** Per-invocation audit record appended to `write-audit.jsonl`
  *  (MCP-TOOL-CONTRACT.md §8.1). Every field is present in stored records;
- *  `audit_log_appended` is always `true` in the file itself. */
+ *  `audit_log_appended` is always `true` in the file itself.
+ *
+ *  Author-identity attribution carries TWO keys (V-03 mitigation):
+ *    - `claimed_author_id` — canonical, written on every new line. The
+ *      name signals that this value is SELF-REPORTED (agent-supplied or
+ *      SPA-form-supplied) and not server-resolved. Consumers MUST treat
+ *      it as a claim, not an authority.
+ *    - `human_author_id`   — legacy name, mirrored on writes for forward
+ *      compatibility. Existing on-disk audit lines retain only the
+ *      legacy key; readers honour `claimed_author_id ?? human_author_id`. */
 export interface WriteAuditRecord {
 	timestamp: string
 	entry_id: string
 	path: string
 	sha: string
 	author_class: "human-via-mcp"
+	/** Self-reported attribution. New canonical field name. */
+	claimed_author_id: string | null
+	/** Legacy alias, mirrored to `claimed_author_id` on writes. */
 	human_author_id: string | null
 	rationale: string | null
 	user_instruction_excerpt: string | null
@@ -35,20 +47,33 @@ export interface WriteAuditRecord {
 	overwrite: boolean
 	dirs_created: string[]
 	audit_log_appended: true
+	/** Tick scope — "stage" for per-stage tick counter (default), "intent"
+	 *  for SPA intent-scope uploads stamped via getIntentScopeTickCounter.
+	 *  Drift-gate consumer keys its action-log union by this scope (V-05). */
+	tick_scope?: "stage" | "intent"
 }
 
 /** Per-tick action-log entry (ARCHITECTURE.md §6.2).
  *  Written by `haiku_human_write` and the SPA upload endpoint.
- *  Read by the drift-detection gate to classify author_class. */
+ *  Read by the drift-detection gate to classify author_class.
+ *
+ *  Author-identity carries `claimed_author_id` (canonical) and
+ *  `human_author_id` (legacy alias) — see WriteAuditRecord above. */
 export interface ActionLogEntry {
 	entry_type: "human_write" | "agent_write"
 	path: string
 	sha: string
 	author_class: "human-via-mcp" | "agent"
 	timestamp: string
+	/** Self-reported attribution. New canonical field name. */
+	claimed_author_id: string | null
+	/** Legacy alias, mirrored to `claimed_author_id` on writes. */
 	human_author_id: string | null
 	entry_id: string
 	tick_counter: number
+	/** Tick scope — "stage" for per-stage counter (default), "intent" for
+	 *  intent-scope (SPA `stage === null` uploads, V-05). */
+	tick_scope?: "stage" | "intent"
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

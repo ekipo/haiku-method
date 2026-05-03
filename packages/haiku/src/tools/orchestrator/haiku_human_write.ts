@@ -35,7 +35,7 @@ import {
 	truncateInstruction,
 	type WriteAuditRecord,
 } from "../../orchestrator/workflow/write-audit.js"
-import { findHaikuRoot } from "../../state-tools.js"
+import { findHaikuRoot, isIntentArchived } from "../../state-tools.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
@@ -322,10 +322,15 @@ export default defineTool({
 				enum: ["utf-8", "base64"],
 				description: "Encoding of the content field. Default: 'utf-8'.",
 			},
+			claimed_author_id: {
+				type: "string",
+				description:
+					"Self-reported identifier (username, email, UUID) of who the agent BELIEVES gave the instruction. Captured in the audit log as a CLAIM, not an authoritative identity — the server does not cross-check against any session or OS identity. Reviewers reading audit logs MUST treat this as 'what the agent said' rather than 'who did it'. (V-03 mitigation: renamed from `human_author_id` so consumers stop treating it as authoritative.)",
+			},
 			human_author_id: {
 				type: "string",
 				description:
-					"Identifier of the human who gave the instruction (username, email, UUID). Captured in the audit log. Self-reported — not validated.",
+					"DEPRECATED legacy alias for `claimed_author_id`. Accepted for backwards compatibility; the value is mirrored to `claimed_author_id` on persistence. New callers MUST use `claimed_author_id`.",
 			},
 			rationale: {
 				type: "string",
@@ -358,7 +363,13 @@ export default defineTool({
 		const content = args.content as string
 		const contentEncoding =
 			(args.content_encoding as string | undefined) ?? "utf-8"
-		const humanAuthorId = (args.human_author_id as string | undefined) ?? null
+		// V-03: prefer the canonical `claimed_author_id`; fall back to the
+		// legacy `human_author_id` so older callers still work. Either value
+		// is recorded as a CLAIM, not an authoritative identity.
+		const claimedAuthorId =
+			(args.claimed_author_id as string | undefined) ??
+			(args.human_author_id as string | undefined) ??
+			null
 		const rationale = (args.rationale as string | undefined) ?? null
 		const userInstructionRaw =
 			(args.user_instruction_excerpt as string | undefined) ?? null
@@ -395,29 +406,29 @@ export default defineTool({
 		}
 
 		// ── Check for archived intent ─────────────────────────────────────────
-		try {
-			const { data: intentFm } = matter(readFileSync(intentMd, "utf8"))
-			if ((intentFm as Record<string, unknown>).archived === true) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: JSON.stringify(
-								{
-									ok: false,
-									error: "intent_not_active",
-									message: `Intent '${slug}' is archived. Unarchive it first with haiku_intent_unarchive.`,
-								},
-								null,
-								2,
-							),
-						},
-					],
-					isError: true,
-				}
+		// V-06: delegate to the shared `isIntentArchived` helper so both the
+		// MCP tool and the SPA upload route agree on intent state semantics.
+		// The shared helper parses the YAML frontmatter via gray-matter, so
+		// `status: archived` (legacy) and `archived: true` (boolean) classify
+		// identically — no substring scans, no false positives on body text.
+		if (isIntentArchived(intentDir)) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: "intent_not_active",
+								message: `Intent '${slug}' is archived. Unarchive it first with haiku_intent_unarchive.`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
 			}
-		} catch {
-			// Proceed — intent.md parse failure is non-blocking here.
 		}
 
 		// ── Validate content_encoding ─────────────────────────────────────────
@@ -649,15 +660,20 @@ export default defineTool({
 		// ── Action-log entry (always stamped — even when kill-switch is set) ───
 		// Per ARCHITECTURE.md §8.5: "tool still writes the file and stamps the
 		// action log, but skips the audit-log append."
+		// V-03: write `claimed_author_id` (canonical) AND `human_author_id`
+		// (legacy alias) so the rename is non-breaking — readers may pick up
+		// either key during the migration window.
 		await appendActionLogEntry(intentDir, tickCounter, {
 			entry_type: "human_write",
 			path: canonicalPath,
 			sha,
 			author_class: "human-via-mcp",
 			timestamp,
-			human_author_id: humanAuthorId,
+			claimed_author_id: claimedAuthorId,
+			human_author_id: claimedAuthorId,
 			entry_id: entryId,
 			tick_counter: tickCounter,
+			tick_scope: "stage",
 		})
 
 		// ── Audit-log append (only when drift detection is enabled) ───────────
@@ -678,7 +694,8 @@ export default defineTool({
 				path: canonicalPath,
 				sha,
 				author_class: "human-via-mcp",
-				human_author_id: humanAuthorId,
+				claimed_author_id: claimedAuthorId,
+				human_author_id: claimedAuthorId,
 				rationale,
 				user_instruction_excerpt: userInstructionExcerpt,
 				tick_counter: tickCounter,
@@ -686,6 +703,7 @@ export default defineTool({
 				overwrite,
 				dirs_created: dirsCreated,
 				audit_log_appended: true,
+				tick_scope: "stage",
 			}
 
 			const auditResult = await appendWriteAudit(intentDir, auditRecord)
@@ -693,13 +711,17 @@ export default defineTool({
 		}
 
 		// ── Success response ──────────────────────────────────────────────────
+		// V-03: surface BOTH `claimed_author_id` (canonical) and
+		// `human_author_id` (legacy alias) so callers using either key see
+		// the value the audit log just received.
 		const responseBody: Record<string, unknown> = {
 			ok: true,
 			path: canonicalPath,
 			sha,
 			author_class: "human-via-mcp",
 			timestamp,
-			human_author_id: humanAuthorId,
+			claimed_author_id: claimedAuthorId,
+			human_author_id: claimedAuthorId,
 			dirs_created: dirsCreated,
 			action_log_entry_id: entryId,
 			audit_log_appended: auditLogAppended,

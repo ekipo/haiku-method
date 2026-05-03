@@ -13,7 +13,26 @@ inputs:
   - packages/haiku/src/http/path-safety.ts
   - packages/haiku/src/orchestrator/workflow/drift-baseline.ts
   - packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
-outputs: []
+outputs:
+  - stages/security/artifacts/unit-03/THREAT-MODEL.md
+  - stages/security/artifacts/unit-03/IMPLEMENTATION.md
+  - packages/haiku/scripts/audit-mutating-routes.mjs
+  - packages/haiku/src/hooks/guard-workflow-fields.ts
+  - packages/haiku/src/http.ts
+  - packages/haiku/src/http/csrf.ts
+  - packages/haiku/src/http/feedback-sanitize.ts
+  - packages/haiku/src/http/path-safety.ts
+  - packages/haiku/src/http/upload-routes.ts
+  - packages/haiku/src/orchestrator/workflow/drift-baseline.ts
+  - packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
+  - packages/haiku/src/state-tools.ts
+  - packages/haiku/src/tools/orchestrator/haiku_human_write.ts
+  - packages/haiku/test/autopilot-mode.test.mjs
+  - packages/haiku/test/http-feedback-strict-auth.test.mjs
+  - packages/haiku/test/tunnel-auth.test.mjs
+  - packages/haiku/test/unit-03-security.test.mjs
+  - stages/security/artifacts/unit-03/RED-TEAM-FINDINGS.md
+  - packages/haiku/test/unit-03-red-team.test.mjs
 model: sonnet
 quality_gates:
   - name: v04-shared-safe-mkdir-helper
@@ -68,7 +87,32 @@ quality_gates:
       packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts'
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: active
+bolt: 1
+hat: blue-team
+started_at: '2026-05-03T02:09:47Z'
+hat_started_at: '2026-05-03T03:02:52Z'
+iterations:
+  - hat: threat-modeler
+    started_at: '2026-05-03T02:09:47Z'
+    completed_at: '2026-05-03T02:14:11Z'
+    result: advance
+  - hat: security-engineer
+    started_at: '2026-05-03T02:14:11Z'
+    completed_at: '2026-05-03T02:48:06Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T02:48:06Z'
+    completed_at: '2026-05-03T02:51:30Z'
+    result: advance
+  - hat: red-team
+    started_at: '2026-05-03T02:51:30Z'
+    completed_at: '2026-05-03T03:02:52Z'
+    result: advance
+  - hat: blue-team
+    started_at: '2026-05-03T03:02:52Z'
+    completed_at: null
+    result: null
 ---
 # Unit 03 — Symlink TOCTOU + layered CSRF + feedback sanitization + baseline-corrupt operator gate
 

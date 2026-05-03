@@ -5,7 +5,12 @@
 //   (a) tool-defs.ts mode enum includes "autopilot" (not a separate boolean flag).
 //   (b) mode: "autopilot" causes the gate handler to promote `ask` gates to `auto`.
 //   (c) mode: "autopilot" does NOT promote `external` or compound gates (safety).
-//   (d) The old `autopilot: true` boolean is ignored; only `mode` drives behavior.
+//   (d) The legacy `autopilot: true` boolean is honored as a FALLBACK when
+//       `intent.mode !== "autopilot"`, so existing intents authored with the
+//       boolean+continuous shape keep working without a hard migration. Canonical
+//       new intents should use `mode: autopilot` directly. Compound gates like
+//       `[external, ask]` strip `ask` (drop the local-review pause) but keep
+//       external — autopilot never fakes external signals.
 
 import assert from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -202,20 +207,28 @@ test("mode:autopilot auto-advances a completed `ask` gate stage", () => {
 
 // Test: the old `autopilot: true` boolean (without mode: autopilot) is
 // effectively ignored in gate.ts — the gate reads only `intent.mode`.
-// So `mode: continuous` + `autopilot: true` behaves like continuous (pauses
-// at ask gates), NOT like autopilot.
+// PRIOR DESIGN INTENT (now reverted): `mode: continuous` + `autopilot: true`
+// would behave like continuous (pause at ask gates), forcing legacy intents
+// to migrate the boolean to `mode: autopilot`.
 //
-// NOTE: This test verifies the NEW behavior after the fix. Before the fix,
-// `intent.autopilot === true` would promote ask gates. After the fix, only
-// `intent.mode === "autopilot"` promotes ask gates.
-test("mode:continuous + autopilot:true boolean does NOT auto-advance ask gates (boolean is ignored)", () => {
+// CURRENT BEHAVIOR (2026-05-02): The legacy boolean is honored as a
+// FALLBACK so existing long-lived intents that carry
+// `mode: continuous + autopilot: true` keep their autopilot semantics
+// without a hard migration. The canonical home is still `intent.mode`;
+// new intents should set `mode: autopilot` directly. The boolean is a
+// compat hatch the gate handler reads when `intent.mode !== "autopilot"`.
+//
+// Without the fallback, real-world intents authored before the canonical
+// shape was finalized silently lost autopilot at every gate — popping
+// SPA review screens on intents the user explicitly put in autopilot.
+test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (legacy boolean honored as fallback)", () => {
 	const slug = "test-legacy-autopilot-flag"
 	const { haikuRoot, cleanup } = fixture(
 		slug,
 		{
 			studio: "software",
 			mode: "continuous",
-			autopilot: true, // legacy boolean — should be ignored after fix
+			autopilot: true, // legacy boolean — honored as fallback when mode != autopilot
 			stages: ["inception"],
 			active_stage: "inception",
 		},
@@ -245,13 +258,22 @@ test("mode:continuous + autopilot:true boolean does NOT auto-advance ask gates (
 
 	assert.ok(result, "tick must return a result")
 	assert.ok(result.action, "result must have an action")
-	// With mode:continuous (even if autopilot:true boolean set), the gate
-	// should pause for human review (gate_review) because inception's
-	// review type is 'ask'.
-	assert.strictEqual(
+	// With autopilot:true boolean set (even when mode is continuous), the
+	// gate handler honors the legacy field and promotes 'ask' to 'auto',
+	// auto-advancing past the gate without popping the SPA review. Since
+	// inception is the only stage in this fixture, completing it transitions
+	// the intent to intent-completion review phase (action: advance_phase),
+	// not to a next-stage advance — both shapes prove the boolean was
+	// honored.
+	assert.notStrictEqual(
 		result.action.action,
 		"gate_review",
-		`mode:continuous + autopilot:true boolean should still emit gate_review (boolean is ignored); got: ${result.action.action} — message: ${result.action.message}`,
+		`mode:continuous + autopilot:true boolean should auto-advance past the gate (boolean honored as fallback); got: ${result.action.action} — message: ${result.action.message}`,
+	)
+	assert.ok(
+		result.action.action === "advance_stage" ||
+			result.action.action === "advance_phase",
+		`expected advance_stage or advance_phase, got: ${result.action.action}`,
 	)
 })
 

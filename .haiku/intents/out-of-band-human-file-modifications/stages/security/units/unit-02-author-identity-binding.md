@@ -12,7 +12,21 @@ inputs:
   - packages/haiku/src/http/feedback-api.ts
   - packages/haiku/src/http/auth.ts
   - packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
-outputs: []
+outputs:
+  - stages/security/artifacts/THREAT-MODEL-unit-02.md
+  - stages/security/artifacts/SECURITY-ASSESSMENT-unit-02.md
+  - packages/haiku/src/http/upload-routes.ts
+  - packages/haiku/src/orchestrator/workflow/drift-baseline.ts
+  - packages/haiku/src/orchestrator/workflow/drift-detection-gate.ts
+  - packages/haiku/src/orchestrator/workflow/write-audit.ts
+  - packages/haiku/src/state-tools.ts
+  - packages/haiku/src/tools/orchestrator/haiku_human_write.ts
+  - packages/haiku/test/autopilot-mode.test.mjs
+  - packages/haiku/test/drift-detection-gate.test.mjs
+  - packages/haiku/test/state-tools-handlers.test.mjs
+  - packages/haiku/test/upload-routes.test.mjs
+  - plugin/studios/software/stages/security/outputs/security-fix.md
+  - stages/security/artifacts/RED-TEAM-unit-02.md
 model: sonnet
 quality_gates:
   - name: v03-spa-author-bound-from-session-or-renamed
@@ -53,7 +67,32 @@ quality_gates:
       packages/haiku/src/state-tools.ts
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: active
+bolt: 1
+hat: blue-team
+started_at: '2026-05-03T02:09:53Z'
+hat_started_at: '2026-05-03T02:59:28Z'
+iterations:
+  - hat: threat-modeler
+    started_at: '2026-05-03T02:09:53Z'
+    completed_at: '2026-05-03T02:13:34Z'
+    result: advance
+  - hat: security-engineer
+    started_at: '2026-05-03T02:13:34Z'
+    completed_at: '2026-05-03T02:40:16Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T02:40:16Z'
+    completed_at: '2026-05-03T02:51:12Z'
+    result: advance
+  - hat: red-team
+    started_at: '2026-05-03T02:51:12Z'
+    completed_at: '2026-05-03T02:59:28Z'
+    result: advance
+  - hat: blue-team
+    started_at: '2026-05-03T02:59:28Z'
+    completed_at: null
+    result: null
 ---
 # Unit 02 — Author identity binding + status-check correctness
 

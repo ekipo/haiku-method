@@ -11,8 +11,20 @@ inputs:
   - packages/haiku/src/http/default-routes.ts
   - packages/haiku/src/http/assessments-routes.ts
   - packages/haiku/src/http/path-safety.ts
-outputs: []
-model: sonnet
+outputs:
+  - stages/security/artifacts/THREAT-MODEL-unit-01.md
+  - stages/security/artifacts/SECURITY-CONTROLS-unit-01.md
+  - packages/haiku/src/http/assessments-routes.ts
+  - packages/haiku/src/http/upload-routes.ts
+  - packages/haiku/src/orchestrator/workflow/handlers/gate.ts
+  - packages/haiku/src/state-tools.ts
+  - packages/haiku/src/tools/orchestrator/haiku_classify_drift.ts
+  - packages/haiku/test/assessments-routes.test.mjs
+  - packages/haiku/test/state-tools-handlers.test.mjs
+  - packages/haiku/test/upload-routes.test.mjs
+  - stages/security/artifacts/RED-TEAM-unit-01.md
+  - packages/haiku/test/red-team-unit-01-upload-bypass.test.mjs
+model: opus
 quality_gates:
   - name: v01-v02-allowed-mimes-defined
     command: >-
@@ -51,7 +63,47 @@ quality_gates:
       packages/haiku/test/state-tools-handlers.test.mjs
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: active
+bolt: 2
+hat: security-reviewer
+started_at: '2026-05-03T02:09:52Z'
+hat_started_at: '2026-05-03T02:58:55Z'
+iterations:
+  - hat: threat-modeler
+    started_at: '2026-05-03T02:09:52Z'
+    completed_at: '2026-05-03T02:13:30Z'
+    result: advance
+  - hat: security-engineer
+    started_at: '2026-05-03T02:13:30Z'
+    completed_at: '2026-05-03T02:43:45Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T02:43:45Z'
+    completed_at: '2026-05-03T02:50:02Z'
+    result: advance
+  - hat: red-team
+    started_at: '2026-05-03T02:50:02Z'
+    completed_at: '2026-05-03T02:58:55Z'
+    result: reject
+    reason: >-
+      Red-team found 4 unclosed findings (2 HIGH, 1 MED, 1 LOW). The V-01/V-02
+      BLOCKED_EXTENSIONS list (.html/.htm/.svg/.xml/.xhtml/.mhtml) misses .js
+      and .css — combined with application/octet-stream on ALLOWED_MIMES_*, the
+      same stored-XSS threat model is reachable just by trading file extensions.
+      PoC test (packages/haiku/test/red-team-unit-01-upload-bypass.test.mjs)
+      executes end-to-end against the live HTTP route and demonstrates 200 OK
+      for pwn.js + pwn.css uploads via octet-stream. R-03: text/markdown MIME
+      with .js extension also bypasses (asymmetric MIME-spoof defence). R-04:
+      attribute_to_user is unvalidated and persists verbatim in audit-log,
+      enabling Reflected-Stored XSS hybrid via any SPA log-rendering view. All
+      four findings filed as FB-01/02/03/04 against the security stage with
+      reproducible PoCs and recommended fixes. Full red-team report at
+      stages/security/artifacts/RED-TEAM-unit-01.md.
+  - hat: security-reviewer
+    started_at: '2026-05-03T02:58:55Z'
+    completed_at: null
+    result: null
+model_original: sonnet
 ---
 # Unit 01 — Upload content validation
 

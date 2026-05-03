@@ -253,7 +253,7 @@ The gate sequence is therefore: tamper-detection → feedback-triage → drift-d
 
 This section specifies the *interface shape* of new MCP tools. Tool names below are **DEFERRED-TO-DESIGN** but a representative name is given for clarity; the field-level shapes are fixed.
 
-### 4.1 `haiku_human_write_file` — agent writes on behalf of human
+### 4.1 `haiku_human_write` — agent writes on behalf of human
 
 Purpose: when a user instructs the agent in chat to "save this Tailwind config to the design references," the agent uses this tool instead of `Write`. The tool sets `Baseline.acknowledged_by = "human"` so the drift gate does not re-flag the write on the next tick.
 

@@ -317,7 +317,7 @@ A disclosure caret on the strip allows expanding a list of the changed files:
 ```
 [▾ See N files]
 
-  stages/design/outputs/hero.html    modified 4m ago
+  stages/design/artifacts/hero.html  modified 4m ago
   knowledge/brand-guide.pdf          added 12m ago
   stages/inception/notes.md          modified 18m ago
 ```

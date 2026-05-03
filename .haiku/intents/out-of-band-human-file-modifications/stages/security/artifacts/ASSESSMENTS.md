@@ -196,6 +196,65 @@ security stage's elaborate phase for a follow-up wave.
   hardening) in next security wave; gated on sub-origin infrastructure.
 - **`stage_revisit` FB ID**: **FB-10** (`feedback/10-residual-r-05-sandboxed-sub-origin.md`)
 
+### R-6. Magic-byte content sniffing on uploads (V-01 / V-02 closure bound)
+
+- **Owning vuln(s)**: V-01 (knowledge upload), V-02 (stage-output upload).
+  **Triggering finding:** FB-34 (security stage,
+  `feedback/34-upload-allowlist-trusts-client-supplied-mime-with-no-magic-b.md`).
+- **Rationale for deferral**: The bolt-1/bolt-3 closure of V-01/V-02
+  reduced the attack surface to "claimed MIME + filename extension are
+  both on the allowlist." That bound is honest — the upload route does
+  NOT inspect the leading bytes of the streamed payload, so HTML bytes
+  delivered as `image/png` with extension `.png` pass at boundary 2.
+  The closure of I-1/I-2 then leans on the serve-side path: `serveFile`
+  picks `Content-Type` from the extension map at
+  `path-safety.ts:118`, and modern browsers respect `image/*`
+  Content-Type and refuse to render the bytes as HTML. The exposure
+  is in degraded paths: pre-2018 user-agents, security scanners that
+  re-sniff content, content-detection middleboxes, and any future
+  serve-side regression. The proper upgrade is magic-byte sniffing of
+  the first 512 bytes against the allowlist's binary members:
+    - `image/png` → `89 50 4E 47 0D 0A 1A 0A`
+    - `image/jpeg` → `FF D8 FF`
+    - `image/gif` → `47 49 46 38 (37|39) 61`
+    - `image/webp` → `RIFF…WEBP`
+    - `application/pdf` → `25 50 44 46 2D` (`%PDF-`)
+  Text-class members (`text/plain`, `text/markdown`,
+  `application/json`) have no fixed magic prefix; they remain accepted
+  on extension+claim and rely on serve-side `Content-Type`-from-
+  extension + the planned `nosniff` header (FB-19).
+  **Why not fixed in this wave:** the bolt-3 closure landed the
+  primary defense (extension blocklist + per-route MIME allowlist +
+  octet-stream removal); magic-byte sniffing is a defense-in-depth
+  upgrade, not a primary-defense gap. Co-locating with R-1 / R-2
+  serve-side hardening means a single follow-up wave delivers the
+  full hardened upload→serve path (magic-byte at boundary 2,
+  `nosniff` + CSP + sandbox at boundary 4), rather than two partial
+  passes.
+- **Severity if unfixed**: **Medium** when paired with a degraded
+  serve-side path (missing `nosniff`, future regression in
+  extension-driven Content-Type, or a CDN/middlebox that re-sniffs).
+  Low under the default modern-browser path. The R-6 + FB-19 +
+  R-1 fix-set lifts this to "structurally closed."
+- **Recommended target iteration**: Next security wave alongside R-1
+  (serve-side hardening). Implementation site is `upload-routes.ts`
+  immediately after `streamToTempfile` resolves — read the first 512
+  bytes of `tmpPath` and compare against the magic-byte table for the
+  member of `ALLOWED_MIMES_*` matched at the claim check, returning
+  415 with `error: "content_type_mismatch"` on miss. The `file-type`
+  npm package is the obvious dep choice (well-audited, single-purpose,
+  ~40 KB minified); a hand-rolled table is < 80 LOC if the team
+  prefers no new dep. Test surface: red-team PoC uploading
+  `<html>…</html>` bytes as `image/png` / `application/pdf` /
+  `image/jpeg` and asserting 415; positive controls for legitimate
+  PNG/JPEG/PDF/GIF/WEBP uploads.
+- **`stage_revisit` FB ID**: filed under R-6, to be authored by
+  unit-04 elaboration in the next security wave (folded into the
+  same `stage_revisit` follow-up FB stream as R-1 / R-2 / R-5 so
+  the pre-tick triage gate routes the cursor to the security
+  stage's elaborate phase exactly once for the whole serve+upload
+  hardening pass).
+
 ---
 
 ## 5. Triage decisions referenced from this stage

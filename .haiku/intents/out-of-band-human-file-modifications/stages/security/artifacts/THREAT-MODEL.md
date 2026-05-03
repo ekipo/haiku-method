@@ -222,8 +222,8 @@ where applicable.
 
 | # | Threat | Feature | V-NN | Notes |
 |---|---|---|---|---|
-| I-1 | Stored XSS via `.html` / `.htm` / `.svg` knowledge upload — script executes in tunnel-origin's security context, exfiltrates session token + intent contents | `drift-assessment-visibility.feature` (rendering chokepoint) | V-01 | Unit-01 ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (commits `3867608a6`, `bfa4b7c91`). Serve-side hardening (CSP, sandboxed sub-origin, `Content-Disposition: attachment` for non-image/PDF) deferred — see ASSESSMENTS.md residual risk. |
-| I-2 | Same class on stage-output upload path; HTML mock renders inline with full DOM access | `explicit-spa-upload.feature` + `drift-assessment-visibility.feature` | V-02 | Same allowlist mitigation. Sandboxed sub-origin for HTML mockups deferred — see ASSESSMENTS.md residual risk. |
+| I-1 | Stored XSS via `.html` / `.htm` / `.svg` knowledge upload — script executes in tunnel-origin's security context, exfiltrates session token + intent contents | `drift-assessment-visibility.feature` (rendering chokepoint) | V-01 | Unit-01 ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (commits `3867608a6`, `bfa4b7c91`). **Bound (FB-34):** the allowlist matches the *claimed* MIME and the *filename extension*, not the byte content; HTML bytes shipped as `image/png`/`.png` pass at boundary 2 and rely on the serve-side extension-driven `Content-Type` + browser respect (boundary 4). Magic-byte sniffing tracked as ASSESSMENTS.md R-6. Serve-side hardening (CSP, sandboxed sub-origin, `Content-Disposition: attachment` for non-image/PDF) deferred — see ASSESSMENTS.md R-1. |
+| I-2 | Same class on stage-output upload path; HTML mock renders inline with full DOM access | `explicit-spa-upload.feature` + `drift-assessment-visibility.feature` | V-02 | Same allowlist mitigation, **same bound** (claimed-MIME + extension; magic-byte sniffing under R-6). Sandboxed sub-origin for HTML mockups deferred — see ASSESSMENTS.md R-5. |
 | I-3 | Reflected XSS via reviewer-rendered feedback markdown (agent-authored body) | `manual-change-assessment.feature` + `drift-assessment-visibility.feature` | V-10 | Unit-03 server-side sanitizer in `feedback-api.ts` (commit `143a1ccbf`). |
 | I-4 | OpenTelemetry exporter exfiltrates audit-log content / file paths / `claimed_author_id` to a configured collector | (cross-cutting telemetry) | (not in VULN-REPORT) | Mitigation: telemetry events redact path tail, never include file *content*. Deferred enhancement: PII allowlist for `claimed_author_id` (rate-limit / hash before export). |
 
@@ -292,12 +292,19 @@ threats, V-NN findings closed, V-NN findings deferred.
 - **Primary threats**: I-1, I-2 (stored XSS via uploaded HTML/SVG), S-3
   (cross-session write), T-2 (TOCTOU on SPA path), T-5 (substring status
   check), D-1 (size DoS), E-1 (CSRF), E-4 (audit-log poisoning).
-- **Closed**: V-01/V-02 (allowlist + extension blocklist, commits
-  `3867608a6`, `bfa4b7c91`), V-03 R-01 (cross-session sid binding,
+- **Closed (with bound)**: V-01/V-02 (allowlist + extension blocklist,
+  commits `3867608a6`, `bfa4b7c91`) — **closure bound:** the allowlist
+  trusts client-supplied MIME (`filePart.mimetype`) and filename
+  extension; the leading bytes are NOT inspected. HTML payloads
+  shipped as `image/png`/`.png` pass boundary 2 and the closure of
+  I-1/I-2 then depends on serve-side defenses (extension-driven
+  Content-Type, future `nosniff`, future CSP). See ASSESSMENTS.md R-6
+  for the magic-byte residual. V-03 R-01 (cross-session sid binding,
   `4e5af2b76`), V-06 (shared `gray-matter` status helpers, `399c2ee13`),
   V-07 (hard cap, `3867608a6`), V-08 (three-layer CSRF, `bed443315`).
 - **Deferred**: serve-side `Content-Disposition: attachment` + CSP for
-  non-image/PDF; sandboxed sub-origin for HTML mockups — see
+  non-image/PDF; sandboxed sub-origin for HTML mockups; magic-byte
+  content sniffing on the binary-class allowlist members (R-6) — see
   ASSESSMENTS.md residual risk.
 
 ### 4.5. `drift-assessment-visibility.feature`
@@ -468,7 +475,7 @@ write), so a hostile agent's blast radius is capped at the schema edge.
 | R-2 | (deferred — audit-log hash chain) | — | residual risk in ASSESSMENTS.md |
 | R-3 | Producer + consumer tick-scope union | `399c2ee13` | unit-02 quality gate `v05-intent-scope-tick-counter` |
 | R-4 | `readClaimedAuthorId` coalescing helper | `399c2ee13` | unit-02 quality gate |
-| I-1, I-2 | ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist | `3867608a6`, `bfa4b7c91` | unit-01 upload-routes test, red-team-unit-01 inverted PoCs |
+| I-1, I-2 | ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (claimed-MIME + extension; magic-byte sniffing tracked under R-6) | `3867608a6`, `bfa4b7c91` | unit-01 upload-routes test, red-team-unit-01 inverted PoCs |
 | I-3 | Server-side feedback sanitizer | `143a1ccbf` | unit-03 quality gate |
 | D-1 | `MAX_UPLOAD_BYTES_HARD_CAP` clamp | `3867608a6` | unit-01 upload-routes hard-cap test |
 | D-2 | Rationale schema caps + list-endpoint truncation | `0f87ed407` | unit-01 state-tools-handlers test, assessments-routes test |

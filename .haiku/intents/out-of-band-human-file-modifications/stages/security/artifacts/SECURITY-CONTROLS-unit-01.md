@@ -49,8 +49,8 @@ matrix + §8 disposition table) to the control implemented here.
 
 | Threat (severity) | Control | Implementation site | Test |
 |---|---|---|---|
-| Knowledge XSS via served file in tunnel origin (extension class includes `.html`/`.htm`/`.xhtml`/`.mhtml`/`.svg`/`.xml` AND bolt-3 additions `.js`/`.mjs`/`.cjs`/`.css`/`.htc`/`.hta`/`.htaccess`) **(HIGH, V-01 + red-team R-01/R-02)** | `BLOCKED_EXTENSIONS` set (broadened in bolt 3) + `ALLOWED_MIMES_KNOWLEDGE` allowlist (octet-stream removed in bolt 3); reject with **415 unsupported_media_type** before any byte is written | `upload-routes.ts` `BLOCKED_EXTENSIONS`, `ALLOWED_MIMES_KNOWLEDGE`, knowledge-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"knowledge: text/html upload rejected with 415 (V-01: html upload rejected)"`, `"knowledge: .svg upload rejected even when MIME claims image/svg+xml (V-01)"`, `"knowledge: .js upload rejected with 415 (red-team R-01 on knowledge route)"`, `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route"` |
-| Stage-output XSS same class (extension class as above) **(HIGH, V-02 + red-team R-01/R-02)** | `ALLOWED_MIMES_STAGE_OUTPUT` allowlist (octet-stream removed in bolt 3) + same broadened `BLOCKED_EXTENSIONS`; reject with **415** before write | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, stage-output-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"stage-output: text/html upload rejected with 415 unsupported_media_type (V-02)"`, `"stage-output: .svg upload rejected even when MIME claims image/svg+xml (V-02)"`, `"stage-output: .js upload rejected with 415 — same threat class as V-02 (red-team R-01)"`, `"stage-output: .css upload rejected with 415 — stylesheet injection vector (red-team R-02)"`, `"stage-output: .mjs/.cjs/.htc/.hta/.htaccess all rejected with 415 (red-team R-01 sibling vectors)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-01 closed: .js upload via application/octet-stream now rejected with 415"`, `"R-02 closed: .css upload via application/octet-stream now rejected with 415"` |
+| Knowledge XSS via served file in tunnel origin (extension class includes `.html`/`.htm`/`.xhtml`/`.mhtml`/`.svg`/`.xml` AND bolt-3 additions `.js`/`.mjs`/`.cjs`/`.css`/`.htc`/`.hta`/`.htaccess`) **(HIGH, V-01 + red-team R-01/R-02)** | `BLOCKED_EXTENSIONS` set (broadened in bolt 3) + `ALLOWED_MIMES_KNOWLEDGE` allowlist (octet-stream removed in bolt 3); reject with **415 unsupported_media_type** before any byte is written. **Bound (FB-34):** the allowlist matches the *claimed* MIME (`filePart.mimetype`) and the *filename extension*. It does **not** sniff the leading bytes, so a payload of `<html>…</html>` shipped as `image/png` with extension `.png` passes both checks at the upload boundary. Closure of I-1 here therefore depends on the serve-side defenses tracked under R-1 (extension-driven `MIME_TYPES[ext]` + browser respect for image Content-Type) and on the new R-6 magic-byte residual; see §5 and ASSESSMENTS.md R-6. | `upload-routes.ts` `BLOCKED_EXTENSIONS`, `ALLOWED_MIMES_KNOWLEDGE`, knowledge-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"knowledge: text/html upload rejected with 415 (V-01: html upload rejected)"`, `"knowledge: .svg upload rejected even when MIME claims image/svg+xml (V-01)"`, `"knowledge: .js upload rejected with 415 (red-team R-01 on knowledge route)"`, `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-05 (knowledge route): .js upload via octet-stream rejected on knowledge route"` |
+| Stage-output XSS same class (extension class as above) **(HIGH, V-02 + red-team R-01/R-02)** | `ALLOWED_MIMES_STAGE_OUTPUT` allowlist (octet-stream removed in bolt 3) + same broadened `BLOCKED_EXTENSIONS`; reject with **415** before write. **Same bound as V-01 (FB-34)** — the allowlist trusts the multipart-claimed MIME and the filename extension, not the byte content. Stage-output mockups uploaded as `image/png` containing renderable bytes pass the upload check; the residual under R-6 covers magic-byte sniffing as the upgrade path. | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, stage-output-route handler post-`bad_param` block | `upload-routes.test.mjs`: `"stage-output: text/html upload rejected with 415 unsupported_media_type (V-02)"`, `"stage-output: .svg upload rejected even when MIME claims image/svg+xml (V-02)"`, `"stage-output: .js upload rejected with 415 — same threat class as V-02 (red-team R-01)"`, `"stage-output: .css upload rejected with 415 — stylesheet injection vector (red-team R-02)"`, `"stage-output: .mjs/.cjs/.htc/.hta/.htaccess all rejected with 415 (red-team R-01 sibling vectors)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-01 closed: .js upload via application/octet-stream now rejected with 415"`, `"R-02 closed: .css upload via application/octet-stream now rejected with 415"` |
 | Allowlist no-op via `application/octet-stream` (multipart default MIME) **(MED, red-team R-03)** | `application/octet-stream` removed from BOTH `ALLOWED_MIMES_KNOWLEDGE` and `ALLOWED_MIMES_STAGE_OUTPUT`; the allowlist now restricts payload types as advertised. Legitimate binary uploads (PDFs, images) send their real MIME; tooling that previously sent octet-stream must learn to send the correct type | `upload-routes.ts` `ALLOWED_MIMES_STAGE_OUTPUT`, `ALLOWED_MIMES_KNOWLEDGE` (octet-stream omitted) | `upload-routes.test.mjs`: `"stage-output: application/octet-stream MIME now rejected (red-team R-03 — allowlist no longer accepts the multipart default)"`, `"knowledge: octet-stream rejected (red-team R-03 on knowledge route)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-06: bare octet-stream MIME (no blocked extension) now rejected — allowlist no longer accepts it"` |
 | Audit-log poisoning / future SPA-render XSS via unvalidated `attribute_to_user` **(LOW, red-team R-04)** | `ATTRIBUTE_TO_USER_PATTERN = /^[\w][\w\-.@ ]{0,127}$/` — slug-with-spaces bound enforced at upload time on BOTH routes; reject with **400 bad_attribute_to_user**. Bound is wide enough for real human IDs (`alice`, `Alice Smith`, `alice.smith@example.com`, `product-owner-2`) but rejects every HTML / JS sigil and shell metacharacter, so the audit log cannot store an attacker-shaped string | `upload-routes.ts` `ATTRIBUTE_TO_USER_PATTERN`, `isValidAttributeToUser()`; both route handlers reject right after the field-presence check, before the extension/MIME branch | `upload-routes.test.mjs`: `"stage-output: attribute_to_user with HTML payload rejected with bad_attribute_to_user (red-team R-04 audit-log XSS guard)"`, `"knowledge: attribute_to_user with shell metacharacters rejected (red-team R-04)"`, `"attribute_to_user: realistic legitimate identities accepted (no false positives on R-04)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-07: attribute_to_user with HTML payload rejected with bad_attribute_to_user (audit-log XSS guard)"` |
 | MIME spoof — `text/plain` (or `image/png`) claim with renderable extension in filename **(MED, V-01/V-02 variant)** | Extension blocklist applies to BOTH `filePart.filename` AND `target_filename`/`target_path` independently — extension wins over claimed MIME | `upload-routes.ts` `hasBlockedExtension(filePart.filename)` and `hasBlockedExtension(targetFilename)` / `hasBlockedExtension(targetPath)` checked separately, with extension-blocked rejected first regardless of MIME | `upload-routes.test.mjs`: `"stage-output: MIME spoof — text/plain claim with .html filename rejected (V-02 defence-in-depth)"`; `"stage-output: target_path with .html extension rejected even when uploaded filename is safe (V-02)"`; `"knowledge: MIME spoof rejected — text/plain claim with .html target_filename (V-01 defence-in-depth)"`; `red-team-unit-01-upload-bypass.test.mjs`: `"R-03 closed: text/markdown MIME + .js extension rejected on extension blocklist"` |
@@ -325,6 +325,56 @@ with named target hands-off:
    can't reach the tunnel session. Until that ships, the operational
    workaround is "attach a screenshot." The trade-off is conscious —
    feature surface for security surface.
+
+4. **Magic-byte content sniffing on uploads (FB-34).** The
+   `ALLOWED_MIMES_*` check at `upload-routes.ts:543-552` (stage-output)
+   and `:878-887` (knowledge) compares against `filePart.mimetype` — the
+   client-supplied multipart `Content-Type` — and `hasBlockedExtension`
+   compares against the client-supplied filename. Neither inspects the
+   leading bytes of the streamed payload. An attacker can therefore land
+   `<html><script>…</script></html>` bytes on disk by sending them as
+   `image/png` with extension `.png`. **Risk bound, NOT zero:**
+     - Under normal browser behavior, `serveFile` later sets the response
+       `Content-Type` from the extension map at `path-safety.ts:118`, so
+       a `.png` GET returns `image/png` and modern browsers refuse to
+       render the bytes as HTML — the file shows as a broken image. SAFE
+       in the default reviewer browser path.
+     - The exposure is in degraded paths: pre-2018 browsers, security
+       scanners / image-search bots that "helpfully" re-sniff content
+       type, content-detection middleboxes, and any future serve-side
+       regression that adds `.bin` or removes the extension-driven
+       Content-Type. Combined with the missing
+       `X-Content-Type-Options: nosniff` (FB-19) the user-agent has more
+       latitude to override the served Content-Type.
+     - Same applies to `.json` / `.md` / `.txt` claims — the content can
+       still be HTML; the extension-driven Content-Type makes those
+       paths render as `text/plain` (no HTML execution) but the audit-
+       log surface still ingests attacker-shaped strings.
+   **Disposition:** sniff the first 512 bytes against magic numbers for
+   the binary-class allowlist members at upload time and 415 on
+   mismatch:
+     - `image/png` → `89 50 4E 47 0D 0A 1A 0A`
+     - `image/jpeg` → `FF D8 FF`
+     - `image/gif` → `47 49 46 38 (37|39) 61` (`GIF87a` / `GIF89a`)
+     - `image/webp` → `RIFF…WEBP` (4-byte length prefix between)
+     - `application/pdf` → `25 50 44 46 2D` (`%PDF-`)
+   For text-class members (`text/plain`, `text/markdown`,
+   `application/json`) magic-byte sniffing is impractical (no fixed
+   prefix); accept on extension+claim and let the serve-side
+   Content-Type-from-extension map plus the planned `nosniff` header
+   (FB-19) carry the defense. The check belongs after `streamToTempfile`
+   completes (the bytes are already on disk in the worktree-staging
+   tempfile and a sync read of the first 512 bytes is bounded). The
+   `file-type` package (well-audited, single-purpose, ~40 KB minified)
+   is the obvious dependency choice; if the team prefers no new dep, a
+   hand-rolled magic-byte table for the five binary MIMEs above is < 80
+   LOC. **Risk acceptance for now:** the FB-19 `nosniff` header (filed
+   for unit-04 serve-side hardening) closes the practical exposure for
+   the vast majority of reviewer browsers; the magic-byte upgrade closes
+   the equivalent-class regression risk. **`stage_revisit` FB ID:**
+   filed as **R-6** in ASSESSMENTS.md, target unit-04 next security
+   wave, co-located with R-1 / R-2 serve-side hardening so a single
+   wave closes both surfaces.
 
 Two narrower residuals worth recording:
 

@@ -53,7 +53,8 @@ quality_gates:
       packages/haiku/src/state-tools.ts
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: completed
+completed_at: '2026-05-03T08:14:33Z'
 ---
 # Unit 02 — Author identity binding + status-check correctness
 

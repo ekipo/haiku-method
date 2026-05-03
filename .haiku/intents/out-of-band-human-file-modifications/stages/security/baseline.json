@@ -106,5 +106,53 @@
     "acknowledged_via": "baseline-init",
     "stage": null,
     "tracking_class": "knowledge"
+  },
+  "stages/security/artifacts/unit-03/BLUE-TEAM-VERIFICATION.md": {
+    "path": "stages/security/artifacts/unit-03/BLUE-TEAM-VERIFICATION.md",
+    "sha256": "7eb62e554de4ed1fee68a2ef1a7d871c29091161fbe0f7d08dd4b34952cedcf1",
+    "bytes": 10894,
+    "mtime_ns": 1777803843563000000,
+    "is_binary": false,
+    "author_class": "agent",
+    "acknowledged_at": "2026-05-03T10:24:19.016Z",
+    "acknowledged_via": "baseline-init",
+    "stage": "security",
+    "tracking_class": "stage-output"
+  },
+  "stages/security/artifacts/unit-03/IMPLEMENTATION.md": {
+    "path": "stages/security/artifacts/unit-03/IMPLEMENTATION.md",
+    "sha256": "ca0296c492ebf098d2282244bee51f310888ad5bcc98e8ea2dc534bc59797a1d",
+    "bytes": 24042,
+    "mtime_ns": 1777803843564000000,
+    "is_binary": false,
+    "author_class": "agent",
+    "acknowledged_at": "2026-05-03T10:24:19.016Z",
+    "acknowledged_via": "baseline-init",
+    "stage": "security",
+    "tracking_class": "stage-output"
+  },
+  "stages/security/artifacts/unit-03/RED-TEAM-FINDINGS.md": {
+    "path": "stages/security/artifacts/unit-03/RED-TEAM-FINDINGS.md",
+    "sha256": "b7fab554935a79b02b6f909a839759d631aa5d2f679de0da61b8157e9b72e2e1",
+    "bytes": 11490,
+    "mtime_ns": 1777803843564000000,
+    "is_binary": false,
+    "author_class": "agent",
+    "acknowledged_at": "2026-05-03T10:24:19.016Z",
+    "acknowledged_via": "baseline-init",
+    "stage": "security",
+    "tracking_class": "stage-output"
+  },
+  "stages/security/artifacts/unit-03/THREAT-MODEL.md": {
+    "path": "stages/security/artifacts/unit-03/THREAT-MODEL.md",
+    "sha256": "94d4a153a0a4ec831e5946129fb569d1804925cc91cabca137c7746fc8f67492",
+    "bytes": 31967,
+    "mtime_ns": 1777803843564000000,
+    "is_binary": false,
+    "author_class": "agent",
+    "acknowledged_at": "2026-05-03T10:24:19.016Z",
+    "acknowledged_via": "baseline-init",
+    "stage": "security",
+    "tracking_class": "stage-output"
   }
 }

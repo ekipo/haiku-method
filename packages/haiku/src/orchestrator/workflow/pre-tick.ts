@@ -169,11 +169,29 @@ export function preTickConsistency(
 					ok: String(result.success),
 					message: result.message,
 				})
-				// On success the next isBranchMerged in this loop iteration
-				// would skip subsequent retries cleanly. On failure, we
-				// leave the orphan and let the downstream handler surface
-				// the issue with its own structured error — the agent's
-				// recovery path already handles merge_failed shapes.
+				// On failure: surface the merge result to the agent
+				// instead of silently continuing. Continuing would let
+				// the next handler advance phase past an unmerged unit
+				// or — worse — leave a half-merged state with conflict
+				// markers in the working tree that the next tick reads
+				// as if it were normal content. Surfacing here matches
+				// the structured error path the merge_failed /
+				// resolve_merge_conflicts shapes already define.
+				if (!result.success) {
+					const isConflict = /merge_conflict:/i.test(result.message)
+					return {
+						action: isConflict
+							? "resolve_merge_conflicts"
+							: "merge_failed",
+						intent: slug,
+						stage: currentStage,
+						unit: unitName,
+						unit_branch: unitBranch,
+						stage_branch: stageBranch,
+						error: result.message,
+						message: `Pre-tick orphan-merge retry on '${unitName}' could not land into '${stageBranch}': ${result.message}. Resolve the merge in the stage worktree (commit dirty engine-owned files first if the failure cited "would be overwritten"; resolve any conflict markers and \`git add\`/\`git commit\` if the failure cited content conflicts), then call haiku_run_next so the engine retries.`,
+					}
+				}
 			}
 		}
 	}

@@ -42,11 +42,9 @@ import { createHash } from "node:crypto"
 import {
 	createWriteStream,
 	existsSync,
-	mkdirSync,
 	readFileSync,
 	unlinkSync,
 } from "node:fs"
-import { rename, unlink } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import type { MultipartFile } from "@fastify/multipart"
 import fastifyMultipart from "@fastify/multipart"
@@ -62,6 +60,7 @@ import {
 } from "../orchestrator/workflow/write-audit.js"
 import { intentDir } from "../state-tools.js"
 import { requireTunnelAuth } from "./auth.js"
+import { cleanupTempFile, safeMkdirAndRename } from "./path-safety.js"
 import { isValidSlug, validateIntent, validateStage } from "./validation.js"
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -131,19 +130,27 @@ function isIntentArchived(intentSlug: string): boolean {
 
 /** Stream a Fastify multipart file part into a tempfile on disk.
  *  Returns the tempfile path on success, or throws if the size cap is exceeded.
- *  The caller is responsible for deleting the tempfile on error. */
+ *  The caller is responsible for deleting the tempfile on error.
+ *
+ *  V-04 (TOCTOU): the legacy version did `mkdirSync(destDir, { recursive: true })`
+ *  here, which silently followed any planted symlink in the chain — that's
+ *  the V-04 SPA mirror. The fix moves all destDir creation into
+ *  `safeMkdirAndRename` (called by the caller after the tempfile is fully
+ *  streamed), and stages the tempfile in `intentRoot` instead. The
+ *  tempfile lives on the same filesystem as the destination (intentRoot
+ *  is the worktree root, parent of every stage subtree) so `rename()`
+ *  remains POSIX-atomic. */
 async function streamToTempfile(
 	part: MultipartFile,
-	destDir: string,
+	tempStagingDir: string,
 	maxBytes: number,
 ): Promise<{ tmpPath: string; sha256: string; bytes: number }> {
-	// Create the destination directory if needed.
-	mkdirSync(destDir, { recursive: true })
-
-	// Place the tempfile in the same directory as the final destination so
-	// rename() is always same-filesystem (POSIX atomic).
+	// Stage the tempfile in `tempStagingDir` (intentRoot from the caller).
+	// Caller is responsible for calling safeMkdirAndRename to create the
+	// real destDir + atomically rename — this function does NOT create the
+	// destination directory (V-04 race fix).
 	const tmpPath = join(
-		destDir,
+		tempStagingDir,
 		`.upload-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
 	)
 
@@ -194,6 +201,10 @@ async function streamToTempfile(
 export async function registerUploadRoutes(
 	instance: FastifyInstance,
 ): Promise<void> {
+	// audit-allow: this file mentions fastify-plugin in commentary only;
+	// the wrapper below is an anonymous inner plugin (NOT fastify-plugin)
+	// so global hooks (including the V-08 csrfPreHandler) propagate.
+	//
 	// Wrap the upload routes in an encapsulated child plugin so that
 	// @fastify/multipart's content-type parser and request decorators
 	// (req.parts, req.isMultipart, etc.) are scoped to this sub-tree
@@ -410,13 +421,16 @@ export async function registerUploadRoutes(
 					return
 				}
 
-				// Stream to tempfile with size check.
+				// Stream to tempfile with size check. The tempfile is staged in
+				// the intent root (NOT in destDir) so V-04 TOCTOU defence in
+				// safeMkdirAndRename can validate the parent chain race-free
+				// before the destDir is created.
 				let tmpPath: string | null = null
 				let sha256: string
 				let bytes: number
 
 				try {
-					const result = await streamToTempfile(filePart, destDir, maxBytes)
+					const result = await streamToTempfile(filePart, iDir, maxBytes)
 					tmpPath = result.tmpPath
 					sha256 = result.sha256
 					bytes = result.bytes
@@ -434,24 +448,32 @@ export async function registerUploadRoutes(
 					return
 				}
 
-				// Atomic rename.
-				try {
-					mkdirSync(destDir, { recursive: true })
-					await rename(tmpPath, destAbsPath)
-					tmpPath = null // rename succeeded; tempfile is now the dest
-				} catch {
-					if (tmpPath) {
-						try {
-							await unlink(tmpPath)
-						} catch {
-							/* best-effort */
-						}
+				// V-04 (Symlink TOCTOU defence): atomic rename via the safe
+				// helper. Refuses any pre-existing symlink in the parent chain,
+				// creates missing dirs one segment at a time (no `recursive:
+				// true` follow-symlink trap), and re-validates the parent's
+				// realpath immediately before the rename.
+				const safeResult = safeMkdirAndRename(iDir, destDir, tmpPath, destAbsPath)
+				if (!safeResult.ok) {
+					cleanupTempFile(tmpPath)
+					tmpPath = null
+					const isSymlinkAttack =
+						safeResult.code === "parent_chain_contains_symlink" ||
+						safeResult.code === "parent_chain_escape"
+					if (isSymlinkAttack) {
+						reply.status(400).send({
+							error: "bad_target_path",
+							code: "bad_target_path",
+							reason: safeResult.code,
+						})
+					} else {
+						reply
+							.status(500)
+							.send({ error: "write_failed", code: "write_failed" })
 					}
-					reply
-						.status(500)
-						.send({ error: "write_failed", code: "write_failed" })
 					return
 				}
+				tmpPath = null // rename succeeded; tempfile is now the dest
 
 				// Stamp action-log entry (author_class: "human-via-mcp").
 				const tickCounter = getCurrentTickCounter(iDir, stage)
@@ -640,13 +662,14 @@ export async function registerUploadRoutes(
 					return
 				}
 
-				// Stream to tempfile with size check.
+				// Stream to tempfile (staged in iDir for V-04 TOCTOU safety —
+				// see streamToTempfile docs).
 				let tmpPath: string | null = null
 				let sha256: string
 				let bytes: number
 
 				try {
-					const result = await streamToTempfile(filePart, destDir, maxBytes)
+					const result = await streamToTempfile(filePart, iDir, maxBytes)
 					tmpPath = result.tmpPath
 					sha256 = result.sha256
 					bytes = result.bytes
@@ -664,24 +687,29 @@ export async function registerUploadRoutes(
 					return
 				}
 
-				// Atomic rename.
-				try {
-					mkdirSync(destDir, { recursive: true })
-					await rename(tmpPath, destAbsPath)
+				// V-04 (Symlink TOCTOU defence): atomic rename via the safe
+				// helper. Same semantics as the stage-output route above.
+				const safeResult = safeMkdirAndRename(iDir, destDir, tmpPath, destAbsPath)
+				if (!safeResult.ok) {
+					cleanupTempFile(tmpPath)
 					tmpPath = null
-				} catch {
-					if (tmpPath) {
-						try {
-							await unlink(tmpPath)
-						} catch {
-							/* best-effort */
-						}
+					const isSymlinkAttack =
+						safeResult.code === "parent_chain_contains_symlink" ||
+						safeResult.code === "parent_chain_escape"
+					if (isSymlinkAttack) {
+						reply.status(400).send({
+							error: "bad_target_path",
+							code: "bad_target_path",
+							reason: safeResult.code,
+						})
+					} else {
+						reply
+							.status(500)
+							.send({ error: "write_failed", code: "write_failed" })
 					}
-					reply
-						.status(500)
-						.send({ error: "write_failed", code: "write_failed" })
 					return
 				}
+				tmpPath = null // rename succeeded; tempfile is now the dest
 
 				// Stamp action-log entry.
 				// For stage-scoped uploads use that stage's tick; for intent-scope

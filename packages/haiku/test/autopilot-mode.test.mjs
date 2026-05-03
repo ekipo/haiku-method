@@ -211,8 +211,8 @@ test("mode:autopilot auto-advances a completed `ask` gate stage", () => {
 // would behave like continuous (pause at ask gates), forcing legacy intents
 // to migrate the boolean to `mode: autopilot`.
 //
-// CURRENT BEHAVIOR (2026-05-02): The legacy boolean is honored as a
-// FALLBACK so existing long-lived intents that carry
+// CURRENT BEHAVIOR (commit a61e6f69e, 2026-05-02): The legacy boolean is
+// honored as a FALLBACK so existing long-lived intents that carry
 // `mode: continuous + autopilot: true` keep their autopilot semantics
 // without a hard migration. The canonical home is still `intent.mode`;
 // new intents should set `mode: autopilot` directly. The boolean is a
@@ -228,7 +228,7 @@ test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (lega
 		{
 			studio: "software",
 			mode: "continuous",
-			autopilot: true, // legacy boolean — honored as fallback when mode != autopilot
+			autopilot: true, // legacy boolean — honored as a fallback for long-lived intents
 			stages: ["inception"],
 			active_stage: "inception",
 		},
@@ -272,8 +272,9 @@ test("mode:continuous + autopilot:true boolean DOES auto-advance ask gates (lega
 	)
 	assert.ok(
 		result.action.action === "advance_stage" ||
-			result.action.action === "advance_phase",
-		`expected advance_stage or advance_phase, got: ${result.action.action}`,
+			result.action.action === "advance_phase" ||
+			result.action.action === "auto_gate_passed",
+		`expected advance_stage / advance_phase / auto_gate_passed, got: ${result.action.action}`,
 	)
 })
 

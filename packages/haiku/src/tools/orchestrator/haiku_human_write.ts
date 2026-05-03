@@ -18,8 +18,8 @@
 //   - ACCEPTANCE-CRITERIA.md AC-AB1, AC-AB2, AC-TA1–AC-TA4, AC-ALIAS1/2
 
 import { createHash, randomBytes } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
-import { rename, unlink, writeFile } from "node:fs/promises"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import matter from "gray-matter"
 import { appendActionLogEntry } from "../../orchestrator/workflow/action-log.js"
@@ -36,6 +36,7 @@ import {
 	type WriteAuditRecord,
 } from "../../orchestrator/workflow/write-audit.js"
 import { findHaikuRoot } from "../../state-tools.js"
+import { cleanupTempFile, safeMkdirAndRename } from "../../http/path-safety.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
@@ -112,6 +113,24 @@ const DENY_LIST: Array<{ pattern: RegExp; rule: string; message: string }> = [
 		rule: "drift-markers.json",
 		message:
 			"drift-markers.json is an internal workflow-engine artifact. Do not write directly.",
+	},
+	{
+		// V-11 — the operator-only baseline-corrupt acknowledgement
+		// marker. Only `/haiku:repair --confirm-baseline-reset ...`
+		// (operator-driven) may write this; the agent has no path here.
+		pattern: /(?:^|\/)\.baseline-ack$/,
+		rule: "stages/{stage}/.baseline-ack",
+		message:
+			".baseline-ack is the operator-only baseline-reset acknowledgement marker. Only /haiku:repair --confirm-baseline-reset can write it; the agent has no path. This is the V-11 defence against silent baseline laundering.",
+	},
+	{
+		// V-11 — the thrash counter is workflow-engine-managed. Letting
+		// the agent reset it would let an attacker zero out the thrash
+		// circuit breaker right before each corruption attempt.
+		pattern: /(?:^|\/)baseline-thrash\.json$/,
+		rule: "stages/{stage}/baseline-thrash.json",
+		message:
+			"baseline-thrash.json is the V-11 baseline-corruption circuit breaker. Managed exclusively by the drift-detection gate.",
 	},
 	{
 		pattern: /(?:^|\/)write-audit\.jsonl$/,
@@ -217,8 +236,24 @@ function validatePath(
 	// Re-derive a clean relative path from the resolved absolute.
 	const cleanRel = relative(intentAbs, absCandidate)
 
-	// 4. Symlink escape: if the PARENT directory exists, resolve it and check.
-	//    We can't resolve the full target path since it may not exist yet.
+	// 4. Symlink escape — pre-validation pass.
+	//    Authoritative defence is in `safeMkdirAndRename` (called from
+	//    the write path below) — it walks the parent chain segment by
+	//    segment with `lstatSync`, refusing any pre-existing symlink,
+	//    and re-validates the realpath immediately before the atomic
+	//    rename. That closes the V-04 TOCTOU window the legacy
+	//    "realpath check, then mkdirSync(recursive: true)" idiom left
+	//    open (parent dir didn't exist → realpath check skipped → mkdir
+	//    silently followed planted symlinks).
+	//
+	//    This pre-check stays as a fast-fail for the common case where
+	//    the parent dir already contains a planted symlink (e.g.
+	//    `stages/security/knowledge` is already `→ /tmp/owned` at the
+	//    moment of the request). It returns the same
+	//    `path_outside_tracked_surface` envelope the rest of the
+	//    validation uses, so downstream callers don't have to learn a
+	//    second error shape. Even if this check passes,
+	//    `safeMkdirAndRename` re-validates race-free.
 	const parentDir = dirname(absCandidate)
 	if (existsSync(parentDir)) {
 		try {
@@ -583,40 +618,51 @@ export default defineTool({
 			}
 		}
 
-		// ── Create intermediate directories + track created dirs ──────────────
+		// ── Track which dirs we'll be creating ────────────────────────────────
+		// We compute the list BEFORE calling safeMkdirAndRename so the audit
+		// log reflects what was actually created. The helper is responsible
+		// for the safe creation; we just enumerate so the audit envelope is
+		// correct.
 		const dirsCreated: string[] = []
 		if (createDirs) {
-			// Walk up from destAbs parent and record dirs that don't exist.
-			const dirsToCreate: string[] = []
 			let cur = parentDir
+			const toCreate: string[] = []
 			while (!existsSync(cur)) {
-				dirsToCreate.unshift(cur)
+				toCreate.unshift(cur)
 				const up = dirname(cur)
 				if (up === cur) break
 				cur = up
 			}
-			if (dirsToCreate.length > 0) {
-				mkdirSync(parentDir, { recursive: true })
-				for (const d of dirsToCreate) {
-					dirsCreated.push(relative(intentDir, d))
-				}
+			for (const d of toCreate) {
+				dirsCreated.push(relative(intentDir, d))
 			}
 		}
 
 		// ── Compute SHA-256 over decoded bytes ────────────────────────────────
 		const sha = createHash("sha256").update(contentBytes).digest("hex")
 
-		// ── Atomic disk write ─────────────────────────────────────────────────
+		// ── Atomic disk write — V-04 TOCTOU-safe ─────────────────────────────
+		// Stream to a tempfile in the intent root (so it's on the same
+		// filesystem as the destination — required for atomic rename), then
+		// hand the (tempPath, parentDir, destPath, intentRoot) tuple to
+		// `safeMkdirAndRename`. The helper:
+		//   1. Refuses any pre-existing symlink in the parent chain.
+		//   2. Creates missing intermediate dirs one segment at a time
+		//      (no `recursive: true`, which would silently follow symlinks).
+		//   3. Re-validates `realpath(parent)` against `realpath(intentRoot)`
+		//      immediately before the atomic rename.
+		//
+		// We stage the tempfile in `intentDir` (not in `parentDir`, which
+		// may not exist yet) so the rename is filesystem-local even when
+		// `parentDir` is brand new.
 		const pid = process.pid
 		const rnd = randomBytes(6).toString("hex")
-		const tmpPath = join(parentDir, `.hwm-tmp-${pid}-${rnd}.tmp`)
+		const tmpPath = join(intentDir, `.hwm-tmp-${pid}-${rnd}.tmp`)
 
 		try {
 			await writeFile(tmpPath, contentBytes)
-			await rename(tmpPath, destAbs)
 		} catch (err) {
-			// Best-effort cleanup.
-			await unlink(tmpPath).catch(() => {})
+			cleanupTempFile(tmpPath)
 			return {
 				content: [
 					{
@@ -626,7 +672,7 @@ export default defineTool({
 								ok: false,
 								error: "disk_write_failed",
 								path: canonicalPath,
-								message: `Failed to write '${canonicalPath}': ${String(err)}`,
+								message: `Failed to write tempfile for '${canonicalPath}': ${String(err)}`,
 							},
 							null,
 							2,
@@ -636,6 +682,41 @@ export default defineTool({
 				isError: true,
 			}
 		}
+
+		const safeResult = safeMkdirAndRename(intentDir, parentDir, tmpPath, destAbs)
+		if (!safeResult.ok) {
+			// V-04 defence triggered, OR rename failed for a benign reason.
+			// Either way: clean up the temp file and surface a structured
+			// error envelope. Symlink/escape paths return a distinct error
+			// code so callers and audits can distinguish a planted attack
+			// from an I/O failure.
+			cleanupTempFile(tmpPath)
+			const isSymlinkAttack =
+				safeResult.code === "parent_chain_contains_symlink" ||
+				safeResult.code === "parent_chain_escape"
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: isSymlinkAttack ? "path_outside_tracked_surface" : "disk_write_failed",
+								path: canonicalPath,
+								reason: isSymlinkAttack ? safeResult.code : undefined,
+								message: isSymlinkAttack
+									? `Refused to write '${canonicalPath}': parent directory chain failed symlink-safety check (${safeResult.code}).`
+									: `Failed to write '${canonicalPath}': ${safeResult.detail}`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
+			}
+		}
+		// Tempfile has been atomically moved; nothing to clean up on success.
 
 		// ── Timestamps + entry IDs ────────────────────────────────────────────
 		const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")

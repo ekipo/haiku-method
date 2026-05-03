@@ -23,6 +23,7 @@ import {
 import { Ajv } from "ajv"
 import matter from "gray-matter"
 import { features, resolvePluginRoot } from "./config.js"
+import { sanitizeFeedbackBody } from "./http/feedback-sanitize.js"
 // workflow-fields module retained for state-integrity sealing; no direct imports
 // needed here since the completion-only guard is narrow to status/completed.
 import {
@@ -4590,13 +4591,22 @@ export function writeFeedbackFile(
 		}
 	}
 
+	// V-10 server-side sanitization. Every external-input body field flows
+	// through this single chokepoint before it hits disk. Strips dangerous
+	// HTML tags (<script>, <iframe>, <object>, <style>, <form>, <embed>),
+	// inline event handlers (on*=), dangerous attributes (formaction,
+	// srcdoc), and dangerous URL schemes (javascript:, vbscript:,
+	// data:text/html) from both HTML attributes and markdown link/image
+	// syntax. Markdown safe constructs are preserved.
+	const sanitizedBody = sanitizeFeedbackBody(opts.body)
+
 	// Link the attachment via the server route so MarkdownViewer's
 	// default <img> renders correctly in the review UI. Storing a
 	// root-relative URL (rather than `./…`) avoids depending on the
 	// current page's path — all review pages share the same origin.
 	const bodyWithAttachment = attachmentBasename
-		? `${opts.body.trim()}\n\n![annotation](/api/feedback-attachment/${encodeURIComponent(slug)}/${encodeURIComponent(stage)}/${encodeURIComponent(attachmentBasename)})\n`
-		: opts.body
+		? `${sanitizedBody.trim()}\n\n![annotation](/api/feedback-attachment/${encodeURIComponent(slug)}/${encodeURIComponent(stage)}/${encodeURIComponent(attachmentBasename)})\n`
+		: sanitizedBody
 
 	const allowedResolutions = new Set([
 		"question",
@@ -5242,7 +5252,10 @@ export function appendFeedbackReply(
 				: `Error: feedback '${feedbackId}' not found (intent-scope)`,
 		}
 	}
-	const trimmed = reply.body.trim()
+	// V-10 server-side sanitization on reply bodies — same chokepoint
+	// rationale as writeFeedbackFile above.
+	const sanitized = sanitizeFeedbackBody(reply.body)
+	const trimmed = sanitized.trim()
 	if (trimmed.length === 0) {
 		return { ok: false, error: "Error: reply body cannot be empty" }
 	}
@@ -10367,7 +10380,13 @@ export function handleStateTool(
 			const intentArg = args.intent as string
 			const stageArg = (args.stage as string) || ""
 			const fbId = args.feedback_id as string
-			const newBody = (args.body as string) ?? ""
+			const rawBody = (args.body as string) ?? ""
+
+			// V-10 server-side sanitization. The fixer-hat path lands here
+			// when an agent edits an FB body during the fix loop; sanitize
+			// at the same chokepoint as writeFeedbackFile / appendFeedbackReply
+			// so a hostile agent cannot plant XSS in the persisted FB.
+			const newBody = sanitizeFeedbackBody(rawBody)
 
 			if (!intentArg || !fbId) {
 				return reply(

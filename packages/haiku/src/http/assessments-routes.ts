@@ -27,6 +27,53 @@ import { isValidSlug, validateIntent } from "./validation.js"
 // Loose Assessment shape — we pass through whatever is in DA-*.json.
 type Assessment = Record<string, unknown>
 
+// ── V-09 list-endpoint rationale truncation ───────────────────────────────
+//
+// VULN-REPORT V-09 (companion to the schema-validation cap in
+// haiku_classify_drift): the list endpoint paginates DA-NN.json records
+// back to the SPA. With a 10 KB top-level rationale and a 1 KB per-finding
+// excerpt, a 200-row page can carry ~2 MB of rationale text — comfortably
+// past what the SPA list view needs. We truncate both fields to a 256-char
+// preview here; the per-id detail endpoint (`GET /assessments/:id`) still
+// returns the full record so the reviewer never loses information.
+//
+// `TRUNCATE_RATIONALE_PREVIEW_CHARS` is the visible-character budget;
+// truncated values are postfixed with `…` so the SPA can show an
+// unambiguous truncation marker.
+const TRUNCATE_RATIONALE_PREVIEW_CHARS = 256
+
+/** Truncate a string to `TRUNCATE_RATIONALE_PREVIEW_CHARS` plus a `…` marker.
+ *  Counts code points — not bytes — because the SPA renders by character. */
+function truncateRationale(value: unknown): unknown {
+	if (typeof value !== "string") return value
+	if (value.length <= TRUNCATE_RATIONALE_PREVIEW_CHARS) return value
+	return `${value.slice(0, TRUNCATE_RATIONALE_PREVIEW_CHARS)}…`
+}
+
+/**
+ * Return a SHALLOW copy of an Assessment with `agent_rationale` and every
+ * classification's `rationale_excerpt` truncated to a list-view-safe
+ * preview length. The original record on disk is NOT modified — the
+ * detail endpoint reads it again for full text.
+ */
+function truncateRationaleForListView(assessment: Assessment): Assessment {
+	const out: Assessment = { ...assessment }
+	out.agent_rationale = truncateRationale(assessment.agent_rationale)
+	const classifications = assessment.classifications
+	if (Array.isArray(classifications)) {
+		out.classifications = classifications.map((c) => {
+			if (c === null || typeof c !== "object") return c
+			return {
+				...(c as Record<string, unknown>),
+				rationale_excerpt: truncateRationale(
+					(c as Record<string, unknown>).rationale_excerpt,
+				),
+			}
+		})
+	}
+	return out
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** Validate assessment ID format: DA-NN (one or more digits). */
@@ -203,10 +250,13 @@ export function registerAssessmentsRoutes(instance: FastifyInstance): void {
 		const has_more = total > limit
 		const page = filtered.slice(0, limit)
 
+		// V-09: truncate `agent_rationale` and per-classification
+		// `rationale_excerpt` to a list-view-safe preview. The detail
+		// endpoint below returns the full text untouched.
 		const assessments: Assessment[] = []
 		for (const entry of page) {
 			const a = readAssessmentFile(entry.absPath)
-			if (a !== null) assessments.push(a)
+			if (a !== null) assessments.push(truncateRationaleForListView(a))
 		}
 
 		reply.send({ ok: true, assessments, total, has_more })

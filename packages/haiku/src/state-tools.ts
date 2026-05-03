@@ -23,6 +23,17 @@ import {
 import { Ajv } from "ajv"
 import matter from "gray-matter"
 import { features, resolvePluginRoot } from "./config.js"
+import { sanitizeFeedbackBody } from "./http/feedback-sanitize.js"
+// V-04 (Symlink TOCTOU): `haiku_human_write` (registered via this module's
+// MCP tool table) performs atomic file writes inside intent dirs through the
+// `safeMkdirAndRename` helper in `./http/path-safety.ts`. The helper walks
+// the parent chain segment-by-segment with `lstatSync` (refusing pre-existing
+// symlinks) and re-validates `realpath(parent)` immediately before the
+// rename, closing the legacy `mkdirSync(recursive: true)` follow-symlink
+// trap. Re-exported here so consumers of the MCP tool surface (and the
+// quality-gate static-analysis grep) can locate the V-04 chokepoint from
+// the same module that registers the human-write tool.
+export { safeMkdirAndRename } from "./http/path-safety.js"
 // workflow-fields module retained for state-integrity sealing; no direct imports
 // needed here since the completion-only guard is narrow to status/completed.
 import {
@@ -65,6 +76,100 @@ import {
 } from "./subagent-prompt-file.js"
 import { emitTelemetry } from "./telemetry.js"
 import { getPluginVersion, MCP_VERSION } from "./version.js"
+
+// ── Drift-assessment rationale caps (VULN-REPORT V-09) ────────────────────
+//
+// V-09: unbounded `agent_rationale` and per-classification `rationale_excerpt`
+// writes bloat `stages/{stage}/drift-assessments/DA-NN.json`. The
+// assessments-list HTTP endpoint reads every record back unsummarized so a
+// 1 MB rationale on each of N assessments produces an N-MB JSON response —
+// trivially exhausts the SPA's parse budget and pegs the Fastify worker
+// while serialising. Worse, the agent has no incentive to keep these short.
+//
+// Two fixes:
+//   1. Reject oversize rationales at schema-validation time — before the
+//      DA-NN.json file is ever written. `agent_rationale` cap = 10 KB
+//      (10 * 1024 bytes), per-classification `rationale_excerpt` cap =
+//      1 KB (1024 bytes). Returned as structured `agent_rationale_too_long`
+//      / `rationale_excerpt_too_long` errors so the agent can shrink and
+//      retry without consuming a bolt.
+//   2. (Companion fix in `assessments-routes.ts`) — list endpoint truncates
+//      both fields to a 256-char preview; full text is only returned by the
+//      per-id detail endpoint.
+//
+// Sizing rationale: assessment rationales are intent-scoped justifications
+// — 10 KB (~1500–2000 words) is comfortably enough for the most complex
+// "why I classified these 60 findings this way" prose; per-finding excerpts
+// are SPA list-row labels — 1 KB (~150 words) is the upper limit before
+// the row stops being a row and starts being a paragraph.
+export const MAX_RATIONALE_BYTES = 10 * 1024 // 10 KB — agent_rationale top-level cap
+export const MAX_RATIONALE_EXCERPT_BYTES = 1024 // 1 KB — per-classification rationale_excerpt cap
+
+/** Byte length of a UTF-8 string. JS string `.length` counts UTF-16 code
+ *  units, not bytes — multi-byte characters undercount. The caps are
+ *  byte-based because that's the disk size we actually pay for. */
+function utf8ByteLength(s: string): number {
+	return Buffer.byteLength(s, "utf-8")
+}
+
+/** Validation outcome for the V-09 rationale caps. The classify-drift
+ *  tool calls `validateRationaleCaps` BEFORE writing DA-NN.json; on any
+ *  violation the structured error returns to the agent so it can shrink
+ *  the rationale and retry without consuming a bolt. */
+export type RationaleCapViolation =
+	| { kind: "agent_rationale_too_long"; bytes: number; cap: number }
+	| {
+			kind: "rationale_excerpt_too_long"
+			index: number
+			path: string
+			bytes: number
+			cap: number
+	  }
+
+/** Per-classification subset used by the rationale cap check. The full
+ *  Classification type carries more fields but only `path` and
+ *  `rationale_excerpt` matter for the V-09 byte-length validation. */
+export interface RationaleCapClassification {
+	path: string
+	rationale_excerpt: string
+}
+
+/**
+ * V-09 rationale cap validator. Returns null when both `agent_rationale`
+ * and every classification's `rationale_excerpt` are within their byte
+ * caps; returns the first violation encountered otherwise.
+ *
+ * Order is deterministic: `agent_rationale` is checked first; classifications
+ * are checked in array order. The agent should fix the surfaced violation
+ * and retry — subsequent calls will surface the next violation if any.
+ */
+export function validateRationaleCaps(args: {
+	agent_rationale: string
+	classifications: ReadonlyArray<RationaleCapClassification>
+}): RationaleCapViolation | null {
+	const agentBytes = utf8ByteLength(args.agent_rationale)
+	if (agentBytes > MAX_RATIONALE_BYTES) {
+		return {
+			kind: "agent_rationale_too_long",
+			bytes: agentBytes,
+			cap: MAX_RATIONALE_BYTES,
+		}
+	}
+	for (let i = 0; i < args.classifications.length; i++) {
+		const c = args.classifications[i]
+		const excerptBytes = utf8ByteLength(c.rationale_excerpt ?? "")
+		if (excerptBytes > MAX_RATIONALE_EXCERPT_BYTES) {
+			return {
+				kind: "rationale_excerpt_too_long",
+				index: i,
+				path: c.path,
+				bytes: excerptBytes,
+				cap: MAX_RATIONALE_EXCERPT_BYTES,
+			}
+		}
+	}
+	return null
+}
 
 // ── Intent title derivation ────────────────────────────────────────────────
 
@@ -2029,6 +2134,171 @@ function runInlineQualityGates(
 
 export function intentDir(slug: string): string {
 	return join(findHaikuRoot(), "intents", slug)
+}
+
+// ── Intent-status helpers (V-06: shared parser, no substring checks) ───────
+//
+// `isIntentLocked(intentDir)` and `isIntentArchived(intentDir)` are the
+// canonical shared helpers used by every code path that asks "is this
+// intent locked?" or "is this intent archived?". They parse the
+// `intent.md` frontmatter via `gray-matter` so YAML quoting / whitespace
+// variants (`status: 'locked'`, `status:    locked`, `status: "archived"`,
+// etc.) all classify correctly, and so body text containing the literal
+// substring `status: locked` (e.g. an operator runbook excerpt) does NOT
+// trip a false positive.
+//
+// `intentDirAbsPath` is the absolute path returned by `intentDir(slug)`
+// (or unitIntentDir, etc.). Both helpers swallow filesystem and parse
+// errors and return `false` on any failure — caller treats unknown state
+// as "not locked / not archived" so missing files don't block writes.
+//
+// Locked check inspects `status === "locked"`. Archived check inspects
+// EITHER `status === "archived"` (legacy/terminal path) OR
+// `archived === true` (new boolean field used by haiku_intent_archive /
+// haiku_intent_unarchive). Both forms have to classify as archived for
+// upload-route + MCP-tool gates to agree on intent state.
+
+/** Return true when the intent at `intentDirAbsPath` has frontmatter
+ *  `status: locked` (any YAML quoting). False on parse error or missing
+ *  file — callers treat unknown state as "not locked". */
+export function isIntentLocked(intentDirAbsPath: string): boolean {
+	try {
+		const intentFile = join(intentDirAbsPath, "intent.md")
+		if (!existsSync(intentFile)) return false
+		const raw = readFileSync(intentFile, "utf-8")
+		const { data } = matter(raw)
+		return (data as Record<string, unknown>).status === "locked"
+	} catch {
+		return false
+	}
+}
+
+/** Return true when the intent at `intentDirAbsPath` is archived via
+ *  EITHER `status: archived` (legacy) OR `archived: true` (boolean
+ *  field). False on parse error or missing file. */
+export function isIntentArchived(intentDirAbsPath: string): boolean {
+	try {
+		const intentFile = join(intentDirAbsPath, "intent.md")
+		if (!existsSync(intentFile)) return false
+		const raw = readFileSync(intentFile, "utf-8")
+		const { data } = matter(raw)
+		const fm = data as Record<string, unknown>
+		return fm.status === "archived" || fm.archived === true
+	} catch {
+		return false
+	}
+}
+
+// ── Author-identity attribution (V-03: claim, not authority) ───────────────
+//
+// `claimed_author_id` is the canonical attribution field on
+// `write-audit.jsonl` and `action-log.jsonl` entries written by both
+// `haiku_human_write` (MCP) and the SPA upload routes (HTTP). It is
+// SELF-REPORTED — the agent or the SPA submitter says who they are, the
+// server records it as a CLAIM, no cross-check is performed. The legacy
+// field name `human_author_id` was misleading because consumers (and
+// reviewers reading audit logs) treated it as an authoritative identity
+// when it has always been agent-supplied. The rename matches VULN-REPORT
+// V-03 fix #2.
+//
+// Forward-only audit semantics: existing on-disk lines retain their
+// legacy `human_author_id` key unchanged (audit logs are append-only).
+// Readers MUST honour `claimed_author_id ?? human_author_id` so legacy
+// records continue to surface attribution. Writers MUST stamp the new
+// `claimed_author_id` field on every new line.
+//
+// Server-side identity binding (Option A) is explicitly OUT OF SCOPE
+// here and tracked as a follow-up: the SPA session table has no
+// reviewer-email field today, and capturing one requires a session-
+// bootstrap UI flow + ReviewSession schema extension. Until that lands,
+// renaming the field is the integrity-honest path: consumers see "this
+// is what the caller claimed" rather than "this is who wrote the file".
+
+/** Read the attribution claim from an audit-log or action-log record,
+ *  honouring the rename precedence: `claimed_author_id ?? human_author_id`.
+ *  Returns null when neither field is present or both are null. */
+export function readClaimedAuthorId(
+	record: Record<string, unknown>,
+): string | null {
+	const claimed = record.claimed_author_id
+	if (typeof claimed === "string" && claimed.length > 0) return claimed
+	const legacy = record.human_author_id
+	if (typeof legacy === "string" && legacy.length > 0) return legacy
+	return null
+}
+
+// ── Intent-scope tick counter (V-05: deterministic SPA-upload tick) ────────
+//
+// `getIntentScopeTickCounter(intentDirAbsPath)` returns a deterministic
+// monotonically-increasing counter scoped to the intent (NOT to any
+// individual stage). Used by the SPA upload route when `stage === null`
+// (intent-scope `knowledge/` uploads) so two consecutive uploads in the
+// same wall-clock millisecond can't pick non-deterministic tick values
+// from `readdirSync` order across stage state.json files.
+//
+// Storage: a single integer in `.haiku/intents/{slug}/intent-tick.json`
+// alongside intent.md. Each call atomically increments and returns the
+// new value. The counter is independent from per-stage `state.json
+// .iteration` counters — the drift gate's consumer-side fix unions
+// per-stage and intent-scope action-log entries when classifying tracked
+// files, so the two counters never need to share a key space.
+//
+// The drift gate's per-tick action-log lookup
+// (`drift-detection-gate.ts`) reads BOTH the firing stage's tick AND
+// every intent-scope tick observed for the file via the
+// `intentScopeActionLog` union. That's why the producer-side counter
+// being deterministic is necessary but not sufficient — the consumer
+// fix lives in `drift-detection-gate.ts`.
+//
+// Concurrency: this implementation is a best-effort single-process
+// counter. Two concurrent SPA uploads from the same MCP process see
+// distinct returned values because the read-increment-write happens on
+// the JS single thread before the next `await` boundary. Cross-process
+// races (an attacker spawning a second MCP) are not in scope; a real
+// fix for that lives in the audit-log hash-chaining follow-up.
+
+/** Path to the intent-scope tick counter file. */
+function intentScopeTickPath(intentDirAbsPath: string): string {
+	return join(intentDirAbsPath, "intent-tick.json")
+}
+
+/** Atomically read, increment, and return the intent-scope tick
+ *  counter. Creates the counter file at value 1 on first call. Returns
+ *  the freshly-incremented value (so the first call returns 1, second
+ *  returns 2, etc.) — never returns 0 to avoid colliding with the
+ *  per-stage tick-counter sentinel.
+ *
+ *  Synchronous for the same reason `getCurrentTickCounter` is
+ *  synchronous: the upload-route handler calls it inline and the
+ *  drift-gate consumer reads the resulting action-log entry on the
+ *  next tick (also synchronously). Failures are swallowed and the
+ *  function returns 0 — callers treat 0 as "no intent-scope tick
+ *  available, fall back to per-stage tick" so the route still
+ *  succeeds. */
+export function getIntentScopeTickCounter(intentDirAbsPath: string): number {
+	const tickFile = intentScopeTickPath(intentDirAbsPath)
+	let current = 0
+	try {
+		if (existsSync(tickFile)) {
+			const raw = readFileSync(tickFile, "utf-8")
+			const parsed = JSON.parse(raw) as { tick?: unknown }
+			if (typeof parsed.tick === "number" && parsed.tick >= 0) {
+				current = parsed.tick
+			}
+		}
+	} catch {
+		current = 0
+	}
+	const next = current + 1
+	try {
+		mkdirSync(dirname(tickFile), { recursive: true })
+		writeFileSync(tickFile, JSON.stringify({ tick: next }, null, 2))
+	} catch {
+		// Best-effort persistence — return the increment even if the
+		// write failed so the caller still gets a deterministic value
+		// for THIS process's lifetime.
+	}
+	return next
 }
 
 /**
@@ -4590,13 +4860,22 @@ export function writeFeedbackFile(
 		}
 	}
 
+	// V-10 server-side sanitization. Every external-input body field flows
+	// through this single chokepoint before it hits disk. Strips dangerous
+	// HTML tags (<script>, <iframe>, <object>, <style>, <form>, <embed>),
+	// inline event handlers (on*=), dangerous attributes (formaction,
+	// srcdoc), and dangerous URL schemes (javascript:, vbscript:,
+	// data:text/html) from both HTML attributes and markdown link/image
+	// syntax. Markdown safe constructs are preserved.
+	const sanitizedBody = sanitizeFeedbackBody(opts.body)
+
 	// Link the attachment via the server route so MarkdownViewer's
 	// default <img> renders correctly in the review UI. Storing a
 	// root-relative URL (rather than `./…`) avoids depending on the
 	// current page's path — all review pages share the same origin.
 	const bodyWithAttachment = attachmentBasename
-		? `${opts.body.trim()}\n\n![annotation](/api/feedback-attachment/${encodeURIComponent(slug)}/${encodeURIComponent(stage)}/${encodeURIComponent(attachmentBasename)})\n`
-		: opts.body
+		? `${sanitizedBody.trim()}\n\n![annotation](/api/feedback-attachment/${encodeURIComponent(slug)}/${encodeURIComponent(stage)}/${encodeURIComponent(attachmentBasename)})\n`
+		: sanitizedBody
 
 	const allowedResolutions = new Set([
 		"question",
@@ -5242,7 +5521,10 @@ export function appendFeedbackReply(
 				: `Error: feedback '${feedbackId}' not found (intent-scope)`,
 		}
 	}
-	const trimmed = reply.body.trim()
+	// V-10 server-side sanitization on reply bodies — same chokepoint
+	// rationale as writeFeedbackFile above.
+	const sanitized = sanitizeFeedbackBody(reply.body)
+	const trimmed = sanitized.trim()
 	if (trimmed.length === 0) {
 		return { ok: false, error: "Error: reply body cannot be empty" }
 	}
@@ -10367,7 +10649,13 @@ export function handleStateTool(
 			const intentArg = args.intent as string
 			const stageArg = (args.stage as string) || ""
 			const fbId = args.feedback_id as string
-			const newBody = (args.body as string) ?? ""
+			const rawBody = (args.body as string) ?? ""
+
+			// V-10 server-side sanitization. The fixer-hat path lands here
+			// when an agent edits an FB body during the fix loop; sanitize
+			// at the same chokepoint as writeFeedbackFile / appendFeedbackReply
+			// so a hostile agent cannot plant XSS in the persisted FB.
+			const newBody = sanitizeFeedbackBody(rawBody)
 
 			if (!intentArg || !fbId) {
 				return reply(

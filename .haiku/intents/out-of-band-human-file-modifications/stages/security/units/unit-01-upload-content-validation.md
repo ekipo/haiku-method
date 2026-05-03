@@ -51,7 +51,8 @@ quality_gates:
       packages/haiku/test/state-tools-handlers.test.mjs
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: pending
+status: completed
+completed_at: '2026-05-03T08:51:24Z'
 ---
 # Unit 01 — Upload content validation
 

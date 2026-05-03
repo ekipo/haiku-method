@@ -208,6 +208,7 @@ where applicable.
 | T-3 | Direct `state.json` tamper to bypass V-11 baseline gate (red-team finding FB-05) | `silent-filesystem-drop-detection.feature` | V-11 + RT1/RT2/RT6 | Unit-03 anchors signals on tamper-evident surfaces (commit `3c3ccf1a0`); FB-05 was rejected because anchored detectors close the bypass. |
 | T-4 | `baseline.json` corruption → silent auto-establish on next tick re-baselines attacker-chosen content | `silent-filesystem-drop-detection.feature` | V-11 | Unit-03 operator-only baseline-reset path with reconstructed-vs-on-disk diff; agent CANNOT set `baseline_corrupt_acknowledged`. |
 | T-5 | Substring-match status check on `intent.md` accepts non-canonical YAML formatting | `explicit-spa-upload.feature` | V-06 | Unit-02 shared `isIntentLocked` / `isIntentArchived` helpers parse via `gray-matter`. R-03 closed coverage gap on MCP path. |
+| T-6 | `haiku_baseline_init` MCP tool re-baselines attacker-controlled content into `baseline.json` (silent-establish laundry against everything V-11 closes on the gate-side path) | `silent-filesystem-drop-detection.feature` | V-11 | Operator-callable MCP tool registered at `packages/haiku/src/tools/orchestrator/index.ts:13,26`. Sibling write-surface to `haiku_classify_drift` (see §5). Two modes: `establish-all` enumerates the entire tracked surface; `establish-paths` baselines only listed paths after validating each against the same allow-list `haiku_human_write` uses (denies workflow-managed files, drift-subsystem internals, and `path_escape` outside the intent dir at `haiku_baseline_init.ts:49-82`). Idempotency: files whose SHA already matches stored baseline are skipped; only NEW or CHANGED files cause a write (`haiku_baseline_init.ts:272-308`). Trust-boundary placement: in local mode this tool runs in the operator-trusted context (no remote attacker can reach the MCP socket). In tunnel mode there is no remote MCP exposure — MCP tool calls do not traverse the tunnel; only the SPA HTTP routes do. The remaining attacker model is therefore "hostile/buggy agent" rather than "remote attacker" (see §1.4 trust assumptions: agent is partially trusted under the local-mode reference frame in §1.1). Residual risk: the agent CAN call this tool. The operator-confirmation gate that `/haiku:repair --confirm-baseline-reset --diff-shown` enforces is NOT replicated at the MCP-tool layer — invoking `haiku_baseline_init` does not require operator confirmation. Compensating controls: (a) the tracked-surface allow-list bounds blast radius — drift-subsystem internals (`baseline.json`, `drift-markers.json`, `write-audit.jsonl`, `drift-assessments/`) and workflow-managed files (`intent.md`, `state.json`, `units/*.md`, `feedback/*.md`) cannot be baselined through `establish-paths`; (b) the SHA-idempotency check means a hostile agent cannot use this tool to "freeze" arbitrary content over an existing baseline entry without the change being visible as a new entry write. Gap accepted (deferred): no `baseline_corruption_event` action-log entry is emitted from `haiku_baseline_init` invocations the way the gate-side path emits when it detects baseline tamper — agent-driven re-baseline is silent at the action-log layer today. Tracked under FB-16 in ASSESSMENTS.md residual risk. |
 
 ### 3.3. Repudiation — audit-log unreliability
 
@@ -222,8 +223,8 @@ where applicable.
 
 | # | Threat | Feature | V-NN | Notes |
 |---|---|---|---|---|
-| I-1 | Stored XSS via `.html` / `.htm` / `.svg` knowledge upload — script executes in tunnel-origin's security context, exfiltrates session token + intent contents | `drift-assessment-visibility.feature` (rendering chokepoint) | V-01 | Unit-01 ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (commits `3867608a6`, `bfa4b7c91`). Serve-side hardening (CSP, sandboxed sub-origin, `Content-Disposition: attachment` for non-image/PDF) deferred — see ASSESSMENTS.md residual risk. |
-| I-2 | Same class on stage-output upload path; HTML mock renders inline with full DOM access | `explicit-spa-upload.feature` + `drift-assessment-visibility.feature` | V-02 | Same allowlist mitigation. Sandboxed sub-origin for HTML mockups deferred — see ASSESSMENTS.md residual risk. |
+| I-1 | Stored XSS via `.html` / `.htm` / `.svg` knowledge upload — script executes in tunnel-origin's security context, exfiltrates session token + intent contents | `drift-assessment-visibility.feature` (rendering chokepoint) | V-01 | Unit-01 ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (commits `3867608a6`, `bfa4b7c91`). **Bound (FB-34):** the allowlist matches the *claimed* MIME and the *filename extension*, not the byte content; HTML bytes shipped as `image/png`/`.png` pass at boundary 2 and rely on the serve-side extension-driven `Content-Type` + browser respect (boundary 4). Magic-byte sniffing tracked as ASSESSMENTS.md R-6. Serve-side hardening (CSP, sandboxed sub-origin, `Content-Disposition: attachment` for non-image/PDF) deferred — see ASSESSMENTS.md R-1. |
+| I-2 | Same class on stage-output upload path; HTML mock renders inline with full DOM access | `explicit-spa-upload.feature` + `drift-assessment-visibility.feature` | V-02 | Same allowlist mitigation, **same bound** (claimed-MIME + extension; magic-byte sniffing under R-6). Sandboxed sub-origin for HTML mockups deferred — see ASSESSMENTS.md R-5. |
 | I-3 | Reflected XSS via reviewer-rendered feedback markdown (agent-authored body) | `manual-change-assessment.feature` + `drift-assessment-visibility.feature` | V-10 | Unit-03 server-side sanitizer in `feedback-api.ts` (commit `143a1ccbf`). |
 | I-4 | OpenTelemetry exporter exfiltrates audit-log content / file paths / `claimed_author_id` to a configured collector | (cross-cutting telemetry) | (not in VULN-REPORT) | Mitigation: telemetry events redact path tail, never include file *content*. Deferred enhancement: PII allowlist for `claimed_author_id` (rate-limit / hash before export). |
 
@@ -255,12 +256,18 @@ threats, V-NN findings closed, V-NN findings deferred.
 ### 4.1. `silent-filesystem-drop-detection.feature`
 
 - **Trust boundary**: out-of-band human writes (or rogue agent Bash
-  bypass) → drift gate trust verdict.
-- **Primary threats**: T-3, T-4 (baseline tamper), E-3 (guard bypass).
+  bypass) → drift gate trust verdict. Two MCP-tool entry points sit on
+  this feature's surface (see §5): `haiku_classify_drift` (drift
+  classification) and `haiku_baseline_init` (baseline establishment).
+- **Primary threats**: T-3, T-4 (baseline tamper), T-6
+  (`haiku_baseline_init` re-baseline laundry), E-3 (guard bypass).
 - **Closed**: V-11 RT1/RT2/RT6 anchored on tamper-evident surfaces
-  (unit-03, commit `3c3ccf1a0`); V-11 operator-only baseline-reset path.
+  (unit-03, commit `3c3ccf1a0`); V-11 operator-only baseline-reset path;
+  T-6 tracked-surface allow-list + SHA-idempotency on `haiku_baseline_init`.
 - **Deferred**: drift-gate kill-switch monitoring (operator alert if the
-  gate is disabled) — see §5.
+  gate is disabled) — see §5; T-6 audit-log gap (no
+  `baseline_corruption_event` on agent-driven re-baseline) — see §5 and
+  ASSESSMENTS.md residual risk.
 
 ### 4.2. `agent-writes-on-behalf-of-human.feature`
 
@@ -292,12 +299,19 @@ threats, V-NN findings closed, V-NN findings deferred.
 - **Primary threats**: I-1, I-2 (stored XSS via uploaded HTML/SVG), S-3
   (cross-session write), T-2 (TOCTOU on SPA path), T-5 (substring status
   check), D-1 (size DoS), E-1 (CSRF), E-4 (audit-log poisoning).
-- **Closed**: V-01/V-02 (allowlist + extension blocklist, commits
-  `3867608a6`, `bfa4b7c91`), V-03 R-01 (cross-session sid binding,
+- **Closed (with bound)**: V-01/V-02 (allowlist + extension blocklist,
+  commits `3867608a6`, `bfa4b7c91`) — **closure bound:** the allowlist
+  trusts client-supplied MIME (`filePart.mimetype`) and filename
+  extension; the leading bytes are NOT inspected. HTML payloads
+  shipped as `image/png`/`.png` pass boundary 2 and the closure of
+  I-1/I-2 then depends on serve-side defenses (extension-driven
+  Content-Type, future `nosniff`, future CSP). See ASSESSMENTS.md R-6
+  for the magic-byte residual. V-03 R-01 (cross-session sid binding,
   `4e5af2b76`), V-06 (shared `gray-matter` status helpers, `399c2ee13`),
   V-07 (hard cap, `3867608a6`), V-08 (three-layer CSRF, `bed443315`).
 - **Deferred**: serve-side `Content-Disposition: attachment` + CSP for
-  non-image/PDF; sandboxed sub-origin for HTML mockups — see
+  non-image/PDF; sandboxed sub-origin for HTML mockups; magic-byte
+  content sniffing on the binary-class allowlist members (R-6) — see
   ASSESSMENTS.md residual risk.
 
 ### 4.5. `drift-assessment-visibility.feature`
@@ -357,6 +371,40 @@ bloat) and V-10 (feedback body XSS) are the two findings on this entry
 point; both closed in unit-01 and unit-03 respectively. The tool is
 schema-bounded (input validation rejects oversize fields before any disk
 write), so a hostile agent's blast radius is capped at the schema edge.
+
+**`haiku_baseline_init` as its own MCP-tool entry point**: sibling to
+`haiku_classify_drift` — the same drift subsystem exposes a second
+operator-callable MCP tool that writes directly to the integrity-critical
+`baseline.json` asset. Registered at
+`packages/haiku/src/tools/orchestrator/index.ts:13,26`; implementation at
+`packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts`. Two modes:
+`establish-all` (scan every tracked file across every stage) and
+`establish-paths` (baseline only the listed paths). T-6 in §3.2 enumerates
+the threat surface in detail. The trust-boundary justification mirrors
+`haiku_classify_drift`: in **local mode** (§1.1) the MCP socket is
+loopback-only and any caller is trusted-equivalent to the operator; in
+**tunnel mode** (§1.2) MCP tool calls do NOT traverse the tunnel
+(`isRemoteReviewEnabled()` only gates the HTTP routes — the MCP transport
+remains stdio/local even when the SPA tunnel is up), so the remote-attacker
+attack model from §1.2 does not apply here. The remaining attacker model
+is "hostile/buggy agent invoking the tool against the operator's intent" —
+the same model that motivates the `establish-paths` allow-list
+(`haiku_baseline_init.ts:49-82`, structurally identical to the
+`haiku_human_write` deny-list). The tool's blast radius is capped at:
+(a) the tracked-surface allow-list (workflow-managed and drift-subsystem
+internal files cannot be baselined), (b) `path_escape` rejection prevents
+writes outside the intent directory, and (c) SHA-idempotency means
+existing baselined files are skipped — the tool can only ADD new entries
+or mutate the SHA of an existing entry to match new on-disk content.
+Audit-log gap (deferred, tracked under FB-16): unlike the gate-side
+silent-establish path which emits `baseline_corruption_event` action-log
+entries when corruption is detected, agent-driven `haiku_baseline_init`
+invocations write the new baseline without an action-log entry. This is
+recorded as residual risk in ASSESSMENTS.md — the operator-confirmation
+gate that protects `/haiku:repair --confirm-baseline-reset --diff-shown`
+is not replicated at the MCP-tool layer, so the layered defense for this
+write surface is allow-list + idempotency only, not allow-list +
+idempotency + operator-confirmation + action-log.
 
 ---
 
@@ -430,26 +478,301 @@ write), so a hostile agent's blast radius is capped at the schema edge.
 - **Recommendation**: never log raw rationale / feedback body / file
   content as a span attribute; restrict to enums + hashes.
 
-### 6.4. `jsonwebtoken`
+### 6.4. Forward-looking dependency hygiene (not in `package.json` today)
 
-- **Algorithm-confusion (`alg: none`, RS-vs-HS swap)**: classic
-  jsonwebtoken pitfall. We do *not* use `jsonwebtoken` — we sign and
-  verify in `tunnel.ts` using `crypto.createHmac` directly, with explicit
-  `alg !== "HS256"` rejection and constant-time signature compare. The
-  dependency enumeration here is forward-looking: if a future refactor
-  pulls in `jsonwebtoken` to replace the hand-rolled HMAC path, the
-  sign/verify pair MUST be called with explicit `algorithms: ["HS256"]`
-  on verify (the library defaults to all algorithms allowed pre-9.x).
-- **Key-confusion via `EPHEMERAL_SECRET` rotation**: if the verify path
+This sub-section is **NOT** a present third-party surface. It is a
+code-review checklist for hypothetical future additions that the
+hand-rolled HMAC path in `packages/haiku/src/tunnel.ts` would naturally
+attract. Listing it under §6 with the live deps would misrepresent the
+present surface; surfacing it here keeps the audit checklist near the
+real enumeration without claiming the dependency exists.
+
+(Verification: `grep -n "jsonwebtoken" packages/haiku/package.json` →
+no output; `grep -rn "jsonwebtoken" packages/haiku/src/` → no output.
+Token sign/verify lives in `packages/haiku/src/tunnel.ts` using
+`crypto.createHmac` directly — see §1.3 / §1.4 for the
+`EPHEMERAL_SECRET` lifecycle and JWT claim semantics.)
+
+**If a future refactor adopts `jsonwebtoken`** to replace the
+hand-rolled HMAC path, the audit MUST cover:
+
+- **Algorithm-confusion (`alg: none`, RS-vs-HS swap)**: the verify call
+  MUST be invoked with explicit `algorithms: ["HS256"]` (the library
+  defaults to all algorithms allowed pre-9.x). The current hand-rolled
+  path already enforces `alg !== "HS256"` rejection and constant-time
+  signature compare; the equivalent bar must hold post-refactor.
+- **Key-confusion via `EPHEMERAL_SECRET` rotation**: a verify path that
   is ever passed a stale secret (e.g. token minted under secret-A,
-  verified under secret-B without re-issuing), `bad_signature` is the
-  correct verdict. Today this is impossible because the secret is
+  verified under secret-B without re-issuing) MUST return
+  `bad_signature`. Today this is impossible because the secret is
   process-local and never rotated within a process. A future refactor
   that adds key rotation MUST track which secret each token was minted
   against and accept verify against any non-revoked key.
 - **Recommendation**: keep using the hand-rolled HMAC path until there
-  is a concrete reason to take the dependency; if added later, audit the
-  verify call site for explicit `algorithms` allowlist.
+  is a concrete reason to take the dependency; if added later, audit
+  the verify call site for the explicit `algorithms` allowlist before
+  the unit's gate passes.
+
+(Tracked separately: the actually-present third-party deps that §6
+should additionally cover — `@sentry/node`, `marked`, `@fastify/cors`,
+`@fastify/rate-limit` — are surfaced in their own findings on this
+artifact and will be folded into §6.1 – §6.3's enumeration in those
+fix loops.)
+
+### 6.5. `@sentry/node`
+
+In-tree at `packages/haiku/package.json:29` (`"@sentry/node": "^10.47.0"`),
+consumed by `packages/haiku/src/sentry.ts:1-80`. Initialized at
+`sentry.ts:9-15` with the operator-supplied `observability.sentryDsn`;
+when unset every export short-circuits and no network traffic is emitted
+(`sentry.ts:42, 59, 78`). When set, the client opens an outbound HTTPS
+channel to the Sentry SaaS endpoint encoded in the DSN. This is the
+fourth third-party telemetry/transport surface in the dependency set
+(alongside `@fastify/multipart`, OTel, and the hand-rolled HMAC tunnel)
+and was previously omitted from this enumeration; closing the gap now.
+
+- **Outbound exfiltration (DSN reconfiguration)**: an attacker who can
+  set `HAIKU_SENTRY_DSN` (the env var read by `config.ts` and surfaced
+  as `observability.sentryDsn`, see `sentry.ts:7`) at process start
+  redirects every captured exception and every captured feedback body
+  to their own Sentry project. The threat model and operator surface
+  match §6.3 OTel exactly (`OTEL_EXPORTER_OTLP_ENDPOINT`): env vars are
+  read once at process start, no runtime API exists to swap the DSN
+  after `Sentry.init` has been called (`sentry.ts:10-14` is the only
+  init site). Mitigation in place: env vars are operator-controlled at
+  process start; no MCP tool, hook, or HTTP route exposes DSN
+  reconfiguration, and `grep -rn 'HAIKU_SENTRY_DSN\|sentryDsn' packages/haiku/src/`
+  returns only `config.ts` (read) and `sentry.ts` (consumed at init) —
+  no write path. Residual risk: identical to OTel — an operator running
+  the MCP under an env file that an attacker can edit is compromised
+  pre-process; out of scope for application-layer controls.
+- **PII leak via `extra: context` (captureException)**:
+  `reportError(err, context, sessionCtx)` at `sentry.ts:37-47` ships
+  the entire `context` object outbound as Sentry's `extra` field
+  (`sentry.ts:45 Sentry.captureException(err, { extra: context })`).
+  Unlike OTel `recordEvent` payloads (which we constrain to enums,
+  counts, and path-tail hashes per §6.3), `extra: context` is an
+  **unconstrained `Record<string, unknown>`** at the type level — every
+  `reportError` call site decides what goes in. Today's call sites
+  pass file paths, intent slugs, and `claimed_author_id`-class
+  identifiers; a future call site could pass raw rationale, feedback
+  body content, or unit body excerpts and the type system will not
+  catch it. The §6.3 OTel mitigation ("never log raw rationale /
+  feedback body / file content as a span attribute; restrict to
+  enums + hashes") does NOT extend to this path because there is no
+  central chokepoint — `reportError` is the chokepoint, but it accepts
+  arbitrary `unknown`. **Mitigation in place: NONE.** Recommended
+  control: tighten the `context` parameter type from
+  `Record<string, unknown>` to a discriminated union of approved keys
+  (e.g. `{ error_code: string; surface: string; path_tail_hash?: string }`),
+  OR introduce a `sanitizeSentryExtra(context)` helper at the
+  `reportError` chokepoint that allowlists keys and hashes path-tail
+  values before handing off to `Sentry.captureException`. Either route
+  produces a typecheck-enforced control that mirrors §6.3 OTel's
+  guarantee.
+- **Feedback-body leak (captureFeedback)**:
+  `reportFeedback(message, sessionCtx, contactEmail, name)` at
+  `sentry.ts:53-69` calls `Sentry.captureFeedback({ message, ... })` at
+  line 63, sending the user/agent feedback body verbatim to the Sentry
+  SaaS. The V-10 fix landed a server-side sanitizer for the
+  disk-stored copy of feedback (see `I-3` row in §7 and the unit-03
+  feedback-sanitizer quality gate), but that sanitizer runs on the
+  filesystem-write path and does NOT cover the
+  `Sentry.captureFeedback` call here — `reportFeedback` is invoked
+  from the SPA review-server feedback-submission route directly with
+  the raw body string, bypassing the disk-sanitizer entirely. Threat:
+  the same XSS / control-character / oversize-payload class V-10
+  closed for the disk-stored copy still flows through to Sentry.
+  Worse, contact email and submitter-supplied `name` (lines 65-66) are
+  also sent — these can carry attacker-controlled values that surface
+  on the Sentry triage UI for whoever reads the inbox. **Mitigation in
+  place: NONE.** Recommended control (one of):
+  (a) **Operator opt-in gate** — wrap the `Sentry.captureFeedback`
+      call in `if (observability.sentryShipFeedbackBodies) { ... }`
+      and default to `false`; the existing tag (`scope.setTag("feedback", "true")`
+      at line 62) still fires so operators see *that* feedback was
+      submitted without leaking content.
+  (b) **Sanitize before send** — invoke the same sanitizer V-10 uses
+      on the disk-write path (the helper exported from
+      `feedback-sanitizer.ts` per the unit-03 quality gate) on
+      `message`, `contactEmail`, and `name` before passing to
+      `Sentry.captureFeedback`. This is the lower-friction path and
+      keeps the existing default-on behavior.
+  Either mitigation MUST land alongside the unit-fix that addresses
+  this finding; recommend (b) as the default and document (a) as the
+  operator-escape-hatch in `observability` config docs.
+- **Supply-chain footprint**: `@sentry/node` pulls a transitive tree
+  (`@sentry/core`, `@sentry/types`, `@sentry/utils`, plus Node-runtime
+  integrations like `@sentry/profiling-node` if enabled). Comparable in
+  depth to the `@opentelemetry/*` tree called out in §6.3. Adds a
+  separate auth-token surface: the `SENTRY_AUTH_TOKEN` env var read by
+  `package.json:10`'s `postbuild` script for sourcemap upload runs only
+  in CI/release contexts, never on a user machine, so no runtime auth-
+  token leak path exists from the consumer side — but operators
+  building the plugin from source MUST treat that token as a release
+  credential. Mitigation: lockfile review on bumps; `npm audit` in CI
+  (already covers all third-party deps).
+- **Recommendation**: pin minor version, watch GHSA advisories,
+  re-audit on every `@sentry/node` major bump. NEVER ship raw
+  rationale, feedback body, or file content as `extra: context`. Land
+  the `extra`-allowlist (or chokepoint sanitizer) and the
+  `captureFeedback` sanitizer-or-opt-in gate in the unit that closes
+  this finding. Add a code-review checklist item: any new call to
+  `reportError(err, context, ...)` MUST justify every key in
+  `context`.
+
+### 6.5. `@fastify/cors`
+
+- **Registration site**: `packages/haiku/src/http.ts:14` (import),
+  `packages/haiku/src/http.ts:192-218` (`instance.register(fastifyCors, …)`).
+  Registered ONLY when `isRemoteReviewEnabled()` is true
+  (`packages/haiku/src/http.ts:192`); local mode emits no CORS headers
+  at all. This is the load-bearing implementation behind THREAT-MODEL
+  §3.6 E-1 ("Origin allowlist") Layer 2 of the CSRF defense and behind
+  ASSESSMENTS R-3's references to origin-based mitigation.
+- **Origin-comparison semantics**: the `origin` callback at
+  `http.ts:194-197` defers to `resolveAllowedCorsOrigin(origin)` at
+  `http.ts:100-105`, which compares the request `Origin` header against
+  the configured allowlist using **exact string equality** (`Array.includes`)
+  with two filters: empty entries dropped, the literal `"*"` dropped
+  (so a wildcard-by-accident in `HAIKU_REVIEW_ALLOWED_ORIGINS` collapses
+  to "no allowed origins" — fail-closed).
+  - The narrower `isOriginAllowed()` helper at
+    `packages/haiku/src/http/csrf.ts:100-126` (used by Layer 3 nonce
+    enforcement, not by `@fastify/cors` directly) supports
+    trailing-port wildcards (`http://localhost:*`) and subdomain
+    wildcards (`https://*.example.com`) for the CSRF Origin check —
+    the CORS allowlist does NOT. The two surfaces are intentionally
+    decoupled: CORS uses exact-match (operator-controlled), CSRF
+    permits the loopback wildcard for dev convenience.
+- **Preflight handling**: `OPTIONS *` is owned globally by
+  `@fastify/cors` (per the explicit comment at
+  `packages/haiku/src/http/default-routes.ts:55-62` referencing
+  `node_modules/@fastify/cors/index.js:79`). For an allowed origin
+  the preflight returns 204 with `Access-Control-Allow-Origin`,
+  `-Allow-Methods`, `-Allow-Headers`, `-Expose-Headers`. For a
+  disallowed origin `@fastify/cors` calls `callNotFound` and the
+  request lands in our `setNotFoundHandler` at
+  `packages/haiku/src/http/default-routes.ts:81-89`, which responds
+  204 with NO ACAO/ACAM/ACAH/ACEH headers — the browser sees no CORS
+  grant and blocks the real request. The bare 204 is intentional so
+  the OPTIONS path does not leak route existence differently from the
+  404 path. **Mitigation tested**: see the existing CSRF + CORS test
+  suite (audit-mutating-routes script) referenced in §7 row E-1.
+- **Methods + headers exposed**: `["GET", "HEAD", "POST", "PUT",
+  "DELETE", "OPTIONS"]` plus `Authorization`, `Content-Type`,
+  `bypass-tunnel-reminder`, `X-Haiku-CSRF` allowed inbound; only
+  `X-E2E-Encrypted` and `X-Original-Content-Type` exposed outbound.
+  `credentials: false` (cookies are not part of the auth model — JWT
+  in `Authorization` header is). `strictPreflight: false` matches the
+  pre-rewrite hand-rolled behaviour (the test contract permits a
+  preflight without an `Access-Control-Request-Method` header).
+- **OPTIONS-route ownership conflict surface**: the only known sharp
+  edge is "do not register a sibling `instance.options('/*')` —
+  `@fastify/cors` already owns the global OPTIONS route and
+  re-declaration throws `Method 'OPTIONS' already declared for route
+  '/*'` at `buildApp` time" (per the comment at
+  `packages/haiku/src/http/default-routes.ts:55-62`). Threat: a
+  future contributor adding a hand-rolled CORS preflight handler on
+  any route would break server boot — caught at build time, not
+  runtime; failure mode is loud, not silent.
+- **Wildcard handling**: `HAIKU_REVIEW_ALLOWED_ORIGINS` is parsed in
+  `config.ts` and consumed via `review.allowedOrigins`; the
+  `resolveAllowedCorsOrigin()` filter explicitly strips both `""` and
+  `"*"` before exact-match. There is NO path by which an operator can
+  configure `@fastify/cors` to echo `Access-Control-Allow-Origin: *`
+  to the client — even if `HAIKU_REVIEW_ALLOWED_ORIGINS=*` is set,
+  the filter drops it and the effective allowlist falls back to
+  `[review.siteUrl]`. Misconfiguration mode (no allowlist + no site
+  URL → empty allowed-set → silent reject of every cross-origin
+  request) is detected at startup by the explicit warning at
+  `packages/haiku/src/http.ts:354-369` (FB-12).
+- **Recommendation**: pin minor version, watch GHSA advisories on
+  `@fastify/cors`. Re-audit the OPTIONS-ownership comment at
+  `default-routes.ts:55-62` whenever `@fastify/cors` major-bumps —
+  the index.js:79 line reference is implementation-specific and may
+  drift across versions. The exact-match origin policy is a
+  deliberate narrowing vs the more permissive `isOriginAllowed`
+  helper used for CSRF Layer 3; if a future change unifies them,
+  audit the CSRF call sites first.
+
+### 6.6. `@fastify/rate-limit`
+
+- **Registration site**: `packages/haiku/src/http.ts:15` (import),
+  `packages/haiku/src/http.ts:228-243` (registration). Registered ONLY
+  when `isRemoteReviewEnabled()` is true; local-loopback mode runs
+  with NO rate limiting (rate-limit value zero is intentional in
+  local mode where the only client is the developer's own browser).
+- **Plugin-wide scope**: registered against the root `instance` AFTER
+  CORS but BEFORE `registerCsrfRoutes`, `registerSessionRoutes`,
+  `registerFileServeRoutes`, `registerFeedbackRoutes`,
+  `registerUploadRoutes`, `registerAssessmentsRoutes`, and
+  `registerWsUpgrade` (see `http.ts:228-306`). This means the
+  per-IP cap covers **every HTTP route** in tunnel mode — feedback
+  CRUD, intent-mutation routes, upload routes, asset serves,
+  assessments reads, the CSRF nonce-mint endpoint, and the WebSocket
+  upgrade handshake. There is NO per-route allowlist today; every
+  route shares the same `(IP, window)` budget.
+  - **Closes ASSESSMENTS R-3 partial gap**: this scope DOES cover
+    "per-IP rate-limit on mutating tunnel-mode routes" (V-08 Layer 4 +
+    D-3/D-4 surface). What it does NOT do: per-token / per-session
+    keying, per-route differentiation, or coverage of the
+    long-running WebSocket frames (only the upgrade handshake counts;
+    in-stream messages are not rate-limited).
+- **Per-key derivation (default IP)**: `@fastify/rate-limit` defaults
+  to `req.ip` for the bucket key. Fastify resolves `req.ip` from
+  `req.socket.remoteAddress` UNLESS `trustProxy` is set on the
+  `Fastify({...})` factory. We do NOT set `trustProxy`
+  (`packages/haiku/src/http.ts:107-137` — full factory call, no
+  `trustProxy` field). **Consequence under localtunnel**: every
+  request's apparent peer is localtunnel's outbound proxy connection
+  (loopback, since localtunnel runs as a sibling process tunnelling
+  to a remote relay). The `X-Forwarded-For` header that the relay
+  injects is **NOT trusted** — Fastify ignores it and the rate-limit
+  bucket effectively becomes "all-of-tunnel" rather than "per
+  internet client". This is **intentional and load-bearing**: trusting
+  `X-Forwarded-For` from an attacker-reachable surface would let
+  attackers spoof their key by injecting their own header. The
+  trade-off is that the rate-limit caps the AGGREGATE tunnel-mode
+  request rate at `HAIKU_HTTP_RATE_MAX/HAIKU_HTTP_RATE_WINDOW_MS`,
+  not per-attacker — sufficient against single-attacker flood but
+  not against distributed flood from one tunnel hop.
+- **Configured `max` and `timeWindow`**: defaults are
+  `max=60` requests, `timeWindow=60_000` ms (1 minute) per
+  `http.ts:229-241`. Operator overrides via `HAIKU_HTTP_RATE_MAX`
+  (int >= 1) and `HAIKU_HTTP_RATE_WINDOW_MS` (int >= 1000); both
+  parsed with `Number.parseInt` + finiteness + lower-bound clamp so
+  malformed env vars fall back to defaults silently.
+- **Store backend**: the default is in-memory (LRU per-IP map).
+  **Process-restart loses the bucket state** — same failure mode as
+  `EPHEMERAL_SECRET` rotation noted in §1.3. An attacker who can
+  trigger a process restart resets every bucket. Mitigation: process
+  restarts under tunnel mode are themselves a meaningful event
+  (operator action or crash); the JWT auth window is process-local
+  too, so a restart already invalidates the JWT, capping the abuse
+  window at "post-restart, pre-mint-of-new-JWT".
+- **Error shape on breach**: `@fastify/rate-limit` defaults to HTTP
+  429 with body `{statusCode: 429, error: "Too Many Requests",
+  message: "Rate limit exceeded, retry in N seconds"}` and a
+  `Retry-After` header. We do NOT override the default error shape;
+  consumers (the SPA fetch wrapper) handle 429 by surfacing a banner
+  and disabling the offending control.
+- **No allowlist for csrf-nonce-mint endpoint**: every route shares
+  the bucket, INCLUDING the `/api/csrf/nonce` mint endpoint. A
+  client that exhausts its rate-limit cannot mint a fresh nonce
+  until the window resets. This is acceptable today (60 req/min is
+  ~10x a reviewer's realistic click rate) but tighten-then-allow is
+  the standard hardening step if the cap is ever lowered.
+- **Recommendation**: pin minor version, watch GHSA advisories. Two
+  follow-ups for the next security wave: (a) add a per-route
+  override for the WebSocket frame stream if rate-limit needs to
+  apply at frame level, not just handshake level; (b) reconsider
+  store backend if the deployment ever moves off the
+  one-process-per-tunnel topology. The deliberate `trustProxy=false`
+  posture MUST be preserved unless the deployment topology gains a
+  trusted reverse proxy in front of tunnel mode — a future change
+  that flips it on without auditing the trust boundary would
+  re-open the IP-spoofing-via-header bypass.
 
 ---
 
@@ -464,11 +787,12 @@ write), so a hostile agent's blast radius is capped at the schema edge.
 | T-3 | Anchored signals on tamper-evident surfaces | `3c3ccf1a0` | unit-03 BLUE-TEAM-VERIFICATION |
 | T-4 | Operator-only baseline-reset path | unit-03 quality gate | reconstruct + diff-confirm flow |
 | T-5 | Shared `gray-matter` status helpers | `399c2ee13` | unit-02 quality gate `v06-no-substring-status-checks-anywhere` |
+| T-6 | Tracked-surface allow-list (`validateTrackedSurfacePath` denies workflow-managed + drift-subsystem-internal paths; rejects `path_escape`) + SHA-idempotency (skips files already baselined to current SHA) on `haiku_baseline_init` | `packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts:49-82, 272-308` | unit-03 quality gate (drift-subsystem allow-list parity with `haiku_human_write`); residual gap (no `baseline_corruption_event` action-log entry on agent-driven re-baseline) tracked in ASSESSMENTS.md FB-16 deferred risk |
 | R-1 | `claimed_author_id` rename | `399c2ee13` | unit-02 quality gate |
 | R-2 | (deferred — audit-log hash chain) | — | residual risk in ASSESSMENTS.md |
 | R-3 | Producer + consumer tick-scope union | `399c2ee13` | unit-02 quality gate `v05-intent-scope-tick-counter` |
 | R-4 | `readClaimedAuthorId` coalescing helper | `399c2ee13` | unit-02 quality gate |
-| I-1, I-2 | ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist | `3867608a6`, `bfa4b7c91` | unit-01 upload-routes test, red-team-unit-01 inverted PoCs |
+| I-1, I-2 | ALLOWED_MIMES + BLOCKED_EXTENSIONS allowlist (claimed-MIME + extension; magic-byte sniffing tracked under R-6) | `3867608a6`, `bfa4b7c91` | unit-01 upload-routes test, red-team-unit-01 inverted PoCs |
 | I-3 | Server-side feedback sanitizer | `143a1ccbf` | unit-03 quality gate |
 | D-1 | `MAX_UPLOAD_BYTES_HARD_CAP` clamp | `3867608a6` | unit-01 upload-routes hard-cap test |
 | D-2 | Rationale schema caps + list-endpoint truncation | `0f87ed407` | unit-01 state-tools-handlers test, assessments-routes test |

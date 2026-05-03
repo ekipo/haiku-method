@@ -39,6 +39,7 @@ import {
 	readBaselineAckMarker,
 	readBaselineContentWithFallback,
 	recordBaselineCorruption,
+	recordBaselineEstablishedMarker,
 	type TrackingClass,
 	wasBaselinePreviouslyEstablished,
 	writeBaselineContentSync,
@@ -605,6 +606,13 @@ export function runDriftDetectionGate(
 		}
 
 		stampBaselineEstablished(intentDir, activeStage)
+
+		// V-11 blue-team (unit-03 bolt 1): mirror the establish event onto
+		// the append-only action-log so the "previously established" signal
+		// is anchored on a tamper-evident surface, not just state.json
+		// (which the red-team RT1/RT6 showed an OOB attacker can disarm
+		// by stealth-deleting or stealth-truncating).
+		recordBaselineEstablishedMarker(intentDir, activeStage, tickCounter)
 
 		// Traffic / lifecycle: this is the silent-establish path
 		// (first-tick on an existing intent or after a baseline reset).

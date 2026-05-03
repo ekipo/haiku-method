@@ -23,6 +23,7 @@ import {
 	closeSync,
 	createReadStream,
 	existsSync,
+	fsyncSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -31,6 +32,7 @@ import {
 	statSync,
 	unlinkSync,
 	writeFileSync,
+	writeSync,
 } from "node:fs"
 import { open, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
@@ -929,6 +931,249 @@ export function clearBaselineAckMarker(
 	}
 }
 
+// ── V-11 blue-team (unit-03 bolt 1): tamper-evident security markers ───────
+//
+// The red-team's RT1 / RT2 / RT6 bypasses showed that the V-11 gate's
+// "previously established" and "thrashing" signals lived on tamper-mutable
+// JSON files (state.json, baseline-thrash.json) that an out-of-band
+// attacker could delete or stealth-truncate to disarm the defence.
+//
+// The blue-team fix re-anchors both signals on the append-only
+// `action-log.jsonl` via two new sentinel entry types
+// (`baseline_established`, `baseline_corruption_event`) and uses the
+// content-addressed `baseline-content/` sidecar directory as a secondary
+// tamper-evident anchor. Both surfaces survive a single-file delete or
+// truncation: an attacker would have to silently rewrite a complete
+// JSONL chronological history AND remove every sha256-validated content
+// sidecar without detection — a much higher bar than the original
+// state.json delete.
+
+/** Sentinel path used by `baseline_established` /
+ *  `baseline_corruption_event` action-log entries so they can be
+ *  filtered by `path.startsWith(BASELINE_MARKER_PATH_PREFIX)` and never
+ *  collide with a real tracked file. */
+const BASELINE_MARKER_PATH_PREFIX = "__baseline_marker__:"
+
+function baselineEstablishedMarkerPath(stage: string): string {
+	return `${BASELINE_MARKER_PATH_PREFIX}established:${stage}`
+}
+
+function baselineCorruptionMarkerPath(stage: string): string {
+	return `${BASELINE_MARKER_PATH_PREFIX}corruption:${stage}`
+}
+
+/** Synchronous append of a single line to the intent-scope action log.
+ *  Used by the drift-detection gate (which is sync) to write the
+ *  tamper-evident V-11 markers. Mirrors `appendActionLogEntry` from
+ *  `action-log.ts` (which is async — node:fs/promises) but uses the
+ *  sync `openSync`/`writeFileSync`-with-flag-`a` path so we don't have
+ *  to thread `await` through every gate handler.
+ *
+ *  Best-effort: returns true on success, false on any error. The
+ *  drift-detection gate falls back to its existing on-disk-cache
+ *  signals (state.json, baseline-thrash.json) when the append fails,
+ *  so a transient I/O hiccup doesn't disarm the security gate. */
+function appendActionLogEntrySync(
+	intentDir: string,
+	entry: import("./write-audit.js").ActionLogEntry,
+): boolean {
+	const filePath = join(intentDir, "action-log.jsonl")
+	try {
+		mkdirSync(dirname(filePath), { recursive: true })
+	} catch {
+		return false
+	}
+	let fd: number | null = null
+	try {
+		// "a" + sync ⇒ POSIX O_APPEND; each write is atomic for payloads
+		// ≤ PIPE_BUF (~4 KiB). Our entries are well under that.
+		fd = openSync(filePath, "a")
+		const line = `${JSON.stringify(entry)}\n`
+		const buf = Buffer.from(line, "utf-8")
+		// Loop in case of short writes (rare on local fs but cheap to handle).
+		let offset = 0
+		while (offset < buf.length) {
+			const written = writeSync(fd, buf, offset)
+			if (written <= 0) return false
+			offset += written
+		}
+		// Best-effort fsync — we don't crash the gate if it fails.
+		try {
+			fsyncSync(fd)
+		} catch {
+			// non-fatal
+		}
+		return true
+	} catch {
+		return false
+	} finally {
+		if (fd !== null) {
+			try {
+				closeSync(fd)
+			} catch {
+				// non-fatal
+			}
+		}
+	}
+}
+
+/** Returns true if the action-log contains at least one
+ *  `baseline_established` marker entry for the given stage. Tamper-
+ *  evident: an attacker would have to silently rewrite the full
+ *  chronological JSONL log to remove the marker, AND keep its sha256
+ *  consistent if downstream auditing is enabled. */
+function actionLogHasBaselineEstablished(
+	intentDir: string,
+	stage: string,
+): boolean {
+	const filePath = join(intentDir, "action-log.jsonl")
+	if (!existsSync(filePath)) return false
+	let raw: string
+	try {
+		raw = readFileSync(filePath, "utf-8")
+	} catch {
+		return false
+	}
+	const wantPath = baselineEstablishedMarkerPath(stage)
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		try {
+			const parsed = JSON.parse(trimmed) as Record<string, unknown>
+			if (
+				parsed.entry_type === "baseline_established" &&
+				parsed.path === wantPath
+			) {
+				return true
+			}
+		} catch {
+			// Malformed line — skip; downstream code already tolerates this.
+		}
+	}
+	return false
+}
+
+/** Returns the number of `baseline_corruption_event` action-log entries
+ *  for the given stage within the last `windowTicks` ticks (inclusive
+ *  of `nowTickCounter`). Used as the tamper-evident input to the
+ *  thrash circuit-breaker (closes the V-11.RT2 bypass where deleting
+ *  baseline-thrash.json zeroed the counter). */
+function actionLogCountCorruptionEvents(
+	intentDir: string,
+	stage: string,
+	nowTickCounter: number,
+	windowTicks: number,
+): number {
+	const filePath = join(intentDir, "action-log.jsonl")
+	if (!existsSync(filePath)) return 0
+	let raw: string
+	try {
+		raw = readFileSync(filePath, "utf-8")
+	} catch {
+		return 0
+	}
+	const wantPath = baselineCorruptionMarkerPath(stage)
+	const minTick = nowTickCounter - windowTicks
+	let count = 0
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		try {
+			const parsed = JSON.parse(trimmed) as Record<string, unknown>
+			if (
+				parsed.entry_type === "baseline_corruption_event" &&
+				parsed.path === wantPath &&
+				typeof parsed.tick_counter === "number" &&
+				parsed.tick_counter >= minTick
+			) {
+				count++
+			}
+		} catch {
+			// Malformed — skip.
+		}
+	}
+	return count
+}
+
+/** Returns true if the per-stage `baseline-content/` sidecar directory
+ *  contains at least one entry whose filename is a 64-hex sha256 AND
+ *  whose contents hash to that filename. This is the "sidecar presence
+ *  as previously-established signal" recommended by the red-team
+ *  (RED-TEAM-FINDINGS.md Recommended-follow-up). Tamper-evident: an
+ *  attacker would have to remove every sidecar from disk to disarm
+ *  this check; selective tampering of a single sidecar is detectable
+ *  by the sha256 mismatch. */
+function hasValidatedBaselineSidecar(intentDir: string, stage: string): boolean {
+	const dirs = [baselineContentDir(intentDir, stage)]
+	const intentDirSidecar = baselineIntentContentDir(intentDir)
+	if (existsSync(intentDirSidecar)) dirs.push(intentDirSidecar)
+	for (const dir of dirs) {
+		if (!existsSync(dir)) continue
+		let names: string[]
+		try {
+			names = readdirSync(dir)
+		} catch {
+			continue
+		}
+		for (const name of names) {
+			if (!/^[0-9a-f]{64}$/.test(name)) continue
+			try {
+				const buf = readFileSync(join(dir, name))
+				const actual = createHash("sha256").update(buf).digest("hex")
+				if (actual === name) return true
+			} catch {
+				// Skip unreadable.
+			}
+		}
+	}
+	return false
+}
+
+/** Append a `baseline_established` marker to the action log. Called
+ *  from the drift-detection gate after a successful establish (first
+ *  tick OR operator-acknowledged re-establish). Best-effort — failure
+ *  to log doesn't fail the establish, but the next `baseline_corrupt`
+ *  detection will fall back to the state.json fast-path which is
+ *  weaker. */
+export function recordBaselineEstablishedMarker(
+	intentDir: string,
+	stage: string,
+	tickCounter: number,
+): boolean {
+	const entry: import("./write-audit.js").ActionLogEntry = {
+		entry_type: "baseline_established",
+		path: baselineEstablishedMarkerPath(stage),
+		sha: "",
+		author_class: "agent",
+		timestamp: new Date().toISOString(),
+		human_author_id: null,
+		entry_id: `BLN-EST-${tickCounter}-${randomBytes(3).toString("hex")}`,
+		tick_counter: tickCounter,
+	}
+	return appendActionLogEntrySync(intentDir, entry)
+}
+
+/** Append a `baseline_corruption_event` marker to the action log.
+ *  Mirrored alongside the existing `baseline-thrash.json` write so the
+ *  signal is duplicated on a tamper-evident surface. Best-effort. */
+function recordBaselineCorruptionMarker(
+	intentDir: string,
+	stage: string,
+	tickCounter: number,
+): boolean {
+	const entry: import("./write-audit.js").ActionLogEntry = {
+		entry_type: "baseline_corruption_event",
+		path: baselineCorruptionMarkerPath(stage),
+		sha: "",
+		author_class: "agent",
+		timestamp: new Date().toISOString(),
+		human_author_id: null,
+		entry_id: `BLN-CORR-${tickCounter}-${randomBytes(3).toString("hex")}`,
+		tick_counter: tickCounter,
+	}
+	return appendActionLogEntrySync(intentDir, entry)
+}
+
 /** Path to the per-stage baseline-corruption thrash counter. */
 function baselineThrashPath(intentDir: string, stage: string): string {
 	return join(intentDir, "stages", stage, "baseline-thrash.json")
@@ -988,12 +1233,24 @@ function writeThrashRecord(
  *  the trimmed event count (events within the last
  *  BASELINE_THRASH_WINDOW_TICKS ticks). The caller decides what to do
  *  with the count — typically: emit telemetry if > threshold, refuse
- *  auto-recovery if so. */
+ *  auto-recovery if so.
+ *
+ *  V-11 blue-team (unit-03 bolt 1): writes the event to BOTH the
+ *  legacy `baseline-thrash.json` cache (kept as a fast read path for
+ *  the gate) AND the append-only `action-log.jsonl` as a
+ *  `baseline_corruption_event` entry. The thrash detection function
+ *  then takes the MAX of the two counts so an attacker who deletes
+ *  the cache file (RT2) is still seen as thrashing if enough events
+ *  exist in the action-log. */
 export function recordBaselineCorruption(
 	intentDir: string,
 	stage: string,
 	tickCounter: number,
 ): number {
+	// 1. Append to the tamper-evident action-log (closes RT2).
+	recordBaselineCorruptionMarker(intentDir, stage, tickCounter)
+
+	// 2. Update the cache (kept as a fast read path).
 	const record = readThrashRecord(intentDir, stage)
 	const minTick = tickCounter - BASELINE_THRASH_WINDOW_TICKS
 	const trimmed = record.events.filter((e) => e.tick_counter >= minTick)
@@ -1008,7 +1265,14 @@ export function recordBaselineCorruption(
  *  whether to even consider an ack marker as authorising recovery
  *  (under thrash conditions, the operator MUST escalate via an
  *  explicit `--override-thrash-circuit-breaker` flag, NOT just
- *  re-confirm a diff hash). */
+ *  re-confirm a diff hash).
+ *
+ *  V-11 blue-team (unit-03 bolt 1): takes the MAX of the cache count
+ *  AND the tamper-evident action-log count. An attacker who deletes
+ *  baseline-thrash.json (RT2) zeroes the cache but leaves the action-
+ *  log entries in place — the counter remains floor-bounded by the
+ *  log. Both surfaces would have to be silently rewritten for the
+ *  attack to land. */
 export function isBaselineThrashing(
 	intentDir: string,
 	stage: string,
@@ -1016,10 +1280,17 @@ export function isBaselineThrashing(
 ): { thrashing: boolean; recentCount: number } {
 	const record = readThrashRecord(intentDir, stage)
 	const minTick = tickCounter - BASELINE_THRASH_WINDOW_TICKS
-	const recent = record.events.filter((e) => e.tick_counter >= minTick)
+	const cacheRecent = record.events.filter((e) => e.tick_counter >= minTick)
+	const logCount = actionLogCountCorruptionEvents(
+		intentDir,
+		stage,
+		tickCounter,
+		BASELINE_THRASH_WINDOW_TICKS,
+	)
+	const recentCount = Math.max(cacheRecent.length, logCount)
 	return {
-		thrashing: recent.length > BASELINE_THRASH_THRESHOLD,
-		recentCount: recent.length,
+		thrashing: recentCount > BASELINE_THRASH_THRESHOLD,
+		recentCount,
 	}
 }
 
@@ -1182,15 +1453,55 @@ export function reconstructPriorBaseline(
 	return { entries }
 }
 
-/** Return true when the stage's state.json indicates the baseline was
- *  previously established (the `drift_baseline_established_at` field
- *  is present and non-empty). Used by the gate to distinguish
- *  legitimate first-tick establish (allowed) from suspicious
- *  re-establish-after-corruption (BLOCKED unless ack marker present). */
+/** Return true when the baseline for this stage was ever established.
+ *  Used by the gate to distinguish legitimate first-tick establish
+ *  (allowed) from suspicious re-establish-after-corruption (BLOCKED
+ *  unless an ack marker is present).
+ *
+ *  V-11 blue-team (unit-03 bolt 1): the legacy implementation read a
+ *  single `drift_baseline_established_at` field from state.json, which
+ *  the red-team showed (RT1, RT6) could be silently disarmed by an
+ *  out-of-band attacker who deletes state.json or stealth-truncates
+ *  that one field. The fix consults THREE sources in priority order;
+ *  ANY of them returning true is enough — fail-closed in the security
+ *  sense (the more places the signal lives, the harder it is to
+ *  silently disarm):
+ *
+ *    1. **Action-log marker** (tamper-evident, append-only). Once a
+ *       `baseline_established` entry has been appended, the only way
+ *       to remove it is to silently rewrite the entire chronological
+ *       log — which is detectable by any downstream auditor that
+ *       hashes the file. Closes RT1/RT6 against attackers who only
+ *       touch state.json.
+ *    2. **Validated baseline-content sidecar presence**. The
+ *       `baseline-content/` directory holds sha256-named, content-
+ *       addressed snapshots of every baselined file. Removing them
+ *       all simultaneously would also wipe `reconstructPriorBaseline`'s
+ *       inputs — the operator-confirmation diff would surface a
+ *       totally-empty reconstructed baseline, making the attack
+ *       loud rather than silent.
+ *    3. **state.json fast path** (legacy behaviour, kept for backward
+ *       compat with stages established before the action-log marker
+ *       was introduced). Honoured but no longer the only signal — an
+ *       attacker who disarms ONLY state.json now hits sources 1 and 2.
+ *
+ *  Returns false only when ALL three sources return false. */
 export function wasBaselinePreviouslyEstablished(
 	intentDir: string,
 	stage: string,
 ): boolean {
+	// 1. Tamper-evident action-log marker (closes RT1 / RT6).
+	if (actionLogHasBaselineEstablished(intentDir, stage)) return true
+
+	// 2. Tamper-evident sidecar presence (closes RT1 / RT6 even if the
+	//    log is unavailable; sidecars must ALL be removed to silently
+	//    disarm, and any single removal is detectable via the matching
+	//    `reconstructPriorBaseline` walk).
+	if (hasValidatedBaselineSidecar(intentDir, stage)) return true
+
+	// 3. state.json fast path (legacy compat — present for back-compat
+	//    with stages that established their baseline before the action-
+	//    log marker existed).
 	const stateFile = join(intentDir, "stages", stage, "state.json")
 	if (!existsSync(stateFile)) return false
 	try {

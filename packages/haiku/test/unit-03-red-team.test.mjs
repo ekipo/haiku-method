@@ -593,22 +593,32 @@ const {
 } = await import("../src/orchestrator/workflow/drift-baseline.ts")
 
 await attack(
-	"V-11.RT1: BYPASS — delete state.json AND baseline.json — gate believes first-tick → silent establish",
+	"V-11.RT1: state.json delete (CLOSED by blue-team bolt 1) — gate stays armed via action-log + sidecar fallback",
 	async () => {
-		// ATTACK: V-11 defence relies on `wasBaselinePreviouslyEstablished`
-		// reading `drift_baseline_established_at` from state.json. If an
-		// attacker can corrupt baseline.json AND state.json (both are
-		// out-of-band-writable), the gate sees a fresh-stage signal and
-		// silently establishes attacker content.
+		// ATTACK: V-11 defence used to rely SOLELY on
+		// `wasBaselinePreviouslyEstablished` reading
+		// `drift_baseline_established_at` from state.json. An out-of-band
+		// attacker who corrupted baseline.json AND deleted state.json
+		// could silently re-establish.
 		//
-		// THIS IS A REAL BYPASS of the V-11 mitigation. The V-11 deny-list
-		// blocks the agent from writing state.json via haiku_human_write,
-		// but an out-of-band attacker (the threat-model assumed for this
-		// unit) can delete it via direct filesystem access.
+		// FIX (unit-03 blue-team bolt 1):
+		// `wasBaselinePreviouslyEstablished` now checks THREE sources in
+		// priority order:
+		//   1. `baseline_established` marker in `action-log.jsonl`
+		//      (append-only, tamper-evident — closes RT1 / RT6).
+		//   2. validated `baseline-content/` sidecar presence
+		//      (content-addressed sha256, tamper-evident — closes RT1 / RT6
+		//      even if the action-log is unavailable).
+		//   3. state.json `drift_baseline_established_at` fast path
+		//      (legacy compat — kept but no longer the only signal).
+		//
+		// This test now asserts the FIX: with a `baseline_established`
+		// marker in the action log AND a validated sidecar on disk,
+		// deleting state.json does NOT disarm the gate.
 		const root = mkdtempSync(join(tmp, "v11rt1-"))
 		mkdirSync(join(root, "stages", "security"), { recursive: true })
-		// SIMULATE: stage existed and had a baseline (the "previously
-		// established" state).
+		// SIMULATE: stage established a baseline previously, leaving a
+		// marker in the action-log AND a validated sidecar.
 		writeFileSync(
 			join(root, "stages", "security", "state.json"),
 			JSON.stringify({
@@ -616,41 +626,68 @@ await attack(
 				drift_baseline_established_at: "2026-04-30T00:00:00Z",
 			}),
 		)
-		// Confirm gate would fire.
+		writeFileSync(
+			join(root, "action-log.jsonl"),
+			`${JSON.stringify({
+				entry_type: "baseline_established",
+				path: "__baseline_marker__:established:security",
+				sha: "",
+				author_class: "agent",
+				timestamp: "2026-04-30T00:00:00Z",
+				human_author_id: null,
+				entry_id: "BLN-EST-1-aaa",
+				tick_counter: 1,
+			})}\n`,
+		)
+		const { createHash } = await import("node:crypto")
+		const sidecarContent = Buffer.from("sample baselined content")
+		const sidecarSha = createHash("sha256")
+			.update(sidecarContent)
+			.digest("hex")
+		mkdirSync(join(root, "stages", "security", "baseline-content"), {
+			recursive: true,
+		})
+		writeFileSync(
+			join(root, "stages", "security", "baseline-content", sidecarSha),
+			sidecarContent,
+		)
+
+		// Confirm gate sees previously-established before the attack.
 		assert.strictEqual(
 			wasBaselinePreviouslyEstablished(root, "security"),
 			true,
-			"setup: stamp present",
+			"setup: marker + sidecar present",
 		)
 		// ATTACK: delete state.json (out-of-band file modification).
 		unlinkSync(join(root, "stages", "security", "state.json"))
-		// Now the gate sees no stamp → reports "first-tick" → silent
-		// establish path is open. This is a CONFIRMED BYPASS — record it
-		// as a finding rather than failing the test (so the suite stays
-		// green for CI; the finding is the artifact that gets actioned).
+		// HELD: gate still reports previously-established because the
+		// action-log marker AND the validated sidecar both survive.
 		const after = wasBaselinePreviouslyEstablished(root, "security")
 		assert.strictEqual(
 			after,
-			false,
-			"setup error — should report not-established after delete",
+			true,
+			"BYPASS REGRESSION: V-11 gate disarmed by state.json delete — fix in drift-baseline.ts must check action-log marker and sidecar presence",
 		)
-		findings.push({
-			severity: "MED",
-			area: "V-11",
-			vector: "delete state.json (out-of-band) → V-11 gate disarmed",
-			outcome:
-				"BYPASS CONFIRMED. wasBaselinePreviouslyEstablished returns false after state.json delete → gate enters silent-establish path. See RED-TEAM-FINDINGS.md for unit-04 follow-up: re-anchor signal on action-log (append-only) or content-addressed sidecars.",
-		})
 	},
 )
 
 await attack(
-	"V-11.RT2: BYPASS — delete baseline-thrash.json — circuit breaker zeroed",
+	"V-11.RT2: baseline-thrash.json delete (CLOSED by blue-team bolt 1) — action-log floor preserves the count",
 	async () => {
-		// ATTACK: thrash counter is in baseline-thrash.json, on-disk. Agent
-		// can't write it (deny-list), but out-of-band attacker can delete
-		// it. After deletion, the next corruption event resets the count
-		// to 1, opening the door for a fresh recovery cycle.
+		// ATTACK: thrash counter used to live SOLELY in
+		// `baseline-thrash.json` on-disk. An out-of-band attacker who
+		// deleted it zeroed the circuit breaker, opening the door for
+		// fresh recovery cycles per attack.
+		//
+		// FIX (unit-03 blue-team bolt 1): `recordBaselineCorruption`
+		// now ALSO appends a `baseline_corruption_event` entry to
+		// `action-log.jsonl` (append-only, tamper-evident).
+		// `isBaselineThrashing` takes MAX(cache_count, log_count) so an
+		// attacker who deletes only the cache file is still seen as
+		// thrashing if the log retains the events.
+		//
+		// This test now asserts the FIX: deleting baseline-thrash.json
+		// does NOT zero the breaker.
 		const { recordBaselineCorruption, isBaselineThrashing } = await import(
 			"../src/orchestrator/workflow/drift-baseline.ts"
 		)
@@ -669,18 +706,18 @@ await attack(
 		// ATTACK: delete the thrash counter
 		unlinkSync(join(root, "stages", "security", "baseline-thrash.json"))
 		const after = isBaselineThrashing(root, "security", 4)
+		// HELD: action-log floor keeps the count at 4, breaker stays
+		// engaged.
 		assert.strictEqual(
 			after.thrashing,
-			false,
-			"setup error — should report not-thrashing after delete",
+			true,
+			"BYPASS REGRESSION: circuit breaker zeroed by baseline-thrash.json delete — fix in drift-baseline.ts must mirror corruption events to action-log",
 		)
-		findings.push({
-			severity: "LOW",
-			area: "V-11",
-			vector: "delete baseline-thrash.json (out-of-band) → circuit breaker zeroed",
-			outcome:
-				"BYPASS CONFIRMED. isBaselineThrashing returns thrashing=false after delete → attacker resets recovery cycle. Same root cause as V-11.RT1; same remediation (action-log derivation).",
-		})
+		assert.strictEqual(
+			after.recentCount,
+			4,
+			"action-log floor must retain all 4 events",
+		)
 	},
 )
 
@@ -804,12 +841,17 @@ await attack(
 )
 
 await attack(
-	"V-11.RT6: state.json drift_baseline_established_at field can be downgraded by truncation",
+	"V-11.RT6: state.json field stealth-removal (CLOSED by blue-team bolt 1) — sidecar fallback wins",
 	async () => {
-		// ATTACK: an attacker who can write state.json (out-of-band) can
-		// remove only the drift_baseline_established_at field while
-		// leaving everything else intact. Same effect as deleting the
-		// whole file but stealthier.
+		// ATTACK: an attacker who can write state.json (out-of-band) used
+		// to be able to remove only the drift_baseline_established_at
+		// field while leaving everything else intact — same effect as
+		// deleting the whole file but stealthier.
+		//
+		// FIX (unit-03 blue-team bolt 1):
+		// `wasBaselinePreviouslyEstablished` consults action-log + sidecar
+		// presence BEFORE the state.json fast-path; truncating the field
+		// no longer disarms the gate.
 		const root = mkdtempSync(join(tmp, "v11rt6-"))
 		mkdirSync(join(root, "stages", "security"), { recursive: true })
 		const stateFile = join(root, "stages", "security", "state.json")
@@ -821,6 +863,20 @@ await attack(
 				other: "field",
 			}),
 		)
+		// SIMULATE: sidecar exists from a prior establish (the fix's
+		// secondary tamper-evident anchor).
+		const { createHash } = await import("node:crypto")
+		const sidecarContent = Buffer.from("sample baselined content rt6")
+		const sidecarSha = createHash("sha256")
+			.update(sidecarContent)
+			.digest("hex")
+		mkdirSync(join(root, "stages", "security", "baseline-content"), {
+			recursive: true,
+		})
+		writeFileSync(
+			join(root, "stages", "security", "baseline-content", sidecarSha),
+			sidecarContent,
+		)
 		assert.strictEqual(
 			wasBaselinePreviouslyEstablished(root, "security"),
 			true,
@@ -831,18 +887,13 @@ await attack(
 			JSON.stringify({ status: "active", other: "field" }),
 		)
 		const after = wasBaselinePreviouslyEstablished(root, "security")
+		// HELD: sidecar presence keeps the signal alive even with the
+		// stamp removed.
 		assert.strictEqual(
 			after,
-			false,
-			"setup error — should report not-established after stamp removal",
+			true,
+			"BYPASS REGRESSION: V-11 gate disarmed by stamp removal — fix must keep sidecar/action-log fallback",
 		)
-		findings.push({
-			severity: "MED",
-			area: "V-11",
-			vector: "stealth removal of `drift_baseline_established_at` field only (state.json otherwise intact)",
-			outcome:
-				"BYPASS CONFIRMED. Same root cause as V-11.RT1. The V-11 gate must not depend on a single mutable JSON field; re-anchor on action-log (append-only).",
-		})
 	},
 )
 

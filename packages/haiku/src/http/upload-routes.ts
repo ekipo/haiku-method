@@ -273,6 +273,16 @@ async function streamToTempfile(
 
 	const ws = createWriteStream(tmpPath)
 
+	// Track whether the writestream has finished closing so the rejection
+	// path can wait for the FD to be released before unlinking — otherwise
+	// the writestream's async close can recreate the inode after our sync
+	// unlink lands, leaving an orphaned tempfile in the artifacts dir.
+	const wsClosed = new Promise<void>((resolve) => {
+		ws.on("close", () => {
+			resolve()
+		})
+	})
+
 	await new Promise<void>((res, rej) => {
 		ws.on("error", rej)
 		ws.on("finish", res)
@@ -297,8 +307,14 @@ async function streamToTempfile(
 		})
 		// pipe() would auto-close; manual wiring to get the size check.
 		part.file.pipe(ws)
-	}).catch((err) => {
-		// Clean up the partial tempfile before propagating.
+	}).catch(async (err) => {
+		// Wait for the writestream's underlying FD to close before unlinking
+		// — otherwise the async `close` callback can recreate the file after
+		// our sync unlink (race observed in test/upload-routes.test.mjs's
+		// "Upload exceeds size cap" assertion that no temp files remain).
+		await wsClosed.catch(() => {
+			/* best-effort */
+		})
 		try {
 			unlinkSync(tmpPath)
 		} catch {

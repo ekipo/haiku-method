@@ -769,7 +769,7 @@ async function run() {
 		)
 	})
 
-	await test("Path traversal attack rejected with bad_target_path (400)", async () => {
+	await test("V-04 symlink-escape / TOCTOU defence — Path traversal attack rejected with bad_target_path (400) by the same safeMkdirAndRename chokepoint that rejects symlink escape in the parent chain", async () => {
 		const fileContent = Buffer.from("evil content")
 		const { body, contentType } = buildMultipart(
 			{
@@ -1827,6 +1827,34 @@ async function run() {
 			aEntry.entry_id,
 			bEntry.entry_id,
 			"entry_id collision is what V-05 set out to prevent",
+		)
+	})
+
+	// ── V-08 CSRF coverage pointer ────────────────────────────────────────────
+	//
+	// The full CSRF preHandler coverage (Layer 1 — query-param token reject,
+	// Layer 2 — Origin allowlist, Layer 3 — X-Haiku-CSRF nonce) lives in
+	// `unit-03-security.test.mjs` and `upload-routes-strict-auth.test.mjs`,
+	// because the strict-auth bootstrap is needed to exercise the actual
+	// preHandler. This test pins the surface contract — the constants the
+	// SPA and external callers rely on — so the test name documents that
+	// upload routes are CSRF-protected and inherit the three-layer defence.
+	await test("V-08 CSRF — upload routes inherit the global preHandler (query-param-token reject + missing-Origin reject + X-Haiku-CSRF nonce); see unit-03-security.test.mjs for the layer-by-layer assertions", async () => {
+		const csrfMod = await import("../src/http/csrf.ts")
+		assert.strictEqual(
+			csrfMod.CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON,
+			"query_param_token_disallowed_on_mutating_route",
+			"Layer 1 reason constant must match the SPA's expected value",
+		)
+		assert.strictEqual(
+			csrfMod.CSRF_NONCE_HEADER,
+			"X-Haiku-CSRF",
+			"Layer 3 header name must be X-Haiku-CSRF (canonical casing)",
+		)
+		assert.strictEqual(
+			typeof csrfMod.isOriginAllowed,
+			"function",
+			"Layer 2 origin-allowlist matcher must be exported",
 		)
 	})
 

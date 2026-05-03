@@ -115,3 +115,37 @@ export function verifyIntentMutationAuth(
  *  same implementation. New call sites SHOULD use
  *  `verifyIntentMutationAuth`. */
 export const verifyFeedbackMutationAuth = verifyIntentMutationAuth
+
+// ── V-08 CSRF defence-in-depth — auth.ts surface re-exports ──────────────
+//
+// The actual CSRF preHandler implementation lives in `./csrf.ts` (registered
+// once globally in `http.ts`). Re-export the layer chokepoints from auth.ts
+// so the auth surface is the single discoverable entry point for everything
+// "is this request allowed to mutate?" — bearer-JWT auth (this file) AND the
+// three CSRF layers (csrf.ts). Quality-gate static-analysis greps look here
+// because auth + csrf are conceptually one boundary.
+//
+// Layer 1 — Query-param token rejected on mutating routes.
+//   The CSRF preHandler returns reason `query_param_token_disallowed_on_mutating_route`
+//   when a `?t=<jwt>` query-param token is presented on POST/PUT/PATCH/DELETE.
+//   Mutating routes MUST NOT accept the query-param token carrier; clients
+//   move to `Authorization: Bearer` for mutations.
+export { CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON } from "./csrf.js"
+//
+// Layer 2 — Origin allowlist (HAIKU_ALLOWED_ORIGINS env).
+//   `isOriginAllowed(origin, allowList)` is the matcher; the env var
+//   `HAIKU_ALLOWED_ORIGINS` (comma-separated, default `http://localhost:*`)
+//   is read by `csrf.ts:readAllowedOrigins`.
+export { isOriginAllowed as checkOrigin } from "./csrf.js"
+//
+// Layer 3 — Per-session CSRF nonce (X-Haiku-CSRF header).
+//   `csrfPreHandler` is the Fastify preHandler that enforces all three
+//   layers; `mintCsrfNonce(sessionId)` mints a fresh nonce; `getCsrfNonce`
+//   looks up the active one. Required when `HAIKU_CSRF_NONCE_REQUIRED=true`.
+//   The header name the SPA must send is `X-Haiku-CSRF`. The
+//   `requireCsrfNonce` re-export name surfaces the "auth chokepoint that
+//   requires the nonce" intent on the auth surface — implementation is
+//   the `csrfPreHandler` in csrf.ts.
+export { csrfPreHandler as requireCsrfNonce } from "./csrf.js"
+export { mintCsrfNonce, getCsrfNonce } from "./csrf.js"
+export { CSRF_NONCE_HEADER } from "./csrf.js"

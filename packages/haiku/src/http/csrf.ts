@@ -68,6 +68,18 @@ import { extractTunnelToken } from "./auth.js"
  *  (operators paste `?t=<jwt>` URLs into chat to share read access). */
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"])
 
+/** V-08 Layer 1 — the canonical `reason` value the CSRF preHandler
+ *  returns when a `?t=<jwt>` query-param token is presented on a mutating
+ *  route. Re-exported from `auth.ts` so the auth surface is the single
+ *  discoverable entry point for "is this request allowed to mutate?". */
+export const CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON =
+	"query_param_token_disallowed_on_mutating_route" as const
+
+/** V-08 Layer 3 — the request header name the SPA must send to satisfy
+ *  the per-session CSRF nonce check. Kept as a constant so tests and
+ *  call sites cannot drift on the casing. */
+export const CSRF_NONCE_HEADER = "X-Haiku-CSRF" as const
+
 /** Read the comma-separated `HAIKU_ALLOWED_ORIGINS` env var. Default
  *  `http://localhost:*` matches any localhost port — the common dev /
  *  review-app loopback case. Operators set this explicitly in tunnel
@@ -223,7 +235,7 @@ export async function csrfPreHandler(
 	if (queryToken && !hasAuthzBearer) {
 		reply.status(401).send({
 			error: "unauthorized",
-			reason: "query_param_token_disallowed_on_mutating_route",
+			reason: CSRF_QUERY_PARAM_TOKEN_DISALLOWED_REASON,
 		})
 		return reply
 	}
@@ -243,7 +255,9 @@ export async function csrfPreHandler(
 	// ── Layer 3 — Per-session CSRF nonce (opt-in) ───────────────────────
 	if (!isCsrfNonceRequired() || isCsrfMintEndpoint) return
 
-	const csrfHeader = req.headers["x-haiku-csrf"]
+	// Header lookup uses lowercase per Node's http header normalisation;
+	// the constant captures the canonical casing the SPA sends.
+	const csrfHeader = req.headers[CSRF_NONCE_HEADER.toLowerCase()]
 	const csrfStr =
 		typeof csrfHeader === "string"
 			? csrfHeader

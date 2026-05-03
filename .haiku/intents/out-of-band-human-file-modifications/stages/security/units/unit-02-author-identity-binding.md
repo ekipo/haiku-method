@@ -27,6 +27,10 @@ outputs:
   - packages/haiku/test/upload-routes.test.mjs
   - plugin/studios/software/stages/security/outputs/security-fix.md
   - stages/security/artifacts/RED-TEAM-unit-02.md
+  - stages/security/artifacts/BLUE-TEAM-unit-02.md
+  - packages/haiku/src/http/auth.ts
+  - packages/haiku/test/haiku-human-write.test.mjs
+  - packages/haiku/test/upload-routes-strict-auth.test.mjs
 model: sonnet
 quality_gates:
   - name: v03-spa-author-bound-from-session-or-renamed
@@ -67,7 +71,7 @@ quality_gates:
       packages/haiku/src/state-tools.ts
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
-status: active
+status: completed
 bolt: 1
 hat: blue-team
 started_at: '2026-05-03T02:09:53Z'
@@ -91,8 +95,9 @@ iterations:
     result: advance
   - hat: blue-team
     started_at: '2026-05-03T02:59:28Z'
-    completed_at: null
-    result: null
+    completed_at: '2026-05-03T08:14:33Z'
+    result: advance
+completed_at: '2026-05-03T08:14:33Z'
 ---
 # Unit 02 — Author identity binding + status-check correctness
 

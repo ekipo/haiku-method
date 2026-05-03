@@ -1,6 +1,6 @@
 ---
 title: 'R-04 (LOW): attribute_to_user unvalidated, audit-log poisoning'
-status: fixing
+status: addressed
 origin: agent
 author: agent
 author_type: agent
@@ -13,8 +13,13 @@ bolt: 1
 triaged_at: '2026-05-03T02:58:43Z'
 resolution: inline_fix
 replies: []
+hat: security-engineer
+iterations:
+  - bolt: 1
+    hat: security-engineer
+    completed_at: '2026-05-03T08:30:42Z'
+    result: advanced
 ---
-
 ## Summary
 
 `attribute_to_user` is parsed from multipart and stored verbatim — no validation — into:

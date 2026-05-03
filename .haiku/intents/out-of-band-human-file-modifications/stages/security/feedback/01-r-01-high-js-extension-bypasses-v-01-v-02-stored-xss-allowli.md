@@ -1,6 +1,6 @@
 ---
 title: 'R-01 (HIGH): .js extension bypasses V-01/V-02 stored-XSS allowlist'
-status: fixing
+status: addressed
 origin: agent
 author: agent
 author_type: agent
@@ -13,8 +13,13 @@ bolt: 1
 triaged_at: '2026-05-03T02:57:57Z'
 resolution: inline_fix
 replies: []
+hat: security-engineer
+iterations:
+  - bolt: 1
+    hat: security-engineer
+    completed_at: '2026-05-03T08:30:33Z'
+    result: advanced
 ---
-
 ## Summary
 
 The V-01/V-02 fix landed an INCOMPLETE allowlist. `BLOCKED_EXTENSIONS` in `packages/haiku/src/http/upload-routes.ts:106-113` blocks only `.html`, `.htm`, `.svg`, `.xml`, `.xhtml`, `.mhtml`. It does NOT block `.js`. Combined with `application/octet-stream` being on `ALLOWED_MIMES_*` (lines 119-143), an attacker uploads `pwn.js` with MIME `application/octet-stream` → server accepts → file lands at `stages/{stage}/artifacts/pwn.js` → `serveFile` later returns `Content-Type: application/javascript; charset=utf-8` (per the MIME map in `path-safety.ts:17-31`) → stored-XSS under the reviewer's tunnel origin via any `<script src="...">` injection chain.

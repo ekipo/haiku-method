@@ -1,6 +1,6 @@
 ---
 title: 'R-02 (HIGH): .css extension bypass — stylesheet injection vector'
-status: fixing
+status: addressed
 origin: agent
 author: agent
 author_type: agent
@@ -13,8 +13,13 @@ bolt: 1
 triaged_at: '2026-05-03T02:58:10Z'
 resolution: inline_fix
 replies: []
+hat: security-engineer
+iterations:
+  - bolt: 1
+    hat: security-engineer
+    completed_at: '2026-05-03T08:30:36Z'
+    result: advanced
 ---
-
 ## Summary
 
 Same root cause as R-01: `.css` is not in `BLOCKED_EXTENSIONS` and `application/octet-stream` is on `ALLOWED_MIMES_*`. Attacker uploads `pwn.css` with arbitrary content; reviewer's tunnel later loads it via `<link rel="stylesheet" href="...">` (chained from any other vector that injects markup) → server returns `text/css; charset=utf-8` → stylesheet executes.

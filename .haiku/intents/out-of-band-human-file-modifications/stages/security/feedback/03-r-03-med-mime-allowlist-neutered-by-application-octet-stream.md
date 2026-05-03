@@ -1,6 +1,6 @@
 ---
 title: 'R-03 (MED): MIME allowlist neutered by application/octet-stream + text/plain'
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: stages/security/artifacts/RED-TEAM-unit-01.md#finding-r-03
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-05-03T02:58:29Z'
 resolution: inline_fix
 replies: []
@@ -43,4 +43,3 @@ Combined with R-01/R-02's blocklist additions, this restores actual "allowlist" 
 - New regression test: every script-MIME × every extension permutation rejects.
 - New regression test: extension allowlist enforces positive-list semantics.
 - R-03 PoC test inverted.
-

@@ -1,6 +1,6 @@
 ---
 title: 'R-04 (LOW): attribute_to_user unvalidated, audit-log poisoning'
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: stages/security/artifacts/RED-TEAM-unit-01.md#finding-r-04
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-05-03T02:58:43Z'
 resolution: inline_fix
 replies: []
@@ -49,4 +49,3 @@ Apply same validator on both `/uploads/stage-output` and `/uploads/knowledge` ro
 - Validator rejects HTML/script payloads in `attribute_to_user`.
 - Validator accepts the existing happy-path values used in tests (e.g. `alice`, `designer`).
 - New regression test: `attribute_to_user="<script>alert(1)</script>"` → 400.
-

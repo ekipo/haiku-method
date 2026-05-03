@@ -2,7 +2,7 @@
 title: >-
   Red-team: V-11 baseline gate bypassable via state.json tamper (3 confirmed
   bypasses)
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -11,7 +11,7 @@ iteration: 1
 visit: 1
 source_ref: null
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-05-03T02:59:40Z'
 resolution: inline_fix
 replies: []

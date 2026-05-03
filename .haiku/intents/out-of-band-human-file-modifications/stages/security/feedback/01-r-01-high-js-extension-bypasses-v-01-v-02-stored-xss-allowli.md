@@ -1,6 +1,6 @@
 ---
 title: 'R-01 (HIGH): .js extension bypasses V-01/V-02 stored-XSS allowlist'
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: stages/security/artifacts/RED-TEAM-unit-01.md#finding-r-01
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-05-03T02:57:57Z'
 resolution: inline_fix
 replies: []
@@ -47,4 +47,3 @@ The unit spec deferred #2 to unit-04 ASSESSMENTS.md residual risk, but the unit-
 - `BLOCKED_EXTENSIONS` includes `.js` and `.css` (and ideally `.htc`, `.hta`).
 - The R-01 PoC test (`red-team-unit-01-upload-bypass.test.mjs`) is INVERTED to assert 415 rejection (instead of 200 acceptance) and continues passing — flip the assertion when fixing.
 - New regression test in `packages/haiku/test/upload-routes.test.mjs` modeled on the existing `.html` rejection test, parameterised over `.js` and `.css` with `application/octet-stream` MIME.
-

@@ -1,6 +1,6 @@
 ---
 title: 'R-02 (HIGH): .css extension bypass — stylesheet injection vector'
-status: pending
+status: fixing
 origin: agent
 author: agent
 author_type: agent
@@ -9,7 +9,7 @@ iteration: 1
 visit: 1
 source_ref: stages/security/artifacts/RED-TEAM-unit-01.md#finding-r-02
 closed_by: null
-bolt: 0
+bolt: 1
 triaged_at: '2026-05-03T02:58:10Z'
 resolution: inline_fix
 replies: []
@@ -44,4 +44,3 @@ Same as R-01: add `.css` to `BLOCKED_EXTENSIONS`. Apply the inverted-MIME-map fi
 - `.css` rejected at upload with 415 `unsupported_media_type` regardless of MIME claim.
 - R-02 PoC test inverted to assert rejection.
 - Parameterised regression test added to `upload-routes.test.mjs`.
-

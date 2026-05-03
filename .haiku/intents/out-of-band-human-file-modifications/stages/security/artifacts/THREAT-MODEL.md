@@ -208,6 +208,7 @@ where applicable.
 | T-3 | Direct `state.json` tamper to bypass V-11 baseline gate (red-team finding FB-05) | `silent-filesystem-drop-detection.feature` | V-11 + RT1/RT2/RT6 | Unit-03 anchors signals on tamper-evident surfaces (commit `3c3ccf1a0`); FB-05 was rejected because anchored detectors close the bypass. |
 | T-4 | `baseline.json` corruption → silent auto-establish on next tick re-baselines attacker-chosen content | `silent-filesystem-drop-detection.feature` | V-11 | Unit-03 operator-only baseline-reset path with reconstructed-vs-on-disk diff; agent CANNOT set `baseline_corrupt_acknowledged`. |
 | T-5 | Substring-match status check on `intent.md` accepts non-canonical YAML formatting | `explicit-spa-upload.feature` | V-06 | Unit-02 shared `isIntentLocked` / `isIntentArchived` helpers parse via `gray-matter`. R-03 closed coverage gap on MCP path. |
+| T-6 | `haiku_baseline_init` MCP tool re-baselines attacker-controlled content into `baseline.json` (silent-establish laundry against everything V-11 closes on the gate-side path) | `silent-filesystem-drop-detection.feature` | V-11 | Operator-callable MCP tool registered at `packages/haiku/src/tools/orchestrator/index.ts:13,26`. Sibling write-surface to `haiku_classify_drift` (see §5). Two modes: `establish-all` enumerates the entire tracked surface; `establish-paths` baselines only listed paths after validating each against the same allow-list `haiku_human_write` uses (denies workflow-managed files, drift-subsystem internals, and `path_escape` outside the intent dir at `haiku_baseline_init.ts:49-82`). Idempotency: files whose SHA already matches stored baseline are skipped; only NEW or CHANGED files cause a write (`haiku_baseline_init.ts:272-308`). Trust-boundary placement: in local mode this tool runs in the operator-trusted context (no remote attacker can reach the MCP socket). In tunnel mode there is no remote MCP exposure — MCP tool calls do not traverse the tunnel; only the SPA HTTP routes do. The remaining attacker model is therefore "hostile/buggy agent" rather than "remote attacker" (see §1.4 trust assumptions: agent is partially trusted under the local-mode reference frame in §1.1). Residual risk: the agent CAN call this tool. The operator-confirmation gate that `/haiku:repair --confirm-baseline-reset --diff-shown` enforces is NOT replicated at the MCP-tool layer — invoking `haiku_baseline_init` does not require operator confirmation. Compensating controls: (a) the tracked-surface allow-list bounds blast radius — drift-subsystem internals (`baseline.json`, `drift-markers.json`, `write-audit.jsonl`, `drift-assessments/`) and workflow-managed files (`intent.md`, `state.json`, `units/*.md`, `feedback/*.md`) cannot be baselined through `establish-paths`; (b) the SHA-idempotency check means a hostile agent cannot use this tool to "freeze" arbitrary content over an existing baseline entry without the change being visible as a new entry write. Gap accepted (deferred): no `baseline_corruption_event` action-log entry is emitted from `haiku_baseline_init` invocations the way the gate-side path emits when it detects baseline tamper — agent-driven re-baseline is silent at the action-log layer today. Tracked under FB-16 in ASSESSMENTS.md residual risk. |
 
 ### 3.3. Repudiation — audit-log unreliability
 
@@ -255,12 +256,18 @@ threats, V-NN findings closed, V-NN findings deferred.
 ### 4.1. `silent-filesystem-drop-detection.feature`
 
 - **Trust boundary**: out-of-band human writes (or rogue agent Bash
-  bypass) → drift gate trust verdict.
-- **Primary threats**: T-3, T-4 (baseline tamper), E-3 (guard bypass).
+  bypass) → drift gate trust verdict. Two MCP-tool entry points sit on
+  this feature's surface (see §5): `haiku_classify_drift` (drift
+  classification) and `haiku_baseline_init` (baseline establishment).
+- **Primary threats**: T-3, T-4 (baseline tamper), T-6
+  (`haiku_baseline_init` re-baseline laundry), E-3 (guard bypass).
 - **Closed**: V-11 RT1/RT2/RT6 anchored on tamper-evident surfaces
-  (unit-03, commit `3c3ccf1a0`); V-11 operator-only baseline-reset path.
+  (unit-03, commit `3c3ccf1a0`); V-11 operator-only baseline-reset path;
+  T-6 tracked-surface allow-list + SHA-idempotency on `haiku_baseline_init`.
 - **Deferred**: drift-gate kill-switch monitoring (operator alert if the
-  gate is disabled) — see §5.
+  gate is disabled) — see §5; T-6 audit-log gap (no
+  `baseline_corruption_event` on agent-driven re-baseline) — see §5 and
+  ASSESSMENTS.md residual risk.
 
 ### 4.2. `agent-writes-on-behalf-of-human.feature`
 
@@ -357,6 +364,40 @@ bloat) and V-10 (feedback body XSS) are the two findings on this entry
 point; both closed in unit-01 and unit-03 respectively. The tool is
 schema-bounded (input validation rejects oversize fields before any disk
 write), so a hostile agent's blast radius is capped at the schema edge.
+
+**`haiku_baseline_init` as its own MCP-tool entry point**: sibling to
+`haiku_classify_drift` — the same drift subsystem exposes a second
+operator-callable MCP tool that writes directly to the integrity-critical
+`baseline.json` asset. Registered at
+`packages/haiku/src/tools/orchestrator/index.ts:13,26`; implementation at
+`packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts`. Two modes:
+`establish-all` (scan every tracked file across every stage) and
+`establish-paths` (baseline only the listed paths). T-6 in §3.2 enumerates
+the threat surface in detail. The trust-boundary justification mirrors
+`haiku_classify_drift`: in **local mode** (§1.1) the MCP socket is
+loopback-only and any caller is trusted-equivalent to the operator; in
+**tunnel mode** (§1.2) MCP tool calls do NOT traverse the tunnel
+(`isRemoteReviewEnabled()` only gates the HTTP routes — the MCP transport
+remains stdio/local even when the SPA tunnel is up), so the remote-attacker
+attack model from §1.2 does not apply here. The remaining attacker model
+is "hostile/buggy agent invoking the tool against the operator's intent" —
+the same model that motivates the `establish-paths` allow-list
+(`haiku_baseline_init.ts:49-82`, structurally identical to the
+`haiku_human_write` deny-list). The tool's blast radius is capped at:
+(a) the tracked-surface allow-list (workflow-managed and drift-subsystem
+internal files cannot be baselined), (b) `path_escape` rejection prevents
+writes outside the intent directory, and (c) SHA-idempotency means
+existing baselined files are skipped — the tool can only ADD new entries
+or mutate the SHA of an existing entry to match new on-disk content.
+Audit-log gap (deferred, tracked under FB-16): unlike the gate-side
+silent-establish path which emits `baseline_corruption_event` action-log
+entries when corruption is detected, agent-driven `haiku_baseline_init`
+invocations write the new baseline without an action-log entry. This is
+recorded as residual risk in ASSESSMENTS.md — the operator-confirmation
+gate that protects `/haiku:repair --confirm-baseline-reset --diff-shown`
+is not replicated at the MCP-tool layer, so the layered defense for this
+write surface is allow-list + idempotency only, not allow-list +
+idempotency + operator-confirmation + action-log.
 
 ---
 
@@ -566,6 +607,7 @@ and was previously omitted from this enumeration; closing the gap now.
 | T-3 | Anchored signals on tamper-evident surfaces | `3c3ccf1a0` | unit-03 BLUE-TEAM-VERIFICATION |
 | T-4 | Operator-only baseline-reset path | unit-03 quality gate | reconstruct + diff-confirm flow |
 | T-5 | Shared `gray-matter` status helpers | `399c2ee13` | unit-02 quality gate `v06-no-substring-status-checks-anywhere` |
+| T-6 | Tracked-surface allow-list (`validateTrackedSurfacePath` denies workflow-managed + drift-subsystem-internal paths; rejects `path_escape`) + SHA-idempotency (skips files already baselined to current SHA) on `haiku_baseline_init` | `packages/haiku/src/tools/orchestrator/haiku_baseline_init.ts:49-82, 272-308` | unit-03 quality gate (drift-subsystem allow-list parity with `haiku_human_write`); residual gap (no `baseline_corruption_event` action-log entry on agent-driven re-baseline) tracked in ASSESSMENTS.md FB-16 deferred risk |
 | R-1 | `claimed_author_id` rename | `399c2ee13` | unit-02 quality gate |
 | R-2 | (deferred — audit-log hash chain) | — | residual risk in ASSESSMENTS.md |
 | R-3 | Producer + consumer tick-scope union | `399c2ee13` | unit-02 quality gate `v05-intent-scope-tick-counter` |

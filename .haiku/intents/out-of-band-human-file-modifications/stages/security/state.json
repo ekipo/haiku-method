@@ -1,7 +1,7 @@
 {
   "stage": "security",
   "status": "active",
-  "phase": "execute",
+  "phase": "review",
   "started_at": "2026-05-02T18:10:19Z",
   "completed_at": null,
   "gate_entered_at": null,

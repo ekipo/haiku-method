@@ -20,13 +20,25 @@ import { dirname, join } from "node:path"
 
 /** Per-invocation audit record appended to `write-audit.jsonl`
  *  (MCP-TOOL-CONTRACT.md §8.1). Every field is present in stored records;
- *  `audit_log_appended` is always `true` in the file itself. */
+ *  `audit_log_appended` is always `true` in the file itself.
+ *
+ *  Author-identity attribution carries TWO keys (V-03 mitigation):
+ *    - `claimed_author_id` — canonical, written on every new line. The
+ *      name signals that this value is SELF-REPORTED (agent-supplied or
+ *      SPA-form-supplied) and not server-resolved. Consumers MUST treat
+ *      it as a claim, not an authority.
+ *    - `human_author_id`   — legacy name, mirrored on writes for forward
+ *      compatibility. Existing on-disk audit lines retain only the
+ *      legacy key; readers honour `claimed_author_id ?? human_author_id`. */
 export interface WriteAuditRecord {
 	timestamp: string
 	entry_id: string
 	path: string
 	sha: string
 	author_class: "human-via-mcp"
+	/** Self-reported attribution. New canonical field name. */
+	claimed_author_id: string | null
+	/** Legacy alias, mirrored to `claimed_author_id` on writes. */
 	human_author_id: string | null
 	rationale: string | null
 	user_instruction_excerpt: string | null
@@ -35,20 +47,52 @@ export interface WriteAuditRecord {
 	overwrite: boolean
 	dirs_created: string[]
 	audit_log_appended: true
+	/** Tick scope — "stage" for per-stage tick counter (default), "intent"
+	 *  for SPA intent-scope uploads stamped via getIntentScopeTickCounter.
+	 *  Drift-gate consumer keys its action-log union by this scope (V-05). */
+	tick_scope?: "stage" | "intent"
 }
 
 /** Per-tick action-log entry (ARCHITECTURE.md §6.2).
  *  Written by `haiku_human_write` and the SPA upload endpoint.
- *  Read by the drift-detection gate to classify author_class. */
+ *  Read by the drift-detection gate to classify author_class.
+ *
+ *  V-11 blue-team (unit-03 bolt 1): the entry_type union is widened to
+ *  carry tamper-evident security signals — `baseline_established` and
+ *  `baseline_corruption_event`. These entries do NOT represent file
+ *  writes; the `path` / `sha` / `author_class` fields are populated with
+ *  sentinel values (path = `__baseline_marker__:{stage}`, sha is empty
+ *  string for non-content events) so downstream consumers that filter
+ *  on `entry_type === "human_write" | "agent_write"` (e.g.
+ *  reconstructPriorBaseline) keep their existing semantics. The drift-
+ *  detection gate uses these markers to derive
+ *  `wasBaselinePreviouslyEstablished` and `isBaselineThrashing` from
+ *  the append-only log — closing the V-11.RT1 / RT2 / RT6 bypasses where
+ *  an out-of-band attacker could disarm the gate by deleting state.json
+ *  or baseline-thrash.json.
+ *
+ *  Author-identity (V-03) carries `claimed_author_id` (canonical) and
+ *  `human_author_id` (legacy alias) — see WriteAuditRecord above. Both
+ *  are SELF-REPORTED claims, not authoritative identities. */
 export interface ActionLogEntry {
-	entry_type: "human_write" | "agent_write"
+	entry_type:
+		| "human_write"
+		| "agent_write"
+		| "baseline_established"
+		| "baseline_corruption_event"
 	path: string
 	sha: string
 	author_class: "human-via-mcp" | "agent"
 	timestamp: string
+	/** Self-reported attribution. New canonical field name. */
+	claimed_author_id: string | null
+	/** Legacy alias, mirrored to `claimed_author_id` on writes. */
 	human_author_id: string | null
 	entry_id: string
 	tick_counter: number
+	/** Tick scope — "stage" for per-stage counter (default), "intent" for
+	 *  intent-scope (SPA `stage === null` uploads, V-05). */
+	tick_scope?: "stage" | "intent"
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

@@ -58,8 +58,13 @@ import {
 	appendWriteAudit,
 	nextEntryId,
 } from "../orchestrator/workflow/write-audit.js"
-import { intentDir } from "../state-tools.js"
-import { requireTunnelAuth } from "./auth.js"
+import {
+	getIntentScopeTickCounter,
+	intentDir,
+	isIntentArchived,
+	isIntentLocked,
+} from "../state-tools.js"
+import { requireTunnelAuth, verifyIntentMutationAuth } from "./auth.js"
 import { cleanupTempFile, safeMkdirAndRename } from "./path-safety.js"
 import { isValidSlug, validateIntent, validateStage } from "./validation.js"
 
@@ -92,40 +97,19 @@ function isStageSealed(intentSlug: string, stage: string): boolean {
 	}
 }
 
-/** Return true when the intent's worktree is locked by a concurrent process.
- *  We detect this via the git worktree lock file. */
-function isIntentWorktreeLocked(intentSlug: string): boolean {
-	try {
-		// Worktrees created by haiku use the path:
-		//   <repoRoot>/.git/worktrees/<slug>/locked
-		// We don't need to check git — just look at the haiku worktree path
-		// convention: .haiku/worktrees/<intent>/<unit>/.git → ../../../.git/worktrees/<worktree>
-		// A simpler heuristic: check for a `.lock` file alongside the intent dir.
-		// The real lock signal is the intent status field — "locked" status.
-		const stateDir = intentDir(intentSlug)
-		if (!existsSync(stateDir)) return false
-		const intentFile = join(stateDir, "intent.md")
-		if (!existsSync(intentFile)) return false
-		const raw = readFileSync(intentFile, "utf-8")
-		return raw.includes("status: locked") || raw.includes('status: "locked"')
-	} catch {
-		return false
-	}
+// Lock + archive checks delegate to the shared `isIntentLocked` /
+// `isIntentArchived` helpers in state-tools.ts so SPA upload routes and
+// `haiku_human_write` agree on intent state semantics. Both helpers
+// parse the frontmatter via gray-matter — no substring checks anywhere
+// (V-06). Wrap the slug-based call so the route handlers can keep using
+// a slug rather than reaching into intent-dir resolution themselves.
+
+function isIntentArchivedBySlug(intentSlug: string): boolean {
+	return isIntentArchived(intentDir(intentSlug))
 }
 
-/** Check whether the intent directory is archived (status: archived). */
-function isIntentArchived(intentSlug: string): boolean {
-	try {
-		const stateDir = intentDir(intentSlug)
-		const intentFile = join(stateDir, "intent.md")
-		if (!existsSync(intentFile)) return false
-		const raw = readFileSync(intentFile, "utf-8")
-		return (
-			raw.includes("status: archived") || raw.includes('status: "archived"')
-		)
-	} catch {
-		return false
-	}
+function isIntentLockedBySlug(intentSlug: string): boolean {
+	return isIntentLocked(intentDir(intentSlug))
 }
 
 /** Stream a Fastify multipart file part into a tempfile on disk.
@@ -246,6 +230,13 @@ export async function registerUploadRoutes(
 					return
 				}
 
+				// R-01 (cross-session bypass): bind the JWT's `sid` claim to the
+				// URL's intent slug. Without this, a tunnel-mode reviewer with a
+				// valid JWT for review session S1 (bound to intent A) could POST
+				// uploads to intent B and have them attributed there. Mirror the
+				// feedback-API surface, which has gated this since FB-30.
+				if (!verifyIntentMutationAuth(req, reply, intent)) return
+
 				// Intent existence check.
 				if (!validateIntent(intent)) {
 					reply
@@ -255,7 +246,7 @@ export async function registerUploadRoutes(
 				}
 
 				// Archived intent check.
-				if (isIntentArchived(intent)) {
+				if (isIntentArchivedBySlug(intent)) {
 					reply
 						.status(404)
 						.send({ error: "intent_not_found", code: "intent_not_found" })
@@ -263,7 +254,7 @@ export async function registerUploadRoutes(
 				}
 
 				// Worktree locked check.
-				if (isIntentWorktreeLocked(intent)) {
+				if (isIntentLockedBySlug(intent)) {
 					reply
 						.status(423)
 						.send({ error: "intent_locked", code: "intent_locked" })
@@ -476,6 +467,10 @@ export async function registerUploadRoutes(
 				tmpPath = null // rename succeeded; tempfile is now the dest
 
 				// Stamp action-log entry (author_class: "human-via-mcp").
+				// V-03: `attribute_to_user` is a self-reported claim — written
+				// to BOTH `claimed_author_id` (canonical) and `human_author_id`
+				// (legacy alias) so consumers can use either key during the
+				// rename window.
 				const tickCounter = getCurrentTickCounter(iDir, stage)
 				const entryId = nextEntryId(tickCounter, 1)
 				const now = new Date().toISOString()
@@ -485,9 +480,11 @@ export async function registerUploadRoutes(
 					sha: sha256,
 					author_class: "human-via-mcp" as const,
 					timestamp: now,
+					claimed_author_id: attributeToUser,
 					human_author_id: attributeToUser,
 					entry_id: entryId,
 					tick_counter: tickCounter,
+					tick_scope: "stage" as const,
 				}
 				await appendActionLogEntry(iDir, tickCounter, actionEntry)
 
@@ -498,6 +495,7 @@ export async function registerUploadRoutes(
 					path: targetPathCanonical,
 					sha: sha256,
 					author_class: "human-via-mcp",
+					claimed_author_id: attributeToUser,
 					human_author_id: attributeToUser,
 					rationale: null,
 					user_instruction_excerpt: null, // SPA uploads have no chat instruction (spec §1)
@@ -506,6 +504,7 @@ export async function registerUploadRoutes(
 					overwrite: targetExists,
 					dirs_created: [],
 					audit_log_appended: true,
+					tick_scope: "stage",
 				})
 
 				reply.send({
@@ -532,6 +531,10 @@ export async function registerUploadRoutes(
 					return
 				}
 
+				// R-01 (cross-session bypass): bind the JWT's `sid` claim to the
+				// URL's intent slug. See stage-output route above for narrative.
+				if (!verifyIntentMutationAuth(req, reply, intent)) return
+
 				if (!validateIntent(intent)) {
 					reply
 						.status(404)
@@ -539,14 +542,14 @@ export async function registerUploadRoutes(
 					return
 				}
 
-				if (isIntentArchived(intent)) {
+				if (isIntentArchivedBySlug(intent)) {
 					reply
 						.status(404)
 						.send({ error: "intent_not_found", code: "intent_not_found" })
 					return
 				}
 
-				if (isIntentWorktreeLocked(intent)) {
+				if (isIntentLockedBySlug(intent)) {
 					reply
 						.status(423)
 						.send({ error: "intent_locked", code: "intent_locked" })
@@ -712,12 +715,21 @@ export async function registerUploadRoutes(
 				tmpPath = null // rename succeeded; tempfile is now the dest
 
 				// Stamp action-log entry.
-				// For stage-scoped uploads use that stage's tick; for intent-scope
-				// knowledge (stage === null) walk all stages to find the active one.
-				const knowledgeTickCounter =
-					stage !== null
-						? getCurrentTickCounter(iDir, stage)
-						: getCurrentTickCounter(iDir)
+				// V-05: stage-scoped uploads use that stage's tick (per-stage
+				// monotonic counter); intent-scope knowledge (stage === null)
+				// uses the deterministic intent-scope counter so two consecutive
+				// uploads can't collide on `entry_id` and the drift gate's
+				// consumer can union per-stage and intent-scope action-log
+				// entries when classifying a tracked file.
+				// V-03: `attribute_to_user` is recorded as a CLAIM in
+				// `claimed_author_id` (canonical) and mirrored to the legacy
+				// `human_author_id` key.
+				const isIntentScope = stage === null
+				const knowledgeTickCounter = isIntentScope
+					? getIntentScopeTickCounter(iDir)
+					: // biome-ignore lint/style/noNonNullAssertion: branch guarded by isIntentScope
+						getCurrentTickCounter(iDir, stage as string)
+				const tickScope = isIntentScope ? "intent" : "stage"
 				const entryId = nextEntryId(knowledgeTickCounter, 1)
 				const now = new Date().toISOString()
 				const actionEntry = {
@@ -726,9 +738,11 @@ export async function registerUploadRoutes(
 					sha: sha256,
 					author_class: "human-via-mcp" as const,
 					timestamp: now,
+					claimed_author_id: attributeToUser,
 					human_author_id: attributeToUser,
 					entry_id: entryId,
 					tick_counter: knowledgeTickCounter,
+					tick_scope: tickScope as "intent" | "stage",
 				}
 				await appendActionLogEntry(iDir, knowledgeTickCounter, actionEntry)
 
@@ -739,6 +753,7 @@ export async function registerUploadRoutes(
 					path: destRelPath,
 					sha: sha256,
 					author_class: "human-via-mcp",
+					claimed_author_id: attributeToUser,
 					human_author_id: attributeToUser,
 					rationale: null,
 					user_instruction_excerpt: null,
@@ -747,6 +762,7 @@ export async function registerUploadRoutes(
 					overwrite: false,
 					dirs_created: [],
 					audit_log_appended: true,
+					tick_scope: tickScope as "intent" | "stage",
 				})
 
 				reply.send({

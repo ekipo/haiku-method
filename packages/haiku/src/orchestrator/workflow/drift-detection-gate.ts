@@ -38,6 +38,7 @@ import {
 	readBaseline,
 	readBaselineAckMarker,
 	readBaselineContentWithFallback,
+	readIntentScopeActionLogSync,
 	recordBaselineCorruption,
 	recordBaselineEstablishedMarker,
 	type TrackingClass,
@@ -629,7 +630,21 @@ export function runDriftDetectionGate(
 	}
 
 	// 6. Read the action log for this tick (for author-class attribution).
-	const actionLogEntries = readActionLogSync(intentDir, tickCounter)
+	// V-05 consumer fix: SPA uploads with `stage === null` are stamped at
+	// the intent-scope tick (deterministic, monotonic at the intent
+	// level), NOT at any stage's tick. The drift gate fires per-stage,
+	// so a per-tick filter alone misses those entries — the file change
+	// then falls back to `baselineEntry.author_class` (typically "agent"
+	// via the silent auto-add path) and the `human-via-mcp` provenance is
+	// lost. Union per-stage entries (this tick) AND intentScopeActionLog
+	// (every intent-scope entry, regardless of tick number) for the
+	// path-based author-class lookup below.
+	const stageActionLogEntries = readActionLogSync(intentDir, tickCounter)
+	const intentScopeActionLog = readIntentScopeActionLogSync(intentDir)
+	const actionLogEntries = [
+		...stageActionLogEntries,
+		...intentScopeActionLog,
+	]
 
 	// 7. Steady-state scan.
 	const findings: DriftFinding[] = []

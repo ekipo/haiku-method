@@ -756,6 +756,272 @@ await test("no_allow_match rejection does not append to audit log", async () => 
 	)
 })
 
+// ── R-02 (V-05 producer fix on MCP path) ──────────────────────────────────
+//
+// Pre-fix: haiku_human_write called getCurrentTickCounter(intentDir) with no
+// stage argument, which falls into a non-deterministic readdirSync(stagesDir)
+// loop and returns the FIRST stage's iteration value. This is the same bug
+// V-05 fixed on the SPA side. Two consecutive intent-scope MCP writes could
+// share a tick value (drawn from whichever stage readdirSync ranked first)
+// and the resulting entry_ids could collide with per-stage entries that
+// happen to share the chosen tick. The drift gate's per-stage filter would
+// then drop the human-via-mcp provenance entirely.
+//
+// The fix mirrors the SPA branch: intent-scope writes (knowledge/...) go
+// through getIntentScopeTickCounter; stage-scope writes (stages/{X}/...)
+// pass the parsed stage slug to getCurrentTickCounter explicitly. tick_scope
+// is stamped on every action-log + audit-log entry so the drift-gate
+// consumer's union routes the entry into the right read.
+
+await test(
+	"R-02: intent-scope MCP write stamps tick_scope='intent' AND uses getIntentScopeTickCounter (deterministic, monotonic)",
+	async () => {
+		// Two stages with WILDLY different iterations so the readdirSync
+		// lottery would clearly pick a wrong value pre-fix. The intent-scope
+		// counter starts at 1 and is independent from both stage values.
+		const { haikuRoot, intentDir } = makeFixture("r02-intent-scope", {
+			stages: ["alpha", "beta"],
+		})
+		// Bump alpha's iteration to 99 and beta's to 7 so we can prove the
+		// counter we get back is NEITHER stage's iteration value.
+		writeFileSync(
+			join(intentDir, "stages", "alpha", "state.json"),
+			JSON.stringify({ iteration: 99, status: "active" }),
+		)
+		writeFileSync(
+			join(intentDir, "stages", "beta", "state.json"),
+			JSON.stringify({ iteration: 7, status: "active" }),
+		)
+
+		// First intent-scope write.
+		const r1 = await invoke(haikuRoot, "r02-intent-scope", {
+			path: "knowledge/r02-first.md",
+			content: "first",
+			human_author_id: "alice",
+		})
+		assert.strictEqual(parseResult(r1).ok, true)
+
+		// Second intent-scope write.
+		const r2 = await invoke(haikuRoot, "r02-intent-scope", {
+			path: "knowledge/r02-second.md",
+			content: "second",
+			human_author_id: "alice",
+		})
+		assert.strictEqual(parseResult(r2).ok, true)
+
+		const auditLines = readAuditLines(intentDir)
+		assert.strictEqual(auditLines.length, 2, "two audit entries expected")
+
+		// Both entries MUST stamp tick_scope='intent' so the drift gate
+		// consumer reads them out of the intent-scope action-log union
+		// rather than the per-stage union.
+		assert.strictEqual(
+			auditLines[0].tick_scope,
+			"intent",
+			"first intent-scope write MUST carry tick_scope='intent'",
+		)
+		assert.strictEqual(
+			auditLines[1].tick_scope,
+			"intent",
+			"second intent-scope write MUST carry tick_scope='intent'",
+		)
+
+		// tick_counter MUST be monotonic & distinct (no collision).
+		assert.notStrictEqual(
+			auditLines[0].tick_counter,
+			auditLines[1].tick_counter,
+			"two consecutive intent-scope MCP writes MUST get DISTINCT tick_counter values (R-02 bypass would let them collide)",
+		)
+		assert.ok(
+			auditLines[1].tick_counter > auditLines[0].tick_counter,
+			"intent-scope tick MUST be monotonic",
+		)
+
+		// And the counter MUST come from the intent-scope counter (1, 2),
+		// NOT from either stage's iteration (99 or 7) — proves we no
+		// longer use the readdirSync lottery for intent-scope writes.
+		assert.notStrictEqual(
+			auditLines[0].tick_counter,
+			99,
+			"intent-scope MCP write MUST NOT use stages/alpha/state.json.iteration",
+		)
+		assert.notStrictEqual(
+			auditLines[0].tick_counter,
+			7,
+			"intent-scope MCP write MUST NOT use stages/beta/state.json.iteration",
+		)
+		assert.strictEqual(
+			auditLines[0].tick_counter,
+			1,
+			"intent-scope counter starts at 1 (no zero-collision with per-stage tick sentinel)",
+		)
+		assert.strictEqual(auditLines[1].tick_counter, 2)
+
+		// Action log must mirror the same tick_scope discriminator so the
+		// consumer-union in drift-detection-gate routes correctly.
+		const actionLines = readActionLines(intentDir)
+		assert.strictEqual(
+			actionLines[0].tick_scope,
+			"intent",
+			"action log entry MUST carry tick_scope='intent' too",
+		)
+		assert.strictEqual(actionLines[1].tick_scope, "intent")
+	},
+)
+
+await test(
+	"R-02: stage-scope MCP write parses stage slug from canonical path (NOT readdirSync lottery)",
+	async () => {
+		const { haikuRoot, intentDir } = makeFixture("r02-stage-scope", {
+			stages: ["alpha", "beta"],
+		})
+		writeFileSync(
+			join(intentDir, "stages", "alpha", "state.json"),
+			JSON.stringify({ iteration: 11, status: "active" }),
+		)
+		writeFileSync(
+			join(intentDir, "stages", "beta", "state.json"),
+			JSON.stringify({ iteration: 22, status: "active" }),
+		)
+
+		// Write to stages/beta/knowledge/...; we MUST get beta's iteration
+		// value (22), NOT whichever stage readdirSync ranked first.
+		const result = await invoke(haikuRoot, "r02-stage-scope", {
+			path: "stages/beta/knowledge/r02-stage-beta.md",
+			content: "stage-scoped",
+			human_author_id: "alice",
+		})
+		assert.strictEqual(parseResult(result).ok, true)
+
+		const auditLines = readAuditLines(intentDir)
+		assert.strictEqual(auditLines.length, 1)
+		assert.strictEqual(
+			auditLines[0].tick_scope,
+			"stage",
+			"stage-scoped MCP write MUST stamp tick_scope='stage'",
+		)
+		assert.strictEqual(
+			auditLines[0].tick_counter,
+			22,
+			"tick_counter MUST come from stages/beta/state.json (22), NOT from the readdirSync lottery (which could have returned 11 from alpha)",
+		)
+
+		// Same for action log.
+		const actionLines = readActionLines(intentDir)
+		assert.strictEqual(actionLines[0].tick_scope, "stage")
+		assert.strictEqual(actionLines[0].tick_counter, 22)
+	},
+)
+
+// ── R-03 (V-06 helper coverage gap on MCP path) ───────────────────────────
+//
+// Pre-fix: SPA upload routes checked both isIntentArchived AND
+// isIntentLocked, but haiku_human_write only checked archived state. An
+// operator-locked intent (mid-revisit freeze) would reject SPA uploads
+// (423 intent_locked) but happily accept haiku_human_write MCP calls.
+// This test pins the symmetric helper coverage so the V-06 'shared helper
+// rule' (both surfaces gate on both states) holds at the MCP boundary.
+
+await test(
+	"R-03: locked intent rejects haiku_human_write with intent_locked (matches SPA 423 surface)",
+	async () => {
+		const { haikuRoot, intentDir } = makeFixture("r03-locked", {
+			stages: ["development"],
+		})
+		// Lock the intent by rewriting intent.md with status: locked.
+		writeFileSync(
+			join(intentDir, "intent.md"),
+			`---\ntitle: R-03 Locked Intent\nstatus: locked\n---\nLocked.\n`,
+		)
+
+		const result = await invoke(haikuRoot, "r03-locked", {
+			path: "knowledge/r03-locked-write.md",
+			content: "should be rejected",
+			human_author_id: "alice",
+		})
+		const body = parseResult(result)
+		assert.strictEqual(
+			body.ok,
+			false,
+			"locked intent MUST reject haiku_human_write (R-03 helper coverage gap)",
+		)
+		assert.strictEqual(
+			body.error,
+			"intent_locked",
+			"error code MUST be intent_locked (matches the SPA 423 intent_locked surface)",
+		)
+
+		// File must NOT have been written.
+		assert.ok(
+			!existsSync(join(intentDir, "knowledge/r03-locked-write.md")),
+			"file must NOT be written when intent is locked",
+		)
+		// Audit log must NOT have been appended.
+		assert.strictEqual(
+			readAuditLines(intentDir).length,
+			0,
+			"no audit entry on intent_locked rejection",
+		)
+		// Action log must NOT have been stamped.
+		assert.strictEqual(
+			readActionLines(intentDir).length,
+			0,
+			"no action log entry on intent_locked rejection",
+		)
+	},
+)
+
+await test(
+	"R-03: single-quoted YAML status: 'locked' rejects haiku_human_write (matches SPA single-quoted V-06 test)",
+	async () => {
+		const { haikuRoot, intentDir } = makeFixture("r03-locked-singlequoted", {
+			stages: ["development"],
+		})
+		writeFileSync(
+			join(intentDir, "intent.md"),
+			`---\ntitle: R-03 Singlequoted Locked\nstatus: 'locked'\n---\nLocked.\n`,
+		)
+
+		const result = await invoke(haikuRoot, "r03-locked-singlequoted", {
+			path: "knowledge/r03-singlequoted-locked.md",
+			content: "should be rejected",
+			human_author_id: "alice",
+		})
+		const body = parseResult(result)
+		assert.strictEqual(body.ok, false)
+		assert.strictEqual(
+			body.error,
+			"intent_locked",
+			"single-quoted YAML status: 'locked' MUST classify as locked on the MCP surface (V-06 cross-surface contract)",
+		)
+	},
+)
+
+await test(
+	"R-03: body-text quoting `status: locked` does NOT lock the MCP surface (no false-positives via shared helper)",
+	async () => {
+		const { haikuRoot, intentDir } = makeFixture("r03-bodytext-falsepos", {
+			stages: ["development"],
+		})
+		writeFileSync(
+			join(intentDir, "intent.md"),
+			`---\ntitle: R-03 Body Text\nstatus: active\n---\nRunbook excerpt: when an intent has \`status: locked\` in its frontmatter, ...\n`,
+		)
+
+		const result = await invoke(haikuRoot, "r03-bodytext-falsepos", {
+			path: "knowledge/r03-bodytext-not-locked.md",
+			content: "should succeed",
+			human_author_id: "alice",
+		})
+		const body = parseResult(result)
+		assert.strictEqual(
+			body.ok,
+			true,
+			"body text quoting `status: locked` MUST NOT classify as locked — gray-matter parses frontmatter only (V-06 cross-surface contract)",
+		)
+	},
+)
+
 // ── Cleanup ────────────────────────────────────────────────────────────────
 
 rmSync(tmp, { recursive: true, force: true })

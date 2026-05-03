@@ -1208,6 +1208,9 @@ export function recordBaselineEstablishedMarker(
 		sha: "",
 		author_class: "agent",
 		timestamp: new Date().toISOString(),
+		// V-11 marker entries carry no human identity — both author keys are null.
+		// claimed_author_id (V-03 canonical) + human_author_id (legacy alias).
+		claimed_author_id: null,
 		human_author_id: null,
 		entry_id: `BLN-EST-${tickCounter}-${randomBytes(3).toString("hex")}`,
 		tick_counter: tickCounter,
@@ -1229,6 +1232,8 @@ function recordBaselineCorruptionMarker(
 		sha: "",
 		author_class: "agent",
 		timestamp: new Date().toISOString(),
+		// V-11 marker entries carry no human identity — both author keys are null.
+		claimed_author_id: null,
 		human_author_id: null,
 		entry_id: `BLN-CORR-${tickCounter}-${randomBytes(3).toString("hex")}`,
 		tick_counter: tickCounter,

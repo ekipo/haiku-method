@@ -177,10 +177,19 @@ function buildMultipart(boundary, fields) {
 async function postUpload(baseUrl, intentSlug, route, fields, headers) {
 	const boundary = `----R01TestBoundary${Date.now()}${Math.random().toString(36).slice(2)}`
 	const body = buildMultipart(boundary, fields)
+	// V-08 CSRF Layer 2 (origin allowlist) — `csrf.ts:readAllowedOrigins`
+	// defaults to `['http://localhost:*']` (matches any loopback port).
+	// Pass that as the Origin so the request reaches the route handler
+	// instead of being short-circuited with `403 forbidden / origin_missing`.
+	// This test exercises auth (R-01), not CSRF — see csrf.test.mjs for
+	// CSRF-specific coverage.
+	const url = new URL(baseUrl)
+	const loopbackOrigin = `http://localhost:${url.port}`
 	return fetch(`${baseUrl}/api/intents/${intentSlug}/uploads/${route}`, {
 		method: "POST",
 		headers: {
 			"Content-Type": `multipart/form-data; boundary=${boundary}`,
+			Origin: loopbackOrigin,
 			...headers,
 		},
 		body,

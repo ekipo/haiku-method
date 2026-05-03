@@ -65,9 +65,9 @@ quality_gates:
     command: bun run --cwd packages/haiku test
 status: active
 bolt: 4
-hat: security-engineer
+hat: red-team
 started_at: '2026-05-03T02:09:52Z'
-hat_started_at: '2026-05-03T08:28:13Z'
+hat_started_at: '2026-05-03T08:36:37Z'
 iterations:
   - hat: threat-modeler
     started_at: '2026-05-03T02:09:52Z'
@@ -236,6 +236,14 @@ iterations:
       the prior rejection.
   - hat: security-engineer
     started_at: '2026-05-03T08:28:13Z'
+    completed_at: '2026-05-03T08:32:07Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T08:32:07Z'
+    completed_at: '2026-05-03T08:36:37Z'
+    result: advance
+  - hat: red-team
+    started_at: '2026-05-03T08:36:37Z'
     completed_at: null
     result: null
 model_original: sonnet

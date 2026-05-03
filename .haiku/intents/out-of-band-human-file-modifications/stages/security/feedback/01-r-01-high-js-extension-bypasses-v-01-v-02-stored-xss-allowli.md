@@ -1,6 +1,6 @@
 ---
 title: 'R-01 (HIGH): .js extension bypasses V-01/V-02 stored-XSS allowlist'
-status: addressed
+status: closed
 origin: agent
 author: agent
 author_type: agent
@@ -8,17 +8,21 @@ created_at: '2026-05-03T02:57:57Z'
 iteration: 1
 visit: 1
 source_ref: stages/security/artifacts/RED-TEAM-unit-01.md#finding-r-01
-closed_by: null
+closed_by: 'fix-loop:FB-01:bolt-1'
 bolt: 1
 triaged_at: '2026-05-03T02:57:57Z'
 resolution: inline_fix
 replies: []
-hat: security-engineer
+hat: feedback-assessor
 iterations:
   - bolt: 1
     hat: security-engineer
     completed_at: '2026-05-03T08:30:33Z'
     result: advanced
+  - bolt: 1
+    hat: feedback-assessor
+    completed_at: '2026-05-03T08:38:53Z'
+    result: closed
 ---
 ## Summary
 

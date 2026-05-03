@@ -13,7 +13,7 @@ For canonical user-behavior features see `/features/` at the intent root (5 file
 | `baseline_schema.feature` | §2.1 Baseline | Baseline record schema (path, sha, author_class) |
 | `drift_finding_and_action.feature` | §3.1, §3.2 | DriftFinding shape, manual_change_assessment action payload |
 | `internal_events.feature` | §6 | drift_detected, assessment_recorded, pending_marker_cleared event payloads |
-| `mcp_tools.feature` | §4 | haiku_human_write_file, haiku_baseline_init, haiku_classify_drift, haiku_baseline_clear_marker contracts |
+| `mcp_tools.feature` | §4 | haiku_human_write, haiku_baseline_init, haiku_classify_drift, haiku_baseline_clear_marker contracts |
 | `http_api.feature` | §5 | POST /uploads/stage-output, POST /uploads/knowledge, GET /assessments[/{id}] |
 | `cross_surface_naming.feature` | §7 | Cross-surface naming audit (entity names match across disk/action/MCP/HTTP/events) |
 

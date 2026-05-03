@@ -290,7 +290,7 @@ This field records the exact SHA the Baseline was updated to, providing a post-c
 
 This section specifies the *interface shape* of new MCP tools. Tool names below are **DEFERRED-TO-DESIGN** but a representative name is given for clarity; the field-level shapes are fixed.
 
-### 4.1 `haiku_human_write_file` — agent writes on behalf of human
+### 4.1 `haiku_human_write` — agent writes on behalf of human
 
 Purpose: when a user instructs the agent in chat to "save this Tailwind config to the design references," the agent uses this tool instead of `Write`. The tool sets `Baseline.author_class = "human-via-mcp"` so the drift gate does not re-flag the write on the next tick.
 
@@ -677,7 +677,7 @@ Appendix A — outputs/features/ catalog. The 8 .feature files at `stages/produc
 | `baseline_schema.feature` | §2.1 Baseline | Baseline record schema (path, sha, author_class) |
 | `drift_finding_and_action.feature` | §3.1, §3.2 | DriftFinding shape, manual_change_assessment action payload |
 | `internal_events.feature` | §6 | drift_detected, assessment_recorded, pending_marker_cleared event payloads |
-| `mcp_tools.feature` | §4 | haiku_human_write_file, haiku_baseline_init, haiku_classify_drift, haiku_baseline_clear_marker contracts |
+| `mcp_tools.feature` | §4 | haiku_human_write, haiku_baseline_init, haiku_classify_drift, haiku_baseline_clear_marker contracts |
 | `http_api.feature` | §5 | POST /uploads/stage-output, POST /uploads/knowledge, GET /assessments[/{id}] |
 | `cross_surface_naming.feature` | §7 | Cross-surface naming audit (entity names match across disk/action/MCP/HTTP/events) |
 

@@ -64,10 +64,10 @@ quality_gates:
   - name: haiku-suite-passes
     command: bun run --cwd packages/haiku test
 status: active
-bolt: 2
-hat: security-reviewer
+bolt: 3
+hat: security-engineer
 started_at: '2026-05-03T02:09:52Z'
-hat_started_at: '2026-05-03T02:58:55Z'
+hat_started_at: '2026-05-03T08:01:00Z'
 iterations:
   - hat: threat-modeler
     started_at: '2026-05-03T02:09:52Z'
@@ -101,6 +101,71 @@ iterations:
       stages/security/artifacts/RED-TEAM-unit-01.md.
   - hat: security-reviewer
     started_at: '2026-05-03T02:58:55Z'
+    completed_at: '2026-05-03T08:01:00Z'
+    result: reject
+    reason: >-
+      REJECT — security-engineer controls do not address the threat class the
+      threat-modeler identified.
+
+
+      Failed criteria (security-reviewer mandate):
+
+      - Check #2 (every threat-modeler threat is accounted for): The
+      threat-modeler called out HIGH "Knowledge XSS via served file in tunnel
+      origin" (V-01) and HIGH "Stage-output XSS same class" (V-02). The controls
+      artifact (SECURITY-CONTROLS-unit-01.md §2 rows 1-2) claims these are
+      closed by `BLOCKED_EXTENSIONS = {.html,.htm,.svg,.xml,.xhtml,.mhtml}` plus
+      per-route MIME allowlists. Red-team bolt 1 proved this claim false with
+      end-to-end PoCs
+      (packages/haiku/test/red-team-unit-01-upload-bypass.test.mjs):
+        - R-01 (HIGH, FB-01): `.js` upload with `application/octet-stream` MIME slips the allowlist (octet-stream is on ALLOWED_MIMES_KNOWLEDGE/STAGE_OUTPUT, .js is not in BLOCKED_EXTENSIONS). Served back with `Content-Type: application/javascript` per path-safety.ts:20. Same XSS-in-tunnel-origin threat the modeler rated HIGH.
+        - R-02 (HIGH, FB-02): `.css` same bypass mechanism (.css → text/css in MIME map at path-safety.ts:19). Threat-modeler enumerated `.html/.htm/.xhtml/.mhtml/.svg/.xml`; .js/.css are equivalent vectors for the same threat class but are not blocked.
+        - R-03 (MED, FB-03): `application/octet-stream` on both ALLOWED_MIMES sets makes the MIME allowlist effectively a no-op for any extension not in BLOCKED_EXTENSIONS.
+        - R-04 (LOW, FB-04): `attribute_to_user` written verbatim to action-log/write-audit JSONL — stored-XSS vector for any future SPA log renderer.
+
+      The threat-modeler's threat is "stored XSS via served file in tunnel
+      origin," not literally "exactly six file extensions." Closing six named
+      extensions while leaving equivalent-class .js/.css open does not
+      substantively address the threat — it is silent omission of the threat
+      class, which the security-reviewer mandate calls a hard reject.
+
+
+      - Check #6 (residual risk is specific): SECURITY-CONTROLS-unit-01.md §5
+      enumerates 5 residuals (serveFile MIME-map inversion, no CSP, no sandboxed
+      origin, telemetry-only clamp signal, UTF-8 byte counting). It does NOT
+      acknowledge the .js/.css/octet-stream bypass class or the unvalidated
+      `attribute_to_user` vector. The artifact is silent on the gaps red-team
+      enumerated — neither closed in §2, nor documented in §5.
+
+
+      What the next security-engineer bolt MUST land before returning to
+      security-reviewer:
+
+      1. Add `.js`, `.css`, `.htc`, `.hta`, `.htaccess` to BLOCKED_EXTENSIONS
+      (closes R-01/R-02 directly). Update the V-01/V-02 row evidence in
+      SECURITY-CONTROLS-unit-01.md §2 + add tests in upload-routes.test.mjs that
+      the .js and .css uploads are rejected with 415.
+
+      2. Remove `application/octet-stream` from both ALLOWED_MIMES_STAGE_OUTPUT
+      and ALLOWED_MIMES_KNOWLEDGE (closes R-03 — restores the allowlist's stated
+      purpose). Update the controls artifact and add a test that octet-stream
+      upload is rejected.
+
+      3. Validate `attribute_to_user` at upload time with a bounded slug pattern
+      (e.g. `^[\w][\w\-.@ ]{0,127}$`); reject 400 with `bad_attribute_to_user`
+      (closes R-04). Add a row in SECURITY-CONTROLS-unit-01.md §2 mapping the
+      audit-log poisoning threat to this control + test.
+
+      4. Mark FB-01/FB-02/FB-03/FB-04 as closed via the fix-loop hat dispatch.
+      Open FBs at status `fixing` cannot be left for the next bolt.
+
+
+      Until the controls artifact body shows either the bypass class closed
+      (with impl + test references) or explicitly accepted in §5 with concrete
+      bound + named target (the latter is unacceptable for HIGH-severity
+      threats), security-reviewer cannot advance.
+  - hat: security-engineer
+    started_at: '2026-05-03T08:01:00Z'
     completed_at: null
     result: null
 model_original: sonnet

@@ -25,6 +25,13 @@ outputs:
     .haiku/intents/out-of-band-human-file-modifications/stages/security/artifacts/THREAT-MODEL.md
   - >-
     .haiku/intents/out-of-band-human-file-modifications/stages/security/artifacts/ASSESSMENTS.md
+  - stages/security/artifacts/ASSESSMENTS.md
+  - stages/security/artifacts/THREAT-MODEL.md
+  - stages/security/artifacts/SECURITY-CONTROLS-VERIFICATION.md
+  - stages/security/artifacts/RED-TEAM-VERIFICATION.md
+  - stages/security/artifacts/BLUE-TEAM-VERIFICATION.md
+  - stages/security/artifacts/verify-prose-claims-attack-replay.sh
+  - stages/security/artifacts/verify-prose-claims.sh
 model: sonnet
 quality_gates:
   - name: threat-model-exists
@@ -100,7 +107,33 @@ quality_gates:
     command: >-
       bash -c '! grep -nE "^- *(improve security|harden|review|investigate)$"
       .haiku/intents/out-of-band-human-file-modifications/stages/security/artifacts/ASSESSMENTS.md'
-status: pending
+status: completed
+bolt: 1
+hat: blue-team
+started_at: '2026-05-03T08:52:23Z'
+hat_started_at: '2026-05-03T09:17:44Z'
+iterations:
+  - hat: threat-modeler
+    started_at: '2026-05-03T08:52:23Z'
+    completed_at: '2026-05-03T09:06:07Z'
+    result: advance
+  - hat: security-engineer
+    started_at: '2026-05-03T09:06:07Z'
+    completed_at: '2026-05-03T09:11:14Z'
+    result: advance
+  - hat: security-reviewer
+    started_at: '2026-05-03T09:11:14Z'
+    completed_at: '2026-05-03T09:12:21Z'
+    result: advance
+  - hat: red-team
+    started_at: '2026-05-03T09:12:21Z'
+    completed_at: '2026-05-03T09:17:44Z'
+    result: advance
+  - hat: blue-team
+    started_at: '2026-05-03T09:17:44Z'
+    completed_at: '2026-05-03T09:33:47Z'
+    result: advance
+completed_at: '2026-05-03T09:33:47Z'
 ---
 # Unit 04 — Threat model + assessments + deferred-risk register
 

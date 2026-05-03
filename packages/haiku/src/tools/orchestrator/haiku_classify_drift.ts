@@ -64,7 +64,13 @@ import {
 	appendMarker,
 	type PendingMarker,
 } from "../../orchestrator/workflow/drift-markers.js"
-import { findHaikuRoot, writeFeedbackFile } from "../../state-tools.js"
+import {
+	findHaikuRoot,
+	MAX_RATIONALE_BYTES,
+	MAX_RATIONALE_EXCERPT_BYTES,
+	validateRationaleCaps,
+	writeFeedbackFile,
+} from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
@@ -267,6 +273,41 @@ export default defineTool({
 			return errorResponse(
 				"empty_rationale",
 				"agent_rationale must contain at least one non-whitespace character.",
+			)
+		}
+
+		// ── VULN-REPORT V-09: rationale byte caps ────────────────────────────
+		// agent_rationale > 10 KB OR any rationale_excerpt > 1 KB is rejected
+		// at schema-validation time so DA-NN.json never grows beyond what the
+		// SPA assessments-list endpoint can comfortably page back. The agent
+		// shrinks and retries — no bolt is consumed because no side effects
+		// have fired yet.
+		const capViolation = validateRationaleCaps({
+			agent_rationale: agentRationale,
+			classifications,
+		})
+		if (capViolation) {
+			if (capViolation.kind === "agent_rationale_too_long") {
+				return errorResponse(
+					"agent_rationale_too_long",
+					`agent_rationale is ${capViolation.bytes} bytes; the cap is ${capViolation.cap} bytes (10 KB). Shrink the rationale and retry — the assessments-list HTTP endpoint pages every record back unsummarized, so an oversize rationale slows the SPA for every reviewer.`,
+					{
+						bytes: capViolation.bytes,
+						cap: capViolation.cap,
+						max_rationale_bytes: MAX_RATIONALE_BYTES,
+					},
+				)
+			}
+			return errorResponse(
+				"rationale_excerpt_too_long",
+				`classifications[${capViolation.index}].rationale_excerpt is ${capViolation.bytes} bytes; the cap is ${capViolation.cap} bytes (1 KB). Per-finding excerpts are SPA list-row labels — keep them short. The full justification can live in agent_rationale (10 KB cap).`,
+				{
+					index: capViolation.index,
+					path: capViolation.path,
+					bytes: capViolation.bytes,
+					cap: capViolation.cap,
+					max_rationale_excerpt_bytes: MAX_RATIONALE_EXCERPT_BYTES,
+				},
 			)
 		}
 

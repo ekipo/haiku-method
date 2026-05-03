@@ -66,7 +66,7 @@ import {
 	isIntentArchived,
 	isIntentLocked,
 } from "../state-tools.js"
-import { requireTunnelAuth } from "./auth.js"
+import { requireTunnelAuth, verifyIntentMutationAuth } from "./auth.js"
 import { isValidSlug, validateIntent, validateStage } from "./validation.js"
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -218,6 +218,13 @@ export async function registerUploadRoutes(
 					reply.status(400).send({ error: "bad_param", code: "bad_param" })
 					return
 				}
+
+				// R-01 (cross-session bypass): bind the JWT's `sid` claim to the
+				// URL's intent slug. Without this, a tunnel-mode reviewer with a
+				// valid JWT for review session S1 (bound to intent A) could POST
+				// uploads to intent B and have them attributed there. Mirror the
+				// feedback-API surface, which has gated this since FB-30.
+				if (!verifyIntentMutationAuth(req, reply, intent)) return
 
 				// Intent existence check.
 				if (!validateIntent(intent)) {
@@ -501,6 +508,10 @@ export async function registerUploadRoutes(
 					reply.status(400).send({ error: "bad_param", code: "bad_param" })
 					return
 				}
+
+				// R-01 (cross-session bypass): bind the JWT's `sid` claim to the
+				// URL's intent slug. See stage-output route above for narrative.
+				if (!verifyIntentMutationAuth(req, reply, intent)) return
 
 				if (!validateIntent(intent)) {
 					reply

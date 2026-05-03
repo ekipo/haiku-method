@@ -35,7 +35,12 @@ import {
 	truncateInstruction,
 	type WriteAuditRecord,
 } from "../../orchestrator/workflow/write-audit.js"
-import { findHaikuRoot, isIntentArchived } from "../../state-tools.js"
+import {
+	findHaikuRoot,
+	getIntentScopeTickCounter,
+	isIntentArchived,
+	isIntentLocked,
+} from "../../state-tools.js"
 import { defineTool, validateSlugArgs } from "../define.js"
 import { text } from "./_text.js"
 
@@ -431,6 +436,34 @@ export default defineTool({
 			}
 		}
 
+		// ── Check for locked intent ───────────────────────────────────────────
+		// R-03 (V-06 helper coverage gap): the SPA upload routes check both
+		// `isIntentArchived` AND `isIntentLocked`. Pre-fix the MCP path checked
+		// only archived state, so an operator-locked intent (e.g. mid-revisit
+		// freeze) would reject SPA uploads (423 intent_locked) but happily
+		// accept `haiku_human_write` MCP calls. Mirror the SPA helper coverage
+		// so the V-06 shared-helper rule ("both surfaces use the helpers")
+		// holds for locked AND archived state.
+		if (isIntentLocked(intentDir)) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(
+							{
+								ok: false,
+								error: "intent_locked",
+								message: `Intent '${slug}' is locked. Unlock it before issuing human-attributed writes.`,
+							},
+							null,
+							2,
+						),
+					},
+				],
+				isError: true,
+			}
+		}
+
 		// ── Validate content_encoding ─────────────────────────────────────────
 		if (contentEncoding !== "utf-8" && contentEncoding !== "base64") {
 			return {
@@ -649,8 +682,23 @@ export default defineTool({
 		}
 
 		// ── Timestamps + entry IDs ────────────────────────────────────────────
+		// R-02 (V-05 producer fix on MCP path): mirror the SPA branch.
+		// Intent-scope writes (`knowledge/...`, no `stages/` prefix) go
+		// through the deterministic `getIntentScopeTickCounter` so two
+		// consecutive MCP-side intent-scope writes never share a counter
+		// value. Stage-scope writes (`stages/{X}/...`) parse the stage slug
+		// out of the canonical path and pass it to `getCurrentTickCounter`
+		// so the no-arg `readdirSync` lottery can never pick the wrong
+		// stage. `tick_scope` is stamped on both action-log and audit-log
+		// entries so the drift-gate consumer's union (per-stage ∪
+		// intent-scope) routes the entry into the right read.
+		const stageMatch = canonicalPath.match(/^stages\/([^/]+)\//)
+		const isIntentScope = stageMatch === null
+		const tickCounter = isIntentScope
+			? getIntentScopeTickCounter(intentDir)
+			: getCurrentTickCounter(intentDir, stageMatch[1])
+		const tickScope: "intent" | "stage" = isIntentScope ? "intent" : "stage"
 		const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
-		const tickCounter = getCurrentTickCounter(intentDir)
 		const seqNumber = getNextAuditSequenceNumber(intentDir)
 		const entryId = nextEntryId(tickCounter, seqNumber)
 
@@ -673,7 +721,7 @@ export default defineTool({
 			human_author_id: claimedAuthorId,
 			entry_id: entryId,
 			tick_counter: tickCounter,
-			tick_scope: "stage",
+			tick_scope: tickScope,
 		})
 
 		// ── Audit-log append (only when drift detection is enabled) ───────────
@@ -703,7 +751,7 @@ export default defineTool({
 				overwrite,
 				dirs_created: dirsCreated,
 				audit_log_appended: true,
-				tick_scope: "stage",
+				tick_scope: tickScope,
 			}
 
 			const auditResult = await appendWriteAudit(intentDir, auditRecord)

@@ -50,11 +50,24 @@ export function requireTunnelAuth(
 	return true
 }
 
-/** Verify a feedback-mutation request: the session encoded in the JWT
- *  must match the `intent` slug the request is mutating. Local mode is
- *  a no-op (loopback gates auth). Returns false on any failure (with
- *  the reply already sent), true to proceed. */
-export function verifyFeedbackMutationAuth(
+/** Verify an intent-scoped mutation request: the session encoded in the
+ *  JWT must match the `intent` slug the request is mutating. Local mode
+ *  is a no-op (loopback gates auth). Returns false on any failure (with
+ *  the reply already sent), true to proceed.
+ *
+ *  Use this on every endpoint that mutates state inside a specific
+ *  intent — feedback APIs, upload routes, and any future per-intent
+ *  write surface. Without this gate, `requireTunnelAuth(req, reply,
+ *  null)` only proves the JWT is signed/non-expired; it does NOT bind
+ *  the JWT's `sid` claim to the URL's intent slug, so a tunnel-mode
+ *  reviewer holding a valid JWT for review session S1 (bound to
+ *  intent A) could mutate intent B (R-01 cross-session bypass). This
+ *  helper closes that gap.
+ *
+ *  `verifyFeedbackMutationAuth` is the legacy alias retained for the
+ *  feedback-API call sites; prefer `verifyIntentMutationAuth` on new
+ *  call sites. */
+export function verifyIntentMutationAuth(
 	req: FastifyRequest,
 	reply: FastifyReply,
 	intent: string,
@@ -96,3 +109,9 @@ export function verifyFeedbackMutationAuth(
 	}
 	return true
 }
+
+/** Legacy alias for `verifyIntentMutationAuth`. Retained so the
+ *  feedback-API call sites don't churn — both names dispatch to the
+ *  same implementation. New call sites SHOULD use
+ *  `verifyIntentMutationAuth`. */
+export const verifyFeedbackMutationAuth = verifyIntentMutationAuth

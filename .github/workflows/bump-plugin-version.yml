@@ -178,14 +178,13 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
-      - name: Build MCP server bundle
-        run: npm run --prefix packages/haiku build
-        env:
-          SENTRY_DSN_REVIEW_SPA: ${{ steps.sentry.outputs.dsn_spa }}
-          HAIKU_SENTRY_DSN_MCP: ${{ steps.sentry.outputs.dsn_mcp }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_URL: https://sentry.ops.gigsmart.com
-          SENTRY_ORG: gigsmart
+      # Note: the MCP server bundle is NOT built here. plugin/bin/haiku is a
+      # committed dev shim that runs the TypeScript source via `bun`. The
+      # bundled binary is produced on-demand by the npm prepack hook
+      # (`plugin/package.json: scripts.prepack`) and restored from git by
+      # postpack — it is never committed to the repo. The "Package plugin"
+      # and "Create GitHub Release" steps below build it explicitly when
+      # they need the standalone binary for the release tarball.
 
       - name: Commit version bump
         id: commit
@@ -197,8 +196,10 @@ jobs:
             exit 0
           fi
 
-          # Add version files, changelog, and rebuilt MCP server bundle
-          git add plugin/.claude-plugin/plugin.json plugin/package.json .claude-plugin/marketplace.json CHANGELOG.md plugin/bin/haiku
+          # Add version files and changelog. plugin/bin/haiku is the dev
+          # shim and stays as the shim in the commit — the bundle ships
+          # via npm pack's prepack hook and never lands on main.
+          git add plugin/.claude-plugin/plugin.json plugin/package.json .claude-plugin/marketplace.json CHANGELOG.md
 
           # Create commit message
           COMMIT_MSG="chore(plugin): bump version ${{ steps.bump-version.outputs.old_version }} -> ${{ steps.bump-version.outputs.new_version }}"
@@ -228,6 +229,22 @@ jobs:
           TAG="v${{ steps.bump-version.outputs.new_version }}"
           git tag -f "$TAG"
           git push -f origin "$TAG"
+
+      # Build the MCP bundle for release artifacts. plugin/bin/haiku is the
+      # committed shim; this step temporarily replaces it with the bundled
+      # binary so the release zip + GitHub-release "MCP Server Binary"
+      # asset contain the runnable bundle. The npm publish step below
+      # runs prepack (rebuilds, idempotent) and postpack (restores the
+      # shim from git) — leaving the working tree clean.
+      - name: Build MCP server bundle for release artifacts
+        if: steps.commit.outputs.released == 'true'
+        run: npm run --prefix packages/haiku build
+        env:
+          SENTRY_DSN_REVIEW_SPA: ${{ steps.sentry.outputs.dsn_spa }}
+          HAIKU_SENTRY_DSN_MCP: ${{ steps.sentry.outputs.dsn_mcp }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: https://sentry.ops.gigsmart.com
+          SENTRY_ORG: gigsmart
 
       - name: Package plugin
         if: steps.commit.outputs.released == 'true'

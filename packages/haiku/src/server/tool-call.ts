@@ -50,6 +50,7 @@ import {
 	listVisibleIntents,
 	parseFrontmatter,
 } from "../state-tools.js"
+import { orchestratorToolHandlers } from "../tools/orchestrator/index.js"
 import {
 	buildReviewUrl,
 	clearE2EKey,
@@ -239,15 +240,11 @@ export async function handleToolCall(
 ) {
 	const { name, arguments: args } = request.params
 
-	// Orchestration tools (async — gate_ask blocks until user reviews)
-	if (
-		name === "haiku_run_next" ||
-		name === "haiku_intent_create" ||
-		name === "haiku_select_studio" ||
-		name === "haiku_intent_reset" ||
-		name === "haiku_intent_archive" ||
-		name === "haiku_intent_unarchive"
-	) {
+	// Orchestration tools (async — gate_ask blocks until user reviews).
+	// The set of orchestrator tools is sourced from the registry
+	// (`orchestratorToolHandlers`) so any new tool added under
+	// tools/orchestrator/ auto-routes here without a second registration.
+	if (orchestratorToolHandlers.has(name)) {
 		return handleOrchestratorTool(
 			name,
 			(args ?? {}) as Record<string, unknown>,

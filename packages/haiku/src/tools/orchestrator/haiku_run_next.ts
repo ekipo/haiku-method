@@ -38,6 +38,7 @@ import {
 	buildRunInstructions,
 	completeOrReviewIntent,
 	enrichActionWithPreview,
+	findIncompleteStages,
 	getElicitInput,
 	getOpenReviewAndWait,
 	isStagePreExecute,
@@ -338,6 +339,25 @@ export default defineTool({
 						const studioForCompletion =
 							(readFrontmatter(join(intentDir(slug), "intent.md"))
 								.studio as string) || ""
+						// Guard: all declared stages must be completed before sealing.
+						// This prevents the engine from marking an intent complete when
+						// the agent stopped calling haiku_run_next mid-workflow (e.g.,
+						// operations/security stages never ran because development's gate
+						// returned advance_stage and the agent never looped back).
+						const incompleteStages = findIncompleteStages(
+							slug,
+							studioForCompletion,
+						)
+						if (incompleteStages.length > 0) {
+							return text(
+								withInstructions({
+									action: "error",
+									intent: slug,
+									message: `Cannot complete intent '${slug}': the following stages have not completed: [${incompleteStages.join(", ")}]. Run those stages to completion before approving intent_completion.`,
+									incomplete_stages: incompleteStages,
+								}),
+							)
+						}
 						workflowIntentComplete(slug)
 						syncSessionMetadata(slug, args.state_file as string | undefined)
 						const gateResult = {
@@ -413,7 +433,15 @@ export default defineTool({
 					return text(withInstructions(gateResult))
 				}
 				if (reviewResult.decision === "external_review") {
-					workflowCompleteStage(slug, stage, "blocked")
+					// Mark the stage truly complete on its branch BEFORE the
+					// PR opens (status=completed, gate_outcome=advanced,
+					// completed_at). The PR then carries the final per-stage
+					// state to intent main on merge — no post-merge cleanup
+					// commit is needed. The gate handler's reconciliation
+					// block (gate.ts) will only advance active_stage once
+					// the branch is merged into intent main; the merge IS
+					// the user's only remaining action for this stage.
+					workflowCompleteStage(slug, stage, "advanced")
 					syncSessionMetadata(slug, args.state_file as string | undefined)
 					const gateResult = {
 						action: "external_review_requested",
@@ -421,8 +449,8 @@ export default defineTool({
 						stage,
 						feedback: reviewResult.feedback,
 						message: isGitRepo()
-							? `External review requested. Open ONE merge request from branch 'haiku/${slug}/${stage}' to 'haiku/${slug}/main'. Do NOT open separate MRs for individual units — all unit work is already merged into the stage branch. Include the H·AI·K·U browse link in the description so reviewers can see the intent, units, and knowledge artifacts. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after approval.`
-							: `External review requested. Submit the work for review through your project's review process. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after approval.`,
+							? `External review requested. Open ONE merge request from branch 'haiku/${slug}/${stage}' to 'haiku/${slug}/main'. Do NOT open separate MRs for individual units — all unit work is already merged into the stage branch. Include the H·AI·K·U browse link in the description so reviewers can see the intent, units, and knowledge artifacts. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after the PR is merged.`
+							: `External review requested. Submit the work for review through your project's review process. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after the PR is merged.`,
 					}
 					return text(withInstructions(gateResult))
 				}

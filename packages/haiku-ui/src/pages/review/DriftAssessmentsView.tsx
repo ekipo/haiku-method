@@ -42,6 +42,19 @@ import {
 	type RevisitState,
 } from "../../atoms/OutcomeBadge"
 
+/** A single per-file finding inside an Assessment record. The wire
+ *  shape comes from `runDriftDetectionGate`'s `DriftFinding` and is
+ *  carried through `haiku_classify_drift` into the on-disk DA-NN.json.
+ *  We only declare the fields the assessment view consumes. */
+export interface AssessmentFinding {
+	path: string
+	stage?: string | null
+	change_kind?: string
+	is_binary?: boolean
+	before_sha256?: string | null
+	after_sha256?: string | null
+}
+
 export interface AssessmentRecord {
 	/** Identifier of the form `DA-NN`. Drives row keys + the "Resolved /
 	 *  Pending revisit / Revisit invoked" lifecycle copy. */
@@ -59,6 +72,12 @@ export interface AssessmentRecord {
 	agent_rationale: string
 	/** Unified diff payload. Empty string for binary changes. */
 	diff_unified: string
+	/** Per-file findings carried from `runDriftDetectionGate`. Drives
+	 *  image-aware before/after preview rendering when a path's
+	 *  extension matches a known image kind. Optional because the older
+	 *  AssessmentRecord shape didn't expose this — older records on disk
+	 *  read fine without it. */
+	findings?: AssessmentFinding[]
 	/** Set when outcome === "surface-as-feedback". */
 	linked_feedback_id?: string
 	/** Set when outcome === "trigger-revisit" — drives the revisit-state
@@ -67,6 +86,35 @@ export interface AssessmentRecord {
 	/** Set when the linked PendingMarker has been cleared (revisit
 	 *  completed). When set, the SPA renders the "Resolved" badge. */
 	pending_marker_cleared_at?: string | null
+}
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg)$/i
+
+/** Path-extension heuristic — extension is unreliable on disk (a `.png`
+ *  may be a JPEG), but for routing decisions in the SPA the extension
+ *  is what tells us "render an `<img>` here." The engine separately
+ *  validates the actual bytes via magic-byte sniff before retaining
+ *  the sidecar; this check just gates the rendering path. */
+function isImagePath(path: string): boolean {
+	return IMAGE_EXT_RE.test(path)
+}
+
+/** Build the URL to a baseline-content sidecar for a given finding's
+ *  before- or after-side. Stage-scoped findings route through the
+ *  `stage` segment; intent-scope findings (stage === null) route
+ *  through `intent`. */
+function baselineContentUrl(
+	intentSlug: string,
+	finding: AssessmentFinding,
+	side: "before" | "after",
+): string | null {
+	const sha = side === "before" ? finding.before_sha256 : finding.after_sha256
+	if (!sha) return null
+	const intent = encodeURIComponent(intentSlug)
+	if (finding.stage === null || finding.stage === undefined) {
+		return `/api/intents/${intent}/baseline-content/intent/${sha}`
+	}
+	return `/api/intents/${intent}/baseline-content/stage/${encodeURIComponent(finding.stage)}/${sha}`
 }
 
 export interface CorruptAssessment {
@@ -289,6 +337,74 @@ function CorruptRow({
 	)
 }
 
+// Fallback covers null url + 404 (extension/bytes mismatch swallowed by
+// magic-byte sniff) so neither path leaves a broken-image icon.
+function ImageOrFallback({
+	url,
+	alt,
+}: {
+	url: string | null
+	alt: string
+}): React.ReactElement {
+	const [failed, setFailed] = useState(false)
+	if (!url || failed) {
+		return (
+			<p className="text-xs italic text-stone-500 dark:text-stone-400">
+				Preview not available.
+			</p>
+		)
+	}
+	return (
+		<img
+			src={url}
+			alt={alt}
+			onError={() => setFailed(true)}
+			className="block w-full h-auto rounded-md border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800"
+		/>
+	)
+}
+
+/** Render before/after thumbnails for an image-pathed finding. Uses
+ *  the baseline-content route for both sides — the engine writes the
+ *  after-sha sidecar at finding-emission time so the SPA can render
+ *  immediately, before the agent classifies. Falls back to "preview
+ *  not available" text when either side returns 404 (extension-vs-
+ *  bytes mismatch, deleted file, or engine from a pre-image version). */
+function ImageDiffPreview({
+	intentSlug,
+	finding,
+}: {
+	intentSlug: string
+	finding: AssessmentFinding
+}): React.ReactElement {
+	const beforeUrl = baselineContentUrl(intentSlug, finding, "before")
+	const afterUrl = baselineContentUrl(intentSlug, finding, "after")
+	return (
+		<div data-testid="image-diff-preview">
+			<p className="text-xs font-bold uppercase tracking-widest text-stone-500 dark:text-stone-400 mb-1">
+				Visual diff —{" "}
+				<code className="font-mono normal-case text-stone-600 dark:text-stone-300">
+					{finding.path}
+				</code>
+			</p>
+			<div className="grid grid-cols-2 gap-3">
+				<figure className="space-y-1">
+					<figcaption className="text-xs font-medium uppercase tracking-wider text-stone-500 dark:text-stone-400">
+						Before
+					</figcaption>
+					<ImageOrFallback url={beforeUrl} alt={`Before: ${finding.path}`} />
+				</figure>
+				<figure className="space-y-1">
+					<figcaption className="text-xs font-medium uppercase tracking-wider text-stone-500 dark:text-stone-400">
+						After
+					</figcaption>
+					<ImageOrFallback url={afterUrl} alt={`After: ${finding.path}`} />
+				</figure>
+			</div>
+		</div>
+	)
+}
+
 function AssessmentRow({
 	record,
 	intentSlug,
@@ -391,11 +507,22 @@ function AssessmentRow({
 								<code>{record.diff_unified}</code>
 							</pre>
 						</div>
-					) : (
-						<p className="text-xs italic text-stone-500 dark:text-stone-400">
-							No textual diff (binary or replaced artifact).
-						</p>
-					)}
+					) : null}
+					{(record.findings ?? [])
+						.filter((f) => isImagePath(f.path))
+						.map((f) => (
+							<ImageDiffPreview
+								key={f.path}
+								intentSlug={intentSlug}
+								finding={f}
+							/>
+						))}
+					{!record.diff_unified &&
+						!(record.findings ?? []).some((f) => isImagePath(f.path)) && (
+							<p className="text-xs italic text-stone-500 dark:text-stone-400">
+								No textual diff (binary or replaced artifact).
+							</p>
+						)}
 				</div>
 			)}
 		</li>

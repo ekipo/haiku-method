@@ -34,6 +34,7 @@ import {
 	isBaselineThrashing,
 	isBinarySync,
 	isDriftDetectionDisabled,
+	isImageBinarySync,
 	readActionLogSync,
 	readBaseline,
 	readBaselineAckMarker,
@@ -708,8 +709,13 @@ export function runDriftDetectionGate(
 			// No change — happy path. Lazily write the content sidecar so that
 			// "before" content is available the next time this file changes.
 			// Intent-scope entries (stageOwner === null) get a sidecar at the
-			// intent level to survive stage transitions.
-			if (!currentBinary && !baselineEntry.is_binary) {
+			// intent level to survive stage transitions. Images bypass the
+			// "is_binary" guard — opaque binaries (fonts, archives, PDFs)
+			// still skip because there's nothing useful to render diff-side.
+			const sidecarEligible =
+				(!currentBinary && !baselineEntry.is_binary) ||
+				isImageBinarySync(entry.absPath)
+			if (sidecarEligible) {
 				const isIntentScope = entry.stageOwner === null
 				const sidecarPath = isIntentScope
 					? baselineIntentContentPath(intentDir, currentSha)
@@ -746,12 +752,64 @@ export function runDriftDetectionGate(
 		}
 
 		// Determine author class from action log (ARCHITECTURE.md §6.2).
-		const logEntry = actionLogEntries.find(
-			(e) => e.path === entry.pathRel && e.entry_type === "human_write",
-		)
+		// `agent_write` (stamped by the stamp-agent-write PostToolUse hook
+		// when the agent uses Write/Edit/MultiEdit on a tracked-surface
+		// path) closes the bleed window where the agent's own edit to a
+		// human-originated file would otherwise inherit the baseline's
+		// `human-implicit` attribution. When the agent's stamped SHA
+		// matches the on-disk SHA, the agent has already accounted for
+		// the write — silently update the baseline and skip emitting a
+		// finding (the agent doesn't need to classify its own deliberate
+		// writes, the same way `haiku_unit_write` writes never enter the
+		// surface in the first place).
+		// Walk the log backwards (newest first) so the most recent entry
+		// per type wins. The action log is append-only, so on a multi-
+		// tick or same-tick re-write the *latest* SHA is what matches the
+		// on-disk bytes. Earlier rev used `Array.find` which returned the
+		// oldest match — that broke same-tick double-writes (agent
+		// stamps SHA_A then SHA_B; current bytes are SHA_B; find picked
+		// SHA_A; SHA mismatch → false positive) and cross-tick intent-
+		// scope writes through `readIntentScopeActionLogSync` (which
+		// unions every tick's entries). `findLast` would be cleaner but
+		// requires ES2023 lib; this hand-rolled loop works on the
+		// current ES2022 target.
+		let humanLogEntry: (typeof actionLogEntries)[number] | undefined
+		let agentLogEntry: (typeof actionLogEntries)[number] | undefined
+		for (let i = actionLogEntries.length - 1; i >= 0; i--) {
+			const e = actionLogEntries[i]
+			if (e.path !== entry.pathRel) continue
+			if (!humanLogEntry && e.entry_type === "human_write") humanLogEntry = e
+			else if (!agentLogEntry && e.entry_type === "agent_write")
+				agentLogEntry = e
+			if (humanLogEntry && agentLogEntry) break
+		}
+		if (!humanLogEntry && agentLogEntry && agentLogEntry.sha === currentSha) {
+			// Agent stamped this write and the file still matches that SHA —
+			// silently absorb into the baseline, no finding emitted. The
+			// `markBaselineDirty + writeBaselineSync` post-loop already
+			// covers the persistence side.
+			baseline.entries.set(entry.pathRel, {
+				...baselineEntry,
+				sha256: currentSha,
+				bytes: currentBytes,
+				mtime_ns: currentMtimeNs,
+				is_binary: currentBinary,
+				author_class: "agent",
+				acknowledged_at: new Date().toISOString(),
+				acknowledged_via: "agent-write",
+			})
+			baselineDirty = true
+			continue
+		}
 		// authorClass is carried into the finding so the assessment handler
 		// can populate the DriftFinding and Assessment records accurately.
-		const authorClass = logEntry ? "human-via-mcp" : baselineEntry.author_class
+		// Priority: human_write (MCP) > agent_write (stale, e.g. agent wrote
+		// then human re-edited) > baseline fallback.
+		const authorClass = humanLogEntry
+			? "human-via-mcp"
+			: agentLogEntry
+				? "agent"
+				: baselineEntry.author_class
 
 		// Build diff for text files. Write a lazy sidecar for unchanged files
 		// so "before" content is available when the file eventually changes.
@@ -765,6 +823,33 @@ export function runDriftDetectionGate(
 					entry.absPath,
 				)
 			: null
+
+		// For image findings, persist the after-side bytes to a sidecar
+		// addressed by the new SHA so the SPA's assessment view can render
+		// before/after thumbnails immediately — without waiting for
+		// classification to update the baseline. Cheap (one fs write per
+		// modified image), and the bytes are already in memory's path
+		// (we just hashed them). Skips text files (the unified diff is
+		// the visual diff) and opaque binaries (nothing to render).
+		if (currentBinary && isImageBinarySync(entry.absPath)) {
+			const isIntentScope = entry.stageOwner === null
+			const afterSidecar = isIntentScope
+				? baselineIntentContentPath(intentDir, currentSha)
+				: baselineContentPath(intentDir, activeStage, currentSha)
+			if (!existsSync(afterSidecar)) {
+				try {
+					const buf = readFileSync(entry.absPath)
+					if (isIntentScope) {
+						writeBaselineIntentContentSync(intentDir, currentSha, buf)
+					} else {
+						writeBaselineContentSync(intentDir, activeStage, currentSha, buf)
+					}
+				} catch {
+					// Non-fatal — the SPA will fall back to "image preview not
+					// available" if the after-sidecar is absent.
+				}
+			}
+		}
 
 		findings.push({
 			path: entry.pathRel,

@@ -2414,7 +2414,16 @@ export function getIntentScopeTickCounter(intentDirAbsPath: string): number {
  * runs against the parent's (still stale) copy and false-reports missing.
  */
 export function unitIntentDir(slug: string, unit: string): string {
-	const workTreePath = join(findHaikuRoot(), "worktrees", slug, unit)
+	// Unit worktrees live under the primary repo's `.haiku/worktrees/`,
+	// not the local view from a Claude Code worktree. See
+	// `getUnitWorktreeChanges` for the same convention.
+	const workTreePath = join(
+		primaryRepoRoot(),
+		".haiku",
+		"worktrees",
+		slug,
+		unit,
+	)
 	const workTreeIntentDir = join(workTreePath, ".haiku", "intents", slug)
 	if (existsSync(workTreeIntentDir)) return workTreeIntentDir
 	return intentDir(slug)
@@ -2432,7 +2441,8 @@ export function unitOutputExists(
 	// Intent-relative: main intent dir or the unit worktree's intent dir.
 	const mainResolved = resolve(intentDir(slug), outputPath)
 	if (existsSync(mainResolved)) return true
-	const wtRoot = join(findHaikuRoot(), "worktrees", slug, unit)
+	// Unit worktrees live under the primary repo (see unitIntentDir).
+	const wtRoot = join(primaryRepoRoot(), ".haiku", "worktrees", slug, unit)
 	const wtIntentDir = join(wtRoot, ".haiku", "intents", slug)
 	if (existsSync(wtIntentDir)) {
 		const wtResolved = resolve(wtIntentDir, outputPath)
@@ -2533,7 +2543,17 @@ function getUnitWorktreeChanges(
 ): string[] | null {
 	if (!isGitRepo()) return null
 	const unitBase = unit.replace(/\.md$/, "")
-	const worktreePath = join(findHaikuRoot(), "worktrees", slug, unitBase)
+	// Unit worktrees always live under the primary repo's `.haiku/worktrees/`
+	// — never under a nested Claude Code worktree's view of `.haiku/`.
+	// Mirrors the convention `primaryRepoRoot()` already enforces for
+	// `.claude/worktrees/`.
+	const worktreePath = join(
+		primaryRepoRoot(),
+		".haiku",
+		"worktrees",
+		slug,
+		unitBase,
+	)
 	if (!existsSync(worktreePath)) return null
 	try {
 		const unitBranch = `haiku/${slug}/${unitBase}`
@@ -3875,9 +3895,15 @@ export function setUnitFrontmatterField(
 ): void {
 	const parentPath = unitPath(slug, stage, unit)
 	if (existsSync(parentPath)) setFrontmatterField(parentPath, field, value)
-	// findHaikuRoot() returns the `.haiku` directory itself; worktrees live
-	// under `<haikuRoot>/worktrees/{slug}/{unit}`.
-	const worktreeBase = join(findHaikuRoot(), "worktrees", slug, unit)
+	// Unit worktrees live under the primary repo's `.haiku/worktrees/`
+	// (see unitIntentDir / getUnitWorktreeChanges for the same convention).
+	const worktreeBase = join(
+		primaryRepoRoot(),
+		".haiku",
+		"worktrees",
+		slug,
+		unit,
+	)
 	if (!existsSync(worktreeBase)) return
 	const worktreeUnitPath = join(
 		worktreeBase,
@@ -6780,7 +6806,15 @@ export function handleStateTool(
 			if (existsSync(path)) {
 				const { data: currentFm } = parseFrontmatter(readFileSync(path, "utf8"))
 				const currentStatus = (currentFm.status as string) || "pending"
-				if (currentStatus === "active" || currentStatus === "completed") {
+				// `outputs` is exempt from the lifecycle gate: advance_hat's own
+				// autoPopulateOutputs writes it during the active phase, so the
+				// agent must be able to do the same when auto-detect fails (e.g.
+				// unit worktree not reachable from the stage worktree CWD).
+				const isLifecycleMutable = field === "outputs"
+				if (
+					!isLifecycleMutable &&
+					(currentStatus === "active" || currentStatus === "completed")
+				) {
 					return reply(
 						{
 							error: "lifecycle_violation",

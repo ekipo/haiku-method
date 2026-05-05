@@ -13,7 +13,7 @@
 // `handlers/index.ts` maps state names to handlers. Adding a new
 // state name = adding the entry to the registry + the file.
 
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { broadcastIntent } from "../../intent-broadcaster.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
@@ -99,16 +99,38 @@ function broadcastTick(
 	return result
 }
 
+/** Persist the most recent action's name to `.last_action.json` for
+ *  the Stop hook's "should I block?" decision. Best-effort — the
+ *  sentinel is out-of-band; a write failure must never abort a tick. */
+function writeLastActionSentinel(result: WorkflowTickResult): void {
+	if (!result.action) return
+	try {
+		writeFileSync(
+			join(result.context.intentDirPath, ".last_action.json"),
+			`${JSON.stringify({ name: result.action.action, at: new Date().toISOString() })}\n`,
+		)
+	} catch {
+		/* best-effort sentinel; never fail the tick */
+	}
+}
+
 /** Run one workflow tick for an intent. Wrapper that fans out a
  *  `tick_committed` event to any SPA tab subscribed to this intent's
- *  live-state channel before returning. Returns null only when the
+ *  live-state channel and writes the `last_action` sentinel before
+ *  returning. Doing both in the wrapper guarantees every tick path —
+ *  including early-return gates like `manual_change_assessment` and
+ *  `upstream_reconciliation_required` — produces the same out-of-band
+ *  state that the Stop hook depends on. Returns null only when the
  *  intent doesn't exist on disk. */
 export function runWorkflowTick(
 	slug: string,
 	root?: string,
 ): WorkflowTickResult | null {
 	const result = runWorkflowTickInner(slug, root)
-	if (result) broadcastTick(slug, result)
+	if (result) {
+		writeLastActionSentinel(result)
+		broadcastTick(slug, result)
+	}
 	return result
 }
 
@@ -308,6 +330,10 @@ function runWorkflowTickInner(
 	}
 
 	const action = dispatchHandler(derived.state, derived.context, root)
+
+	// `.last_action.json` is written by the outer `runWorkflowTick`
+	// wrapper so every early-return path above also persists the
+	// sentinel, not just this main dispatch path.
 
 	return {
 		state: derived.state,

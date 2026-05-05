@@ -2370,6 +2370,37 @@ export function mergeDiscoveryWorktree(
 			])
 		}
 		if (onBaseBranch) {
+			// Discovery branches commit engine-owned state inside
+			// `.haiku/intents/{slug}/` (action-log.jsonl, baseline.json).
+			// If the base worktree has those same files untracked or modified,
+			// `git merge` aborts with "untracked working tree files would be
+			// overwritten" — a non-conflict error the caller silently swallows,
+			// re-emitting the same fan-out instructions every tick. Snapshot
+			// any pending engine state first so the merge has a clean tree.
+			const intentDir = `.haiku/intents/${slug}`
+			tryRun(["git", "add", "--", intentDir])
+			const staged = tryRun([
+				"git",
+				"diff",
+				"--cached",
+				"--name-only",
+				"--",
+				intentDir,
+			])
+			if (staged) {
+				// Use `run()` (not `tryRun()`) so a commit failure (pre-commit
+				// hook rejection, index lock, etc.) surfaces the real error via
+				// the outer try/catch rather than silently falling through to
+				// `mergeHere()` with staged-but-uncommitted files (which would
+				// produce a confusing "you have uncommitted changes" merge
+				// error instead of the actual commit failure cause).
+				run([
+					"git",
+					"commit",
+					"-m",
+					`haiku: snapshot engine state before merging discovery ${template} into ${stage}`,
+				])
+			}
 			mergeHere()
 		} else {
 			withWorktreeOnBranch(baseBranch, (tmpPath) => mergeHere(tmpPath))

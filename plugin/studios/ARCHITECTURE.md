@@ -289,7 +289,8 @@ When all pre-advance checks pass, the tick emits one mainline action describing 
 | `pre_review` | Pre-execute review of unit specs | Spawn review-agent subagents |
 | `start_units` | First wave of unit dispatch | Spawn N subagents in parallel |
 | `continue_units` | Mid-wave continuation (refill or new wave) | Spawn the dispatched subagents |
-| `review` | Adversarial review of stage outputs | Spawn review-agent subagents |
+| `spec_review` | Engine-owned spec-conformance gate (universal hard gate, runs before quality review on every stage) | Spawn the single built-in spec-conformance subagent (no per-studio mandate file, no opt-out); advance to gate for fix loop if findings filed. |
+| `review` | Quality adversarial review of stage outputs | Spawn quality review-agent subagents |
 | `review_fix` | Fix loop against open findings | Spawn fix-chain subagents (per-finding chains) |
 | `gate_review` | Stage gate (human or external approval) | (engine blocks; agent may surface to user) |
 | `advance_phase` | Phase boundary internal to a stage | Acknowledge, retick |

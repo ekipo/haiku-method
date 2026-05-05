@@ -440,6 +440,8 @@ const emit: WorkflowHandler = (ctx) => {
 		gateState.pre_review_skipped_no_agents = false
 		gateState.pre_review_reviewers_acknowledged = false
 		gateState.pre_review_reviewers_acknowledged_at = null
+		gateState.spec_review_dispatched = false
+		gateState.quality_review_dispatched = false
 		writeJson(statePath, gateState)
 		gitCommitState(
 			`haiku: feedback_revisit in ${currentStage} (${pendingCount} pending, iteration ${iterResult.count})`,
@@ -454,6 +456,32 @@ const emit: WorkflowHandler = (ctx) => {
 			visits: iterResult.count,
 			pending_items: pendingItems.map(summarizeFeedback),
 			message: `${pendingCount} pending feedback item(s) found — rolling back to elaborate (iteration ${iterResult.count}). YOU MUST read every feedback file at pending_items[].file in full before elaborating — the body carries the requirements. Address all pending feedback before the gate can advance.`,
+		}
+	}
+
+	// ── Spec-gate: reset to review phase for quality review ────────────
+	// When the engine spec_review subagent ran (spec_review_dispatched=true)
+	// but quality review hasn't fired yet (quality_review_dispatched
+	// unset/false), reset the stage phase to "review" so the review handler
+	// can dispatch quality agents on the next tick.
+	{
+		const specDispatched = stageState.spec_review_dispatched === true
+		const qualityDispatched = stageState.quality_review_dispatched === true
+		if (specDispatched && !qualityDispatched) {
+			const statePath = stageStatePath(slug, currentStage)
+			const stateData = readJson(statePath)
+			stateData.phase = "review"
+			writeJson(statePath, stateData)
+			gitCommitState(
+				`haiku: spec gate passed — reset to review for quality review in ${currentStage}`,
+			)
+			return {
+				action: "advance_phase",
+				intent: slug,
+				stage: currentStage,
+				to_phase: "review",
+				message: `Spec conformance gate passed for stage '${currentStage}' — resetting to review phase for quality review. Call \`haiku_run_next { intent: "${slug}" }\` immediately.`,
+			}
 		}
 	}
 

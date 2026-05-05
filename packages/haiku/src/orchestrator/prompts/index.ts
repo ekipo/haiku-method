@@ -54,6 +54,7 @@ import revise_unit_specs from "./revise_unit_specs.js"
 import revisited from "./revisited.js"
 import safe_intent_repair from "./safe_intent_repair.js"
 import select_studio from "./select_studio.js"
+import spec_review from "./spec_review.js"
 import start_stage from "./start_stage.js"
 import start_unit from "./start_unit.js"
 import start_units from "./start_units.js"
@@ -101,6 +102,7 @@ export const actionPromptBuilders: ReadonlyMap<string, PromptBuilder> = new Map<
 	["pre_review", pre_review],
 	["pre_review_waiting", pre_review_waiting],
 	["review", review],
+	["spec_review", spec_review],
 	["review_fix", review_fix],
 	["revise_unit_specs", revise_unit_specs],
 	["revisited", revisited],

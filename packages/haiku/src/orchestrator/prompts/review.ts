@@ -30,6 +30,9 @@ export default definePromptBuilder(({ slug, studio, action }) => {
 	sections.push(WORKFLOW_CONTRACTS_REVIEW_BLOCK)
 
 	// Collect agent name → mandate FILE PATH.
+	// Spec conformance runs earlier as an engine phase (`spec_review` action,
+	// see prompts/spec_review.ts), not as a studio-level review agent — so
+	// every agent in `review-agents/` is a quality reviewer and fires here.
 	let agentPaths: Record<string, string> = readReviewAgentPaths(studio, stage)
 
 	// Cross-stage includes (review-agents-include on STAGE.md).

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] - 2026-05-05
+
+### Added
+- Discovery templates now support model configuration, allowing you to specify which Claude version generates research artifacts and analysis for each stage.
+- Studio integrators and cross-studio decisions now support model configuration for unified governance across multiple studios.
+
+### Changed
+- Model selection now applies consistently across research, review, and decision phases throughout the workflow.
+
 ## [3.10.0] - 2026-05-05
 
 ### Added

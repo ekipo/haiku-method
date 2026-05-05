@@ -17,7 +17,12 @@
 // Deriving here would close the import cycle and TDZ-trip the registry's
 // const exports. The contract test is the safe alternative.
 
-import { HAIKU_AWAIT_GATE_INPUT_SCHEMA } from "../state/schemas/index.js"
+import {
+	HAIKU_AWAIT_GATE_INPUT_SCHEMA,
+	HAIKU_SELECT_MODE_INPUT_SCHEMA,
+	HAIKU_SELECT_STAGE_INPUT_SCHEMA,
+	HAIKU_SELECT_STUDIO_INPUT_SCHEMA,
+} from "../state/schemas/index.js"
 import { jsonSchemaOf } from "../state/schemas/inputs/_validate.js"
 
 export const orchestratorToolDefs = [
@@ -66,7 +71,7 @@ export const orchestratorToolDefs = [
 	{
 		name: "haiku_intent_create",
 		description:
-			'Create a new H·AI·K·U intent. Studio selection happens separately via haiku_select_studio. You must provide BOTH a crisp `title` (3–8 words, ≤80 chars, single line, no trailing punctuation — e.g. "Add archivable intents") AND a richer `description` (2–5 sentences covering scope, motivation, and constraints). The title is NOT derived from the description — write it deliberately as a human-readable summary.',
+			'Create a new H·AI·K·U intent. Studio, mode, and (for quick) stage are selected separately via the engine-controlled elicitation chain (haiku_select_studio → haiku_select_mode → optional haiku_select_stage). You must provide BOTH a crisp `title` (3–8 words, ≤80 chars, single line, no trailing punctuation — e.g. "Add archivable intents") AND a richer `description` (2–5 sentences covering scope, motivation, and constraints). The title is NOT derived from the description — write it deliberately as a human-readable summary. The agent never sets `mode` or `stages` — those flow through elicitation tools so the user picks them.',
 		inputSchema: {
 			type: "object" as const,
 			properties: {
@@ -90,39 +95,28 @@ export const orchestratorToolDefs = [
 					description:
 						"Conversation context summary — highlights from the conversation that led to this intent",
 				},
-				mode: {
-					type: "string",
-					description:
-						"Execution mode: continuous (stages auto-advance, follow STAGE.md gates), discrete (every stage gate becomes external PR/MR), or autopilot (every per-stage gate auto-advances; only the final intent-completion gate opens a delivery PR). Defaults to continuous.",
-					enum: ["continuous", "discrete", "autopilot"],
-				},
-				stages: {
-					type: "array",
-					items: { type: "string" },
-					description:
-						"Explicit stage list — overrides the studio's default stages. Use to run a subset of stages (e.g. just ['development'] for quick tasks).",
-				},
 			},
 			required: ["title", "description"],
+			additionalProperties: false,
 		},
 	},
 	{
 		name: "haiku_select_studio",
 		description:
 			"Select or change the studio for an intent. Uses elicitation to present studio options. Cannot be used after the intent has entered any stage.",
-		inputSchema: {
-			type: "object" as const,
-			properties: {
-				intent: { type: "string", description: "Intent slug" },
-				options: {
-					type: "array",
-					items: { type: "string" },
-					description:
-						"Studio names to present. Empty or omitted = all studios. Single item = auto-select.",
-				},
-			},
-			required: ["intent"],
-		},
+		inputSchema: jsonSchemaOf(HAIKU_SELECT_STUDIO_INPUT_SCHEMA),
+	},
+	{
+		name: "haiku_select_mode",
+		description:
+			"Select an execution mode for an intent. Uses elicitation to present mode options. Engine-managed — agents never write `mode` directly; this tool is the only way to set or change it. Side effects: writes `mode` to intent.md; for non-quick modes also writes `stages` (the studio's full stage list). For quick mode, leaves `stages` empty so the workflow routes to select_stage next. Refuses transitions into or out of `quick` once the intent has started a stage.",
+		inputSchema: jsonSchemaOf(HAIKU_SELECT_MODE_INPUT_SCHEMA),
+	},
+	{
+		name: "haiku_select_stage",
+		description:
+			"Select the single stage for a quick-mode intent. Uses elicitation to present the studio's stage list. Refuses if the intent's mode is not `quick` or if a stage is already set.",
+		inputSchema: jsonSchemaOf(HAIKU_SELECT_STAGE_INPUT_SCHEMA),
 	},
 	{
 		name: "haiku_intent_reset",

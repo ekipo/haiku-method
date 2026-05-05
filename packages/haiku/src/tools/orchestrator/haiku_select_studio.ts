@@ -18,6 +18,15 @@ import { join } from "node:path"
 import { ensureOnStageBranch } from "../../git-worktree.js"
 import { getElicitInput, resolveStudioStages } from "../../orchestrator.js"
 import {
+	HAIKU_SELECT_STUDIO_INPUT_SCHEMA,
+	type HaikuSelectStudioInput,
+	validateHaikuSelectStudioInputSchema,
+} from "../../state/schemas/index.js"
+import {
+	jsonSchemaOf,
+	validateToolInput,
+} from "../../state/schemas/inputs/_validate.js"
+import {
 	findHaikuRoot,
 	gitCommitState,
 	parseFrontmatter,
@@ -40,16 +49,16 @@ export default defineTool({
 	name: "haiku_select_studio",
 	description:
 		"Select a studio for an intent. Pass the intent slug and optionally a list of studio names to limit the selection. If only one option is provided, auto-selects it. If elicitation is available, prompts the user; otherwise returns the studio list for conversational selection. Refuses if the intent has already entered a stage.",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			intent: { type: "string" },
-			options: { type: "array", items: { type: "string" } },
-		},
-		required: ["intent"],
-	},
+	inputSchema: jsonSchemaOf(HAIKU_SELECT_STUDIO_INPUT_SCHEMA),
 	async handle(args) {
-		const slug = args.intent as string
+		const inputErr = validateToolInput(
+			args,
+			validateHaikuSelectStudioInputSchema,
+			"haiku_select_studio",
+		)
+		if (inputErr) return inputErr
+		const validated = args as HaikuSelectStudioInput
+		const slug = validated.intent
 		const root = findHaikuRoot()
 		const iDir = join(root, "intents", slug)
 		const intentFile = join(iDir, "intent.md")
@@ -97,7 +106,7 @@ export default defineTool({
 			}
 		}
 
-		const options = (args.options as string[] | undefined) || []
+		const options = validated.options ?? []
 		// selectedStudio stores the directory name (stable on-disk
 		// identifier) — UI displays the canonical `name`, but everything
 		// downstream reads by `dir`.
@@ -280,35 +289,16 @@ export default defineTool({
 			}
 		}
 
-		// Update intent.md with selected studio — only set stages if not
-		// already overridden.
-		const intentFmCheck = readFrontmatter(intentFile)
-		const existingStages = intentFmCheck.stages as string[] | undefined
+		// Update intent.md with selected studio. `stages` is no longer
+		// touched here — it's owned by haiku_select_mode (full studio
+		// list for non-quick modes) or haiku_select_stage (single-stage
+		// allow-list for quick mode). Setting `stages` from studio
+		// selection skipped the mode elicitation, which is exactly the
+		// orientation Tara fell into ("inception only in discrete" →
+		// engine never asked for mode, agent dictated discrete itself).
 		const allStudioStages = resolveStudioStages(selectedStudio)
 
-		if (existingStages && existingStages.length > 0) {
-			const invalid = existingStages.filter((s) => !allStudioStages.includes(s))
-			if (invalid.length > 0) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Invalid stages for studio '${selectedStudio}': ${invalid.join(", ")}. Available stages: ${allStudioStages.join(", ")}`,
-						},
-					],
-					isError: true,
-				}
-			}
-		}
-
-		const activeStages =
-			existingStages && existingStages.length > 0
-				? existingStages // stages were set at creation time (e.g. quick mode)
-				: allStudioStages
 		setFrontmatterField(intentFile, "studio", selectedStudio)
-		if (!existingStages || existingStages.length === 0) {
-			setFrontmatterField(intentFile, "stages", activeStages)
-		}
 
 		gitCommitState(`haiku: select studio ${selectedStudio} for intent ${slug}`)
 		emitTelemetry("haiku.studio.selected", {
@@ -322,9 +312,8 @@ export default defineTool({
 					action: "studio_selected",
 					intent: slug,
 					studio: selectedStudio,
-					stages: activeStages,
 					all_studio_stages: allStudioStages,
-					message: `Studio '${selectedStudio}' selected for intent '${slug}'. Call haiku_run_next { intent: "${slug}" } to begin.`,
+					message: `Studio '${selectedStudio}' selected for intent '${slug}'. Call haiku_run_next { intent: "${slug}" } — the workflow engine will elicit mode next.`,
 				},
 				null,
 				2,

@@ -119,8 +119,53 @@ test("no studio → select_studio", () => {
 	assert.strictEqual(result.context.studio, "")
 })
 
-test("studio set, no active_stage → start_stage", () => {
+test("studio set, no mode → select_mode", () => {
 	const { haikuRoot, cleanup } = fixture("test", { studio: "software" })
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "select_mode")
+	assert.strictEqual(result.context.studio, "software")
+})
+
+test("mode=quick, no stages → select_stage", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "quick",
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "select_stage")
+})
+
+test("mode=quick, stages set → intent_review", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "quick",
+		stages: ["design"],
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "intent_review")
+})
+
+test("studio + mode set, no active_stage, not yet reviewed → intent_review", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "continuous",
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "intent_review")
+	assert.strictEqual(result.context.studio, "software")
+	assert.strictEqual(result.context.currentStage, "")
+})
+
+test("studio + mode set, no active_stage, intent_reviewed=true → start_stage", () => {
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "continuous",
+		intent_reviewed: true,
+	})
 	const result = deriveCurrentState("test", haikuRoot)
 	cleanup()
 	assert.strictEqual(result.state, "start_stage")
@@ -128,19 +173,21 @@ test("studio set, no active_stage → start_stage", () => {
 	assert.strictEqual(result.context.currentStage, "")
 })
 
-test("intent.phase=intent_review → gate_review", () => {
+test("intent.phase=intent_review → intent_review", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
+		mode: "continuous",
 		phase: "intent_review",
 	})
 	const result = deriveCurrentState("test", haikuRoot)
 	cleanup()
-	assert.strictEqual(result.state, "gate_review")
+	assert.strictEqual(result.state, "intent_review")
 })
 
 test("intent.phase=intent_completion (not dispatched) → intent_completion_review", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
+		mode: "continuous",
 		phase: "intent_completion",
 	})
 	const result = deriveCurrentState("test", haikuRoot)
@@ -151,6 +198,7 @@ test("intent.phase=intent_completion (not dispatched) → intent_completion_revi
 test("intent.phase=intent_completion + dispatched → intent_completion_fix", () => {
 	const { haikuRoot, cleanup } = fixture("test", {
 		studio: "software",
+		mode: "continuous",
 		phase: "intent_completion",
 		completion_review_dispatched: true,
 	})
@@ -238,6 +286,64 @@ test("unknown phase → error", () => {
 	const result = deriveCurrentState("test", haikuRoot)
 	cleanup()
 	assert.strictEqual(result.state, "error")
+})
+
+console.log("\n=== Backward compat (pre-elicitation-chain intents on disk) ===")
+
+test("legacy intent with mode + stages already set → routes past select_mode", () => {
+	// Existing intents on disk (created before the elicitation chain
+	// shipped) carry `mode` and `stages` in their frontmatter. The
+	// derive-state branches must accept those values as authoritative
+	// rather than re-routing to select_mode every tick. If they
+	// didn't, every existing user would be stuck in a select_mode
+	// loop after the upgrade — the worst possible regression.
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "continuous",
+		stages: ["inception", "design", "product"],
+		intent_reviewed: true,
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "start_stage")
+})
+
+test("legacy intent in mid-stage execute → still routes to execute", () => {
+	// Same backward-compat guarantee for an intent that's already
+	// mid-stage. The new states must NOT short-circuit ticks that
+	// were already past pre-stage when the upgrade lands.
+	const { haikuRoot, cleanup } = fixture(
+		"test",
+		{
+			studio: "software",
+			mode: "continuous",
+			stages: ["development"],
+			active_stage: "development",
+			intent_reviewed: true,
+		},
+		{ development: { status: "active", phase: "execute" } },
+	)
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "execute")
+	assert.strictEqual(result.context.currentStage, "development")
+})
+
+test("legacy quick-style intent with stages: ['inception'] but no mode → still routes correctly", () => {
+	// The /haiku:quick skill on the OLD shape wrote `mode: continuous`
+	// + `stages: ['<one-stage>']`. Those intents must still load —
+	// derive-state sees mode set, doesn't fire select_mode, and
+	// because stages is non-empty doesn't fire select_stage either.
+	// Falls through to intent_review (or start_stage if reviewed).
+	const { haikuRoot, cleanup } = fixture("test", {
+		studio: "software",
+		mode: "continuous",
+		stages: ["inception"],
+		intent_reviewed: true,
+	})
+	const result = deriveCurrentState("test", haikuRoot)
+	cleanup()
+	assert.strictEqual(result.state, "start_stage")
 })
 
 console.log("\n=== Context shape ===")

@@ -1212,6 +1212,18 @@ export async function prepareGateReviewSession(
 	}
 }
 
+// Exported for unit testing — the spawn-based browser launch is hard to assert against directly.
+export function shouldLaunchReviewBrowser(
+	autoOpen: boolean,
+	reviewUrl: string | undefined,
+	sessionId: string,
+): boolean {
+	if (!autoOpen) return false
+	if (!reviewUrl) return false
+	if (isBrowserAttached(sessionId)) return false
+	return true
+}
+
 export async function awaitGateReviewSession(
 	sessionId: string,
 	opts: {
@@ -1241,7 +1253,9 @@ export async function awaitGateReviewSession(
 	// propagates `signal` to unwind the await promptly; the SPA stays
 	// connected and the next agent tick can call haiku_await_gate
 	// again.
-	if (autoOpen && reviewUrl) launchBrowserBestEffort(reviewUrl, "Review gate")
+	if (shouldLaunchReviewBrowser(autoOpen, reviewUrl, sessionId)) {
+		launchBrowserBestEffort(reviewUrl as string, "Review gate")
+	}
 
 	// Drain queued decision on entry. The SPA may have submitted while
 	// no await was open (e.g., user reviewed and clicked before the

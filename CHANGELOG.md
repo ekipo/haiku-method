@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.0] - 2026-05-05
+
+### Added
+
+- Choose operating mode (discrete, continuous, or hybrid) when creating an intent, with constraints enforced based on the selected studio.
+- Select which stage to start in before advancing from elaboration, enabling flexible entry points into staged workflows.
+- New `/haiku:change-mode` skill to switch between discrete and continuous modes during an active intent.
+- Automatic recovery from dirty tree conflicts when the workflow encounters uncommitted local changes, reducing manual intervention.
+
+### Changed
+
+- Intent creation now includes a validation gate that reviews the intent specification before advancing to the first stage.
+- Elaborate phase prompts now inject structured discovery and output template guidance directly into the agent's tool-use result, eliminating separate discovery dispatch steps.
+- Operating mode is now a mutable, schema-enforced field on the intent, allowing mid-workflow adjustments without recreating the intent.
+
+### Fixed
+
+- Workflow no longer gets stuck when local branches conflict with remote state during multi-stage execution.
+
 ## [3.13.1] - 2026-05-05
 
 ### Changed

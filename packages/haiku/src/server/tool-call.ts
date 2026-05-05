@@ -17,6 +17,7 @@ import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 import { ensureOnStageBranch } from "../git-worktree.js"
 import { closeSessionConnection, startHttpServer } from "../http.js"
+import type { ParsedUnit } from "../index.js"
 import {
 	buildDAG,
 	parseAllUnits,
@@ -29,6 +30,7 @@ import {
 	toMermaidDefinition,
 } from "../index.js"
 import { handleOrchestratorTool } from "../orchestrator.js"
+import { buildOutputDeclaredBy } from "../output-declared-by.js"
 import { isSentryConfigured, reportFeedback } from "../sentry.js"
 import type { DesignArchetypeData, QuestionDef } from "../sessions.js"
 import {
@@ -42,6 +44,9 @@ import {
 	hasPresenceLost,
 	waitForSession,
 } from "../sessions.js"
+import { buildStageArtifactUrl } from "../stage-artifact-url.js"
+import { validateHaikuReviewOpenInputSchema } from "../state/schemas/index.js"
+import { validateToolInput } from "../state/schemas/inputs/_validate.js"
 import {
 	findHaikuRoot,
 	handleStateTool,
@@ -58,6 +63,42 @@ import {
 	isRemoteReviewEnabled,
 	openTunnel,
 } from "../tunnel.js"
+import { buildUnitOutputPreviews } from "../unit-output-preview.js"
+
+/**
+ * Build the per-unit output preview map and the inverse
+ * `output_declared_by` map for a session payload. Both halves of the
+ * data exist for the same reason — the SPA's Units tab renders
+ * popovers for unit-declared outputs, and the Outputs tab renders the
+ * "Declared by" banner that points the other direction. Computed once
+ * here so the ad-hoc-review and gate-review session builders stay in
+ * sync without repeated copy-paste.
+ */
+async function buildSessionOutputMeta(
+	intentDirAbs: string,
+	sessionId: string,
+	units: ParsedUnit[],
+): Promise<{
+	unitOutputs: Record<string, unknown>
+	outputDeclaredBy: Record<string, string[]>
+}> {
+	const previews = await Promise.all(
+		units.map(async (u) => ({
+			slug: u.slug,
+			outputs: await buildUnitOutputPreviews(
+				intentDirAbs,
+				sessionId,
+				u.frontmatter.outputs,
+			),
+		})),
+	)
+	const unitOutputs: Record<string, unknown> = {}
+	for (const { slug: uSlug, outputs } of previews) {
+		if (outputs.length > 0) unitOutputs[uSlug] = outputs
+	}
+	const outputDeclaredBy = await buildOutputDeclaredBy(intentDirAbs)
+	return { unitOutputs, outputDeclaredBy }
+}
 
 const AskVisualQuestionInput = z.object({
 	questions: z
@@ -295,6 +336,12 @@ export async function handleToolCall(
 	// picks it up via run_next's fix-loop/revisit path.
 	if (name === "haiku_review_open") {
 		const a = (args ?? {}) as Record<string, unknown>
+		const reviewOpenInputErr = validateToolInput(
+			a,
+			validateHaikuReviewOpenInputSchema,
+			"haiku_review_open",
+		)
+		if (reviewOpenInputErr) return reviewOpenInputErr
 		let slug = (a.intent as string) || ""
 		if (!slug) {
 			const branchMatch = intentFromCurrentBranch()
@@ -371,20 +418,43 @@ export async function handleToolCall(
 		session.ad_hoc = true
 		session.stage = activeStage || undefined
 
+		// Per-unit output previews + the inverse "declared by" map.
+		// Built after the session exists (the URL helper needs the
+		// session id) so the SPA gets popover-ready entries with no
+		// per-row fetch round-trip.
+		const { unitOutputs, outputDeclaredBy } = await buildSessionOutputMeta(
+			intentDirAbs,
+			session.session_id,
+			units,
+		)
+
 		Object.assign(session, {
 			parsedIntent: intent,
 			parsedUnits: units,
 			parsedCriteria: criteria,
 			parsedMermaid: mermaid,
+			unitOutputs,
+			outputDeclaredBy,
 		})
 
 		const stageStates = await parseStageStates(intentDirAbs)
 		const knowledgeFiles = await parseKnowledgeFiles(intentDirAbs)
 		const stageArtifacts = await parseStageArtifacts(intentDirAbs)
 		const outputArtifacts = await parseOutputArtifacts(intentDirAbs)
+		// Rewrite every relativePath (not just images) to a tunnel URL so
+		// click-out links work for HTML, file, and image types alike. The
+		// parser produces intent-dir-relative paths; the helper returns
+		// the full `/stage-artifacts/:sessionId/*` route path the SPA
+		// reaches via `withAuthQuery`. Preserve the original
+		// intent-relative path on `intentRelativePath` so the SPA can
+		// look the artifact up in `output_declared_by`.
 		for (const oa of outputArtifacts) {
-			if (oa.type === "image" && oa.relativePath) {
-				oa.relativePath = `/stage-artifacts/${session.session_id}/stages/${oa.relativePath}`
+			if (oa.relativePath) {
+				oa.intentRelativePath = oa.relativePath
+				oa.relativePath = buildStageArtifactUrl(
+					session.session_id,
+					oa.relativePath,
+				)
 			}
 		}
 		Object.assign(session, {
@@ -889,12 +959,22 @@ export function createReviewGateHandler() {
 			session.next_phase = gateMeta.nextPhase
 		bindSessionCancellation(session.session_id, signal)
 
+		// Per-unit output previews + the inverse "declared by" map —
+		// see helper notes in buildSessionOutputMeta.
+		const { unitOutputs, outputDeclaredBy } = await buildSessionOutputMeta(
+			intentDirAbs,
+			session.session_id,
+			units,
+		)
+
 		// Store parsed data on session for the SPA
 		Object.assign(session, {
 			parsedIntent: intent,
 			parsedUnits: units,
 			parsedCriteria: criteria,
 			parsedMermaid: mermaid,
+			unitOutputs,
+			outputDeclaredBy,
 		})
 
 		// Attach previous-review snapshot (from a prior changes_requested) so
@@ -910,10 +990,17 @@ export function createReviewGateHandler() {
 		const stageArtifacts = await parseStageArtifacts(intentDirAbs)
 		const outputArtifacts = await parseOutputArtifacts(intentDirAbs)
 
-		// Resolve image output artifact URLs now that we have a session ID
+		// Resolve every output artifact's URL now that we have a session
+		// ID — applies for image, html, and file types so click-out links
+		// work universally. Preserve the original intent-relative path
+		// on `intentRelativePath` for `output_declared_by` lookups.
 		for (const oa of outputArtifacts) {
-			if (oa.type === "image" && oa.relativePath) {
-				oa.relativePath = `/stage-artifacts/${session.session_id}/stages/${oa.relativePath}`
+			if (oa.relativePath) {
+				oa.intentRelativePath = oa.relativePath
+				oa.relativePath = buildStageArtifactUrl(
+					session.session_id,
+					oa.relativePath,
+				)
 			}
 		}
 

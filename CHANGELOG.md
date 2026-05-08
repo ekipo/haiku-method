@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.17.0] - 2026-05-08
+
+### Added
+- Picker and direction pages for intent navigation and workflow visualization
+- Classifier component available in all stage templates for structured decision-making  
+- Migration tooling to upgrade v0 intents to v4 schema
+
+### Changed
+- Feedback dispatch now occurs inline within stage review using closure-reply patterns
+- Workflow state progression refactored to cursor-driven engine for deterministic advancement
+
+### Fixed
+- Concurrent worktree conflicts and feedback schema validation edge cases
+
 ## [3.16.2] - 2026-05-06
 
 ### Fixed

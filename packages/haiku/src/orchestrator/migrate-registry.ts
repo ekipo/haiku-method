@@ -45,13 +45,25 @@ export type MigrationContext = {
  */
 export type MigrationStepDetails = {
 	intent_md_migrated: boolean
+	/**
+	 * `units_migrated` and `*_synthesized_approval` count UNITS — once
+	 * per file. The `*_stamps_synthesized` counters below count STAMPS
+	 * — once per role-slot written. A v3 unit with three review agents
+	 * contributes 1 to `units_with_synthesized_approval` and 5 to
+	 * `review_stamps_synthesized` (spec + 3 agents + user). The naming
+	 * is explicit so banner copy and tests don't conflate the two.
+	 */
 	units_migrated: number
 	units_with_synthesized_approval: number
+	discovery_stamps_synthesized: number
+	review_stamps_synthesized: number
+	approval_stamps_synthesized: number
 	feedback_migrated: number
 	feedback_with_synthesized_closure: number
 	feedback_relocated: number
 	state_json_deleted: number
 	drift_artifacts_deleted: number
+	stages_merged_stamped: number
 }
 
 export function emptyMigrationDetails(): MigrationStepDetails {
@@ -59,11 +71,15 @@ export function emptyMigrationDetails(): MigrationStepDetails {
 		intent_md_migrated: false,
 		units_migrated: 0,
 		units_with_synthesized_approval: 0,
+		discovery_stamps_synthesized: 0,
+		review_stamps_synthesized: 0,
+		approval_stamps_synthesized: 0,
 		feedback_migrated: 0,
 		feedback_with_synthesized_closure: 0,
 		feedback_relocated: 0,
 		state_json_deleted: 0,
 		drift_artifacts_deleted: 0,
+		stages_merged_stamped: 0,
 	}
 }
 
@@ -169,12 +185,19 @@ export function migrateIntent(
 			aggregate.units_migrated += stepDetails.units_migrated
 			aggregate.units_with_synthesized_approval +=
 				stepDetails.units_with_synthesized_approval
+			aggregate.discovery_stamps_synthesized +=
+				stepDetails.discovery_stamps_synthesized
+			aggregate.review_stamps_synthesized +=
+				stepDetails.review_stamps_synthesized
+			aggregate.approval_stamps_synthesized +=
+				stepDetails.approval_stamps_synthesized
 			aggregate.feedback_migrated += stepDetails.feedback_migrated
 			aggregate.feedback_with_synthesized_closure +=
 				stepDetails.feedback_with_synthesized_closure
 			aggregate.feedback_relocated += stepDetails.feedback_relocated
 			aggregate.state_json_deleted += stepDetails.state_json_deleted
 			aggregate.drift_artifacts_deleted += stepDetails.drift_artifacts_deleted
+			aggregate.stages_merged_stamped += stepDetails.stages_merged_stamped
 		}
 	}
 	return {

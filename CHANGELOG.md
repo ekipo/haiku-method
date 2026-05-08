@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-05-08
+
+### Added
+- Stages can now independently gate elaboration, verifying design work is ready before execution
+- `haiku_stage_elaboration_seal` and `haiku_intent_seal` tools to explicitly mark elaboration and intent completion
+
+### Changed
+- Elaboration now gates per-stage instead of as a unified design phase
+
+### Fixed
+- Eliminated infinite loops in dispatch, approval, and intent-review workflows
+- Discovery now correctly identifies artifacts without relying on metadata
+
 ## [4.1.4] - 2026-05-08
 
 ### Fixed

@@ -178,12 +178,21 @@ export {
 	validateHaikuSelectStudioInputSchema,
 } from "./inputs/selection-tools.js"
 export type {
+	HaikuIntentSealInput,
+	HaikuStageElaborationRecordInput,
+	HaikuStageElaborationSealInput,
 	HaikuStageGetInput,
 	HaikuStageSetInput,
 } from "./inputs/stages.js"
 export {
+	HAIKU_INTENT_SEAL_INPUT_SCHEMA,
+	HAIKU_STAGE_ELABORATION_RECORD_INPUT_SCHEMA,
+	HAIKU_STAGE_ELABORATION_SEAL_INPUT_SCHEMA,
 	HAIKU_STAGE_GET_INPUT_SCHEMA,
 	HAIKU_STAGE_SET_INPUT_SCHEMA,
+	validateHaikuIntentSealInputSchema,
+	validateHaikuStageElaborationRecordInputSchema,
+	validateHaikuStageElaborationSealInputSchema,
 	validateHaikuStageGetInputSchema,
 	validateHaikuStageSetInputSchema,
 } from "./inputs/stages.js"

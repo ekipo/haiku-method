@@ -32,7 +32,39 @@ export function enrichActionWithPreview(action: OrchestratorAction): void {
 				"Next I'll break the work down into units, then validate them and open a review gate for your approval."
 			break
 
-		case "elaborate": {
+		// 2026-05-08: per-stage `elaborate` was split into the
+		// conversation gate (new `elaborate`) and unit-spec writing
+		// (renamed to `decompose`). Two new actions also need preview
+		// text: `elaborate_review` (substance verifier dispatch) and
+		// `decompose` (the renamed phase that retains the old
+		// iteration/pending_feedback semantics).
+
+		case "elaborate":
+			if (stage) {
+				tell_user = `Starting the conversation about stage '${stage}' before any unit decomposition.`
+				next_step =
+					"I'll read the intent + STAGE.md, surface informed questions, and capture our agreement via haiku_stage_elaboration_record. A verifier will then grade the conversation for substance before the cursor advances to decompose."
+			} else {
+				tell_user =
+					"Pre-intent verifier — grading whether intent.md reflects a meaningful conversation about what you want."
+				next_step =
+					"I'll dispatch a verifier subagent. Pass stamps `verified_at` on intent.md via haiku_intent_seal; fail returns gaps so we re-engage and update the intent."
+			}
+			break
+
+		case "elaborate_review":
+			if (stage) {
+				tell_user = `Dispatching the substance verifier on the captured elaboration for stage '${stage}'.`
+				next_step =
+					"On pass, the verifier seals the artifact and the cursor advances to decompose. On fail, the verifier returns specific gaps and we re-engage you with the missing questions."
+			} else {
+				tell_user = "Dispatching the substance verifier on intent.md."
+				next_step =
+					"On pass, the cursor walks into the first stage's elaborate gate. On fail, we update the intent body and re-verify."
+			}
+			break
+
+		case "decompose": {
 			const iteration =
 				(action.iteration as number) || (action.visits as number) || 0
 			const fbCount = (action.pending_feedback as unknown[])?.length || 0
@@ -44,7 +76,7 @@ export function enrichActionWithPreview(action: OrchestratorAction): void {
 				next_step =
 					"I'll draft units that close each pending feedback item, then advance to execution once validated."
 			} else {
-				tell_user = `Elaborating stage '${stage}' — defining units of work and their completion criteria.`
+				tell_user = `Decomposing stage '${stage}' into unit specs — informed by the captured elaboration + any discovery output.`
 				next_step =
 					"After units are defined, the orchestrator validates them and opens a review gate for your approval before execution begins."
 			}
@@ -200,15 +232,10 @@ export function enrichActionWithPreview(action: OrchestratorAction): void {
 			next_step = "Unblock the dependencies, then retry."
 			break
 
-		case "design_direction_required":
-			tell_user = `Stage '${stage}' requires a design direction selection before proceeding.`
-			next_step = "After you select a direction, elaboration continues."
-			break
-
-		case "design_direction_complete":
-			tell_user = `You picked a design direction — I'll fold the selection (and any annotated screenshots) into elaboration.`
-			next_step = "I'll continue elaborating with the chosen archetype."
-			break
+		// design_direction_required / _complete / _uploaded preview cases
+		// deleted 2026-05-08 — those cursor actions were collapsed into
+		// the discovery-agent model. The `discovery_required` case above
+		// covers all gate-driven dispatches now.
 
 		case "outputs_missing":
 			tell_user = `Stage '${stage}' is missing required output artifacts.`

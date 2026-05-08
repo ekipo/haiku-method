@@ -73,7 +73,6 @@ import {
 import {
 	resolveStageFixHats,
 	resolveStageHats,
-	resolveStageMetadata,
 	resolveStudioStages,
 } from "../studio.js"
 import { type DriftEvent, runDriftSweep } from "./drift-sweep.js"
@@ -88,29 +87,45 @@ export type CursorAction =
 			agent: string
 			units: string[]
 	  }
-	| {
-			kind: "design_direction_required"
-			stage: string
-	  }
-	| {
-			kind: "design_direction_complete"
-			stage: string
-			archetype: string
-			comments?: string
-			annotations?: Array<{ comment: string; screenshot_path: string }>
-	  }
-	| {
-			kind: "design_direction_uploaded"
-			stage: string
-			uploads: Array<{ filename: string; path: string; caption?: string }>
-			comments?: string
-	  }
-	| {
-			kind: "clarify_required"
-			stage: string
-			questions: Array<{ id: string; prompt: string; body: string }>
-	  }
+	// design_direction_* and clarify_required cursor actions deleted
+	// 2026-05-08: collapsed into the discovery-agent model. Studios
+	// now declare a discovery template with `tool:` (e.g., the
+	// software studio's `discovery/DESIGN-DIRECTION.md` declares
+	// `tool: pick_design_direction`) and the cursor's existence
+	// check on the artifact location passes the gate. See
+	// `prompts/discovery_required.ts` for the tool-driven branch.
+	// `elaborate` is the per-stage human-conversation gate. Fires
+	// whenever (a) `intent.mode !== "autopilot"` and
+	// (b) `stages/<stage>/elaboration.md` is missing on a fresh stage
+	// (units.length === 0). The agent's job during this action is the
+	// conversation: read intent + STAGE.md + prior outputs, surface
+	// informed questions to the user, and capture the agreement via
+	// `haiku_stage_elaboration_record`. The artifact-present-but-
+	// unverified case emits `elaborate_review` instead, NOT this
+	// action — so this action's payload doesn't need to convey
+	// "where in the gate cycle we are." Just `stage` is enough.
+	// Autopilot bypasses this clause entirely.
 	| { kind: "elaborate"; stage: string }
+	// `elaborate_review` dispatches the substance verifier on a captured
+	// elaboration artifact. Two scopes:
+	//   - per-stage (stage field present): reads
+	//     `stages/<stage>/elaboration.md` + intent.md + STAGE.md.
+	//     Pass stamps `verified_at` via `haiku_stage_elaboration_seal`.
+	//   - pre-intent (no stage): reads intent.md and grades whether
+	//     the body reflects a meaningful conversation about what the
+	//     user wants. Pass stamps `verified_at` via
+	//     `haiku_intent_seal`. Fires immediately after intent_create
+	//     (before any stage walk) when mode != autopilot.
+	// Fail returns gaps so the agent re-engages the user and re-records.
+	| { kind: "elaborate_review"; stage?: string }
+	// `decompose` is the unit-spec writing phase. Fires when (a) the
+	// elaborate gate has passed (or autopilot bypassed it) and
+	// (b) `units.length === 0`. The agent dispatches stage-scoped
+	// discovery subagents and writes unit specs informed by the
+	// captured conversation + discovery output. Renamed from the legacy
+	// `elaborate` cursor action; the old name is reserved for the
+	// conversation gate above.
+	| { kind: "decompose"; stage: string }
 	| {
 			kind: "start_unit_hat"
 			stage: string
@@ -180,64 +195,10 @@ function readFm(path: string): { data: UnitFm; body: string } | null {
 	}
 }
 
-/**
- * Read clarify-question files from a stage's `clarify/` directory.
- * Each file is a markdown doc with frontmatter — the FM `prompt` field
- * (or filename as fallback) is the short prompt; the body is the
- * elaboration. Returns one entry per file, sorted by filename.
- *
- * Search path: project-local `.haiku/studios/<studio>/stages/<stage>/clarify/`
- * first, then plugin-shipped `<plugin>/studios/<studio>/stages/<stage>/clarify/`.
- *
- * Empty array when the dir doesn't exist (which is the common case —
- * stages opt in by adding the directory).
- */
-function readClarifyQuestions(
-	studio: string,
-	stage: string,
-): Array<{ id: string; prompt: string; body: string }> {
-	const candidates = [
-		join(
-			process.cwd(),
-			".haiku",
-			"studios",
-			studio,
-			"stages",
-			stage,
-			"clarify",
-		),
-	]
-	const root = primaryRepoRoot()
-	if (root) {
-		candidates.push(
-			join(root, "plugin", "studios", studio, "stages", stage, "clarify"),
-		)
-	}
-	for (const dir of candidates) {
-		if (!existsSync(dir)) continue
-		const entries = readdirSync(dir).filter((f) => f.endsWith(".md"))
-		const out: Array<{ id: string; prompt: string; body: string }> = []
-		for (const f of entries.sort()) {
-			const path = join(dir, f)
-			try {
-				const raw = readFileSync(path, "utf8")
-				const parsed = matter(raw)
-				const data = parsed.data as Record<string, unknown>
-				out.push({
-					id: f.replace(/\.md$/, ""),
-					prompt:
-						(data.prompt as string) ||
-						f.replace(/\.md$/, "").replace(/-/g, " "),
-					body: parsed.content.trim(),
-				})
-			} catch {
-				/* skip malformed clarify file rather than crash the cursor */
-			}
-		}
-		if (out.length > 0) return out
-	}
-	return []
-}
+// readClarifyQuestions deleted 2026-05-08 along with the
+// clarify_required cursor action. Stages that need pre-decompose Q&A
+// now declare a discovery template with `tool:` (any tool that
+// captures user input). Zero studios shipped clarify dirs at deletion.
 
 function pickIterations(fm: UnitFm | FbFm): Iteration[] {
 	if (!Array.isArray(fm.iterations)) return []
@@ -637,108 +598,60 @@ function walkIntentTrack(args: {
 		? ["spec", "quality_gates"]
 		: ["spec", "quality_gates", ...reviewAgents, "user"]
 
-	// Gate priority chain (2026-05-06): collaboration before
-	// computation. Order:
-	//   1. design_direction_required — strategic decision; the user
-	//      picks a direction the rest of elaborate orbits.
-	//   2. clarify_required — stage-specific Q&A captured before
-	//      anything else fires.
-	//   3. discovery_required — the agents run to gather knowledge
-	//      WITH the user's design + clarifications already on disk,
-	//      so they have richer context.
-	//   4. elaborate / wave logic.
+	// Gate priority chain (collaboration before computation):
+	//   1. elaborate (conversation gate, mode-aware) — the human
+	//      conversation that orbits the rest of the stage.
+	//   2. discovery_required — agents run to gather knowledge,
+	//      including user-input-driven discovery templates
+	//      (e.g., the reframed design-direction picker) that
+	//      replace the bespoke design_direction_required and
+	//      clarify_required gates retired on 2026-05-08.
+	//   3. decompose / wave logic.
 
-	// 1. Design direction (P3). Two-phase gate:
+	// 2.5. Elaborate gate (mode-aware). Every non-autopilot intent gets a
+	//      per-stage human conversation gate. The agent reads intent +
+	//      STAGE.md + prior outputs, surfaces informed questions, and
+	//      captures the agreement at `stages/<stage>/elaboration.md`.
+	//      The cursor blocks until the artifact exists AND a verifier
+	//      has stamped `verified_at` on its frontmatter (substance check
+	//      — the agent can't self-certify a one-line "user said go").
 	//
-	//    a. Selection: when the stage's STAGE.md declares
-	//       `requires_design_direction: true`, the cursor refuses to
-	//       advance until the user has selected a direction. Stored on
-	//       intent.md as `design_directions: { <stage>: { … } }`.
+	//      Grandfather rule: if the artifact is missing AND the stage
+	//      already has units, treat the stage as legacy work that
+	//      pre-dates this gate. Don't retroactively rewind the user to
+	//      do a conversation about work already shipped. Once an
+	//      artifact exists (even unverified), it's tracked normally —
+	//      the verifier still has to seal it before advancement.
 	//
-	//    b. Surface-once: after selection, the cursor emits ONE
-	//       `design_direction_complete` (archetype mode) or
-	//       `design_direction_uploaded` (intake/upload mode) action so
-	//       the agent can read screenshot annotations or uploaded files
-	//       before elaboration starts. Surfaced state is tracked by
-	//       `surfaced_at` on the same record — once stamped, the cursor
-	//       falls through to elaborate. The agent stamps `surfaced_at`
-	//       via the engine after it's seen the action.
-	const stageMeta = resolveStageMetadata(studio, stage)
-	if (stageMeta?.requires_design_direction === true) {
-		const intentMdPath = join(intentDir, "intent.md")
-		if (existsSync(intentMdPath)) {
-			const intentFm = readFm(intentMdPath)?.data ?? {}
-			const directions =
-				intentFm.design_directions &&
-				typeof intentFm.design_directions === "object"
-					? (intentFm.design_directions as Record<string, unknown>)
-					: {}
-			const dd = directions[stage] as
-				| {
-						mode?: string
-						archetype?: string
-						comments?: string
-						annotations?: Array<{ comment: string; screenshot_path: string }>
-						uploads?: Array<{
-							filename: string
-							path: string
-							caption?: string
-						}>
-						at?: string
-						surfaced_at?: string
-				  }
-				| undefined
-			if (!dd) {
-				return { kind: "design_direction_required", stage }
+	//      Concurrent-work case: when units exist alongside a missing
+	//      artifact, the cursor can't tell "legacy intent" from "agent
+	//      drafted units before recording elaboration." We err toward
+	//      grandfathering (fall through) because (a) re-running on a
+	//      legacy intent that was already happy is the worse failure
+	//      mode and (b) the elaborate prompt explicitly tells fresh
+	//      agents to record before writing units, so the concurrent
+	//      pattern is rare in practice.
+	//
+	//      Autopilot bypasses this gate entirely — there's no human
+	//      conversation to capture. Pre-intent elaborate (intent.md
+	//      creation) still applies in autopilot; only the per-stage gate
+	//      is mode-skipped here.
+	if (mode !== "autopilot") {
+		const elabPath = join(stageDir, "elaboration.md")
+		if (existsSync(elabPath)) {
+			const elabFm = readFm(elabPath)?.data ?? {}
+			const verifiedAt =
+				typeof elabFm.verified_at === "string" ? elabFm.verified_at : ""
+			if (!verifiedAt) {
+				return { kind: "elaborate_review", stage }
 			}
-			if (!dd.surfaced_at) {
-				if (
-					dd.mode === "upload" &&
-					Array.isArray(dd.uploads) &&
-					dd.uploads.length > 0
-				) {
-					return {
-						kind: "design_direction_uploaded",
-						stage,
-						uploads: dd.uploads,
-						...(dd.comments ? { comments: dd.comments } : {}),
-					}
-				}
-				if (dd.archetype) {
-					return {
-						kind: "design_direction_complete",
-						stage,
-						archetype: dd.archetype,
-						...(dd.comments ? { comments: dd.comments } : {}),
-						...(dd.annotations && dd.annotations.length > 0
-							? { annotations: dd.annotations }
-							: {}),
-					}
-				}
-			}
+			// verified — fall through to discovery / decompose / waves
+		} else if (units.length === 0) {
+			// Fresh stage, no artifact, no units — fire the gate.
+			return { kind: "elaborate", stage }
 		}
-	}
-
-	// 2. Clarify (P4). Every stage shipping `clarify/*.md` files gets
-	//    a hard gate. Answers recorded on intent.md as
-	//    `clarifications: { <stage>: { answers, at } }`. Stage-conditional.
-	const clarifyQuestions = readClarifyQuestions(studio, stage)
-	if (clarifyQuestions.length > 0) {
-		const intentMdPath = join(intentDir, "intent.md")
-		if (existsSync(intentMdPath)) {
-			const intentFm = readFm(intentMdPath)?.data ?? {}
-			const clarifications =
-				intentFm.clarifications && typeof intentFm.clarifications === "object"
-					? (intentFm.clarifications as Record<string, unknown>)
-					: {}
-			if (!clarifications[stage]) {
-				return {
-					kind: "clarify_required",
-					stage,
-					questions: clarifyQuestions,
-				}
-			}
-		}
+		// Else: artifact missing but units exist → grandfathered.
+		// Falls through past the gate without firing.
 	}
 
 	// 3. Discovery (P7). When the studio declares discovery artifacts
@@ -747,6 +660,15 @@ function walkIntentTrack(args: {
 	//    signal — no FM bookkeeping. (FM state is reserved for actions
 	//    that DON'T produce a file: review approvals, user gates.)
 	//
+	// 2026-05-08: discovery now fires when units.length === 0 too IF the
+	// template declares a `tool:` field (tool-driven discovery — the
+	// reframed design_direction picker is the canonical case). Without
+	// `tool:`, discovery still gates on `units.length > 0` because
+	// research-style discovery agents need a representative unit for
+	// prompt context. The `units` field on the action is empty when
+	// units don't yet exist; empty array is fine because the tool's
+	// output is stage-scoped.
+	//
 	// Defs are sorted by `name` so dispatch order is deterministic
 	// across filesystems — `readdirSync` returns templates in
 	// platform-dependent order, which makes idempotent retries surface
@@ -754,8 +676,11 @@ function walkIntentTrack(args: {
 	const discoveryDefs = readStageArtifactDefs(studio, stage)
 		.filter((d) => d.kind === "discovery")
 		.sort((a, b) => a.name.localeCompare(b.name))
-	if (discoveryDefs.length > 0 && units.length > 0) {
+	if (discoveryDefs.length > 0) {
 		for (const def of discoveryDefs) {
+			// Skip non-tool discovery agents when units don't exist —
+			// they need a representative unit for prompt context.
+			if (units.length === 0 && !def.tool) continue
 			if (!def.required) continue
 			if (!def.location) {
 				// `required: true` with no `location:` is a studio
@@ -774,23 +699,28 @@ function walkIntentTrack(args: {
 					readdirSync(absPath).filter((e) => e !== ".gitkeep").length > 0
 				: existsSync(absPath)
 			if (!exists) {
-				// Discovery artifacts are typically intent-scoped (one
-				// artifact serves all units in the stage). The action
-				// carries a representative unit for prompt context — pick
-				// the first unit alphabetically so the choice is stable.
+				// Discovery artifacts are stage- or intent-scoped.
+				// `units` is a representative unit for prompt context
+				// when units exist; empty array when the stage hasn't
+				// been decomposed yet (the discovery output informs
+				// decomposition).
 				return {
 					kind: "discovery_required",
 					stage,
 					agent: def.name,
-					units: [units[0].name],
+					units: units.length > 0 ? [units[0].name] : [],
 				}
 			}
 		}
 	}
 
-	// 4. No units → elaborate.
+	// 4. No units → decompose. Agent dispatches stage-scoped discovery
+	//    subagents (when configured) and writes unit specs informed by
+	//    the captured elaboration + discovery output. The cursor only
+	//    reaches this clause once the elaborate gate has passed (or
+	//    autopilot bypassed it).
 	if (units.length === 0) {
-		return { kind: "elaborate", stage }
+		return { kind: "decompose", stage }
 	}
 
 	// 5. Wave logic. A unit is "in-flight" if started AND its last
@@ -957,6 +887,54 @@ export function derivePosition(args: {
 		(intentResult.data.sealed_at as string).length > 0
 	) {
 		return { track: "sealed", action: { kind: "sealed" } }
+	}
+
+	// Pre-intent verifier (2026-05-08). The conversation that produced
+	// intent.md needs the same substance check as per-stage elaborate.
+	// Fires right after intent_create on a fresh intent: reads
+	// intent.md, grades whether the body reflects a meaningful
+	// conversation about what the user wants. Pass stamps `verified_at`
+	// on intent FM via `haiku_intent_seal`; fail returns gaps so the
+	// agent re-engages the user and re-creates / updates intent.md.
+	//
+	// Mode bypass: autopilot skips this gate. The user's intent for
+	// autopilot is "the agent runs everything autonomously" — there's
+	// no human to converse with for the substance check. Pre-intent
+	// elaborate still happens (the user creates the intent in chat),
+	// but its rigor isn't enforced by an extra verifier seal.
+	//
+	// Grandfather rule (mirrors per-stage gate): only fire on a truly
+	// fresh intent — first stage active, no units written yet. Any
+	// existing in-flight intent that was created before this PR
+	// (lacking `verified_at`) but has already shipped stage work is
+	// grandfathered. Without this, every legacy non-autopilot intent
+	// would block permanently at `elaborate_review` on first tick
+	// after the plugin upgrade.
+	if (intentResult && mode !== "autopilot") {
+		const verifiedAt =
+			typeof intentResult.data.verified_at === "string"
+				? (intentResult.data.verified_at as string)
+				: ""
+		if (!verifiedAt) {
+			const stages = resolveStudioStages(studio)
+			const firstStage = stages[0] ?? ""
+			const firstStageDir = firstStage
+				? join(intentDir, "stages", firstStage)
+				: ""
+			const firstStageHasUnits =
+				firstStageDir && existsSync(firstStageDir)
+					? listUnitPaths(firstStageDir).length > 0
+					: false
+			const activeForGate = firstUnmergedStage(slug, studio)
+			const isTrulyFresh = activeForGate === firstStage && !firstStageHasUnits
+			if (isTrulyFresh) {
+				return {
+					track: "intent",
+					action: { kind: "elaborate_review" },
+				}
+			}
+			// Grandfathered — fall through.
+		}
 	}
 
 	// Determine the active stage (first NOT merged into intent main).

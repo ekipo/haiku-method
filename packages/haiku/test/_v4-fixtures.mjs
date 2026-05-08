@@ -91,6 +91,14 @@ export function makeMergedUnit({
 
 /**
  * Create a v4-shaped intent.md at `<intentDir>/intent.md`.
+ *
+ * 2026-05-08: pre-intent verifier added (cursor returns
+ * `elaborate_review` (no stage) when intent.md lacks `verified_at`).
+ * Test fixtures default to `verified_at` set so downstream tests walk
+ * past the gate. Tests that ARE exercising the pre-intent gate should
+ * pass `verifyOnCreate: false` to leave the field unset. Autopilot
+ * bypasses the gate at the cursor level, so the field is irrelevant
+ * there.
  */
 export function makeIntent({
 	intentDir,
@@ -99,6 +107,7 @@ export function makeIntent({
 	mode = "continuous",
 	approvals = {},
 	sealed = false,
+	verifyOnCreate = true,
 	extraFm = {},
 }) {
 	mkdirSync(intentDir, { recursive: true })
@@ -111,6 +120,9 @@ export function makeIntent({
 		started_at: at,
 		approvals,
 		sealed_at: sealed ? at : null,
+		...(verifyOnCreate
+			? { verified_at: at, verified_notes: "test fixture" }
+			: {}),
 		...extraFm,
 	}
 	const path = join(intentDir, "intent.md")
@@ -191,6 +203,33 @@ export function makeFeedback({
 	const path = join(fbDir, `${nnn}-${slug}.md`)
 	writeFileSync(path, matter.stringify(body, fm))
 	return { path, frontmatter: fm, num }
+}
+
+/**
+ * Pre-write a verified per-stage elaboration artifact so the cursor's
+ * elaborate gate (introduced 2026-05-08) doesn't trip in tests that
+ * are exercising downstream behavior (discovery, decompose, waves,
+ * reviews). Without this, every non-autopilot test would have to
+ * manually emit the conversation cycle (`elaborate` → record →
+ * `elaborate_review` → seal) before reaching the action under test.
+ *
+ * Tests that ARE testing the elaborate gate itself should not call
+ * this — they want the gate to fire naturally.
+ */
+export function seedVerifiedElaboration({ intentDir, stage, body = "Verified test elaboration." }) {
+	const stageDir = join(intentDir, "stages", stage)
+	mkdirSync(stageDir, { recursive: true })
+	const at = new Date().toISOString()
+	const fm = {
+		recorded_at: at,
+		intent: intentDir.split("/").pop() ?? "test-intent",
+		stage,
+		verified_at: at,
+		verified_notes: "test fixture — bypasses gate",
+	}
+	const path = join(stageDir, "elaboration.md")
+	writeFileSync(path, matter.stringify(body, fm))
+	return path
 }
 
 /**

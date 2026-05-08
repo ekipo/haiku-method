@@ -146,6 +146,17 @@ function applyResponse(intentDir, action, root, slug) {
 			const intentMd = join(intentDir, "intent.md")
 			const fm = readFm(intentMd)
 			writeFm(intentMd, { ...fm, sealed_at: at })
+		} else if (action.action === "elaborate_review") {
+			// Pre-intent elaborate_review (no stage). Stamp verified_at on
+			// intent.md to clear the gate. Tests don't simulate the
+			// verifier subagent.
+			const intentMd = join(intentDir, "intent.md")
+			const fm = readFm(intentMd)
+			writeFm(intentMd, {
+				...fm,
+				verified_at: at,
+				verified_notes: "test fixture — gate simulated",
+			})
 		}
 		return
 	}
@@ -155,6 +166,33 @@ function applyResponse(intentDir, action, root, slug) {
 
 	switch (action.action) {
 		case "elaborate": {
+			// Conversation gate (2026-05-08). Write a verified
+			// elaboration artifact so the cursor advances. Tests don't
+			// simulate the verifier subagent.
+			mkdirSync(stageDir, { recursive: true })
+			const elabPath = join(stageDir, "elaboration.md")
+			writeFm(
+				elabPath,
+				{
+					recorded_at: at,
+					intent: action.intent ?? "",
+					stage,
+					verified_at: at,
+					verified_notes: "test fixture — gate simulated",
+				},
+				"Test elaboration body.",
+			)
+			break
+		}
+		case "elaborate_review": {
+			const elabPath = join(stageDir, "elaboration.md")
+			if (existsSync(elabPath)) {
+				const fm = readFm(elabPath)
+				writeFm(elabPath, { ...fm, verified_at: at })
+			}
+			break
+		}
+		case "decompose": {
 			mkdirSync(unitsDir, { recursive: true })
 			const path = join(unitsDir, "unit-01.md")
 			if (!existsSync(path)) {

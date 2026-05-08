@@ -44,10 +44,10 @@ export function runWorkflowTick(
 	slug: string,
 	root?: string,
 ): WorkflowTickResult | null {
-	// `intentDir` resolves against the current haiku root (cwd-driven);
-	// the optional `root` arg here is reserved for future fixture
-	// override but currently unused.
-	void root
+	// `intentDir` resolves against the current haiku root (cwd-driven).
+	// `root` is forwarded to migrateIntent below as repoRoot for ctx;
+	// the cursor walk itself is cwd-driven via intentDir. Tests typically
+	// chdir into a fixture root before calling runWorkflowTick.
 	// Sad-path guard: `intentDir(slug)` walks up from cwd to find a
 	// `.haiku/` directory and throws if none exists. Return null so
 	// `dispatchOrchestratorAction` can surface a structured "intent
@@ -92,18 +92,112 @@ export function runWorkflowTick(
 		// generation, not the build that last touched it.
 		const sourceMajor = Number(sourceVersion.split(".")[0] ?? "0") || 0
 		if (sourceMajor !== targetMajor) {
+			// Use the major's canonical schema anchor (e.g. "4.0.0"),
+			// not the running build version (e.g. "4.0.2"). The
+			// migration registry edges are keyed by schema generation
+			// (one edge per schema bump), not by build patch — CI
+			// auto-bumps the patch on every merge to main but those
+			// don't change the schema. Without this, users upgrading
+			// from v3 on any v4.0.x build > 4.0.0 hit "no migration
+			// path from 0 to 4.0.x" and the migration fails entirely.
+			// Reported 2026-05-08 by a user upgrading on v4.0.2.
+			const schemaTarget = `${targetMajor}.0.0`
 			try {
-				migrateIntent(
+				const migrateResult = migrateIntent(
 					{ intentDir: iDir, repoRoot: root ?? "" },
 					sourceVersion,
-					target,
+					schemaTarget,
 				)
 				intentFm = parseIntentFm(intentMdPath)
+				// Surface what the migrator did to the agent BEFORE the
+				// next cursor walk. Without this, the agent sees deleted
+				// state.json / baseline.json / drift-markers.json files in
+				// `git status` and incorrectly tells the user data was
+				// lost — when in reality the relevant signals (completed-
+				// unit approvals, iteration history, feedback closure) are
+				// preserved in unit/feedback frontmatter, and the deleted
+				// files are v3-only artifacts v4 doesn't read or write.
+				if (migrateResult.steps > 0) {
+					const d = migrateResult.details
+					const lines: string[] = []
+					lines.push(
+						`Migrated intent '${slug}' from plugin_version='${sourceVersion}' to '${schemaTarget}'.`,
+					)
+					lines.push("")
+					lines.push("**What changed on disk** (this is intentional):")
+					if (d.intent_md_migrated) {
+						lines.push(
+							"- `intent.md` frontmatter rewritten — deprecated v3 fields stripped, v4 schema applied",
+						)
+					}
+					if (d.units_migrated > 0) {
+						const synth =
+							d.units_with_synthesized_approval > 0
+								? ` (${d.units_with_synthesized_approval} had \`status: completed\` → synthesized \`approvals.user\` so the cursor treats them as merged-and-approved going forward)`
+								: ""
+						lines.push(`- ${d.units_migrated} unit file(s) migrated${synth}`)
+					}
+					if (d.feedback_migrated > 0) {
+						const synth =
+							d.feedback_with_synthesized_closure > 0
+								? `; ${d.feedback_with_synthesized_closure} had a terminal v3 status → synthesized \`closed_at\``
+								: ""
+						const reloc =
+							d.feedback_relocated > 0
+								? `; ${d.feedback_relocated} relocated to their upstream stage (v4 routes feedback by file location, not by frontmatter hint)`
+								: ""
+						lines.push(
+							`- ${d.feedback_migrated} feedback file(s) migrated${synth}${reloc}`,
+						)
+					}
+					if (d.state_json_deleted > 0) {
+						lines.push(
+							`- ${d.state_json_deleted} stage \`state.json\` file(s) deleted — v4 derives stage position from git via \`firstUnmergedStage\`, not from state.json`,
+						)
+					}
+					if (d.drift_artifacts_deleted > 0) {
+						lines.push(
+							`- ${d.drift_artifacts_deleted} drift artifact(s) deleted (\`baseline.json\` / \`drift-markers.json\` / \`baseline-content/\`) — v4 uses \`body_sha256\` stamped on each signed slot's frontmatter, no separate baseline manifest needed`,
+						)
+					}
+					lines.push("")
+					lines.push("**What was preserved**:")
+					lines.push(
+						"- Intent: title, description, mode, studio, started_at, follows",
+					)
+					lines.push(
+						"- Units: title, body, inputs, outputs, depends_on, quality_gates, model, started_at, **iterations[]** (the bolt/hat history)",
+					)
+					lines.push(
+						"- Feedback: title, body, origin, author, source_ref, attachment, **iterations[]**, **replies[]**",
+					)
+					lines.push("")
+					lines.push("**What v4 derives instead of stores**:")
+					lines.push(
+						"- Active stage: walked from git branch state (`firstUnmergedStage`)",
+					)
+					lines.push("- Current phase: decided per-tick by the cursor walk")
+					lines.push(
+						"- Unit progress: read from `iterations[]` (the last entry's `result` and `hat`)",
+					)
+					lines.push("")
+					lines.push(
+						`If anything looks broken, run \`haiku_run_next { intent: "${slug}" }\` again — the cursor will pick up where v3 left off. The downgrade-or-redrive advice you might be tempted to give the user is wrong: the data is intact in the new shape.`,
+					)
+					return broadcastTick(slug, {
+						position: { track: "intent", action: null },
+						action: {
+							action: "migrated",
+							intent: slug,
+							message: lines.join("\n"),
+						},
+					})
+				}
 			} catch (err) {
 				emitTelemetry("haiku.migrate.failed", {
 					intent: slug,
 					from: sourceVersion,
-					to: target,
+					to: schemaTarget,
 					error: String((err as Error)?.message ?? err),
 				})
 				return {
@@ -118,7 +212,7 @@ export function runWorkflowTick(
 					action: {
 						action: "error",
 						intent: slug,
-						message: `Migration from plugin_version='${sourceVersion}' to '${target}' failed: ${String((err as Error)?.message ?? err)}. Resolve manually before continuing.`,
+						message: `Migration from plugin_version='${sourceVersion}' to '${schemaTarget}' failed: ${String((err as Error)?.message ?? err)}. Resolve manually before continuing.`,
 					},
 				}
 			}

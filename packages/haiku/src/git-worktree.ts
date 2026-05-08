@@ -478,6 +478,346 @@ export function openPullRequest(
 	}
 }
 
+/** Push a branch to its origin (creates upstream if missing). Returns
+ *  ok:true on success, ok:false with the raw error on failure. */
+export function pushBranchToOrigin(branch: string): {
+	ok: boolean
+	error?: string
+} {
+	try {
+		execFileSync("git", ["push", "-u", "origin", branch], {
+			encoding: "utf8",
+			stdio: "pipe",
+		})
+		return { ok: true }
+	} catch (err) {
+		return {
+			ok: false,
+			error: err instanceof Error ? err.message : String(err),
+		}
+	}
+}
+
+/** Build a provider-specific URL that opens the "new PR/MR" form
+ *  pre-filled with the head + base branches. Used as a last-resort
+ *  fallback when neither gh nor glab is on PATH (or the CLI fails) — the
+ *  user clicks the URL and lands directly on the create-PR page with
+ *  the right branches selected, no compare-then-create dance.
+ *
+ *  Reads `origin` from `git remote get-url origin`, parses host/owner/repo,
+ *  and constructs:
+ *    GitHub  → https://github.com/<owner>/<repo>/compare/<base>...<head>?expand=1
+ *              (the `?expand=1` makes GitHub open the create-PR form
+ *              instead of just the diff)
+ *    GitLab  → https://gitlab.com/<owner>/<repo>/-/merge_requests/new?
+ *              merge_request[source_branch]=<head>&merge_request[target_branch]=<base>
+ *              (GitLab's "new MR" form pre-fills source + target)
+ *
+ *  Returns null when the origin URL can't be parsed or the host isn't
+ *  recognised (the caller should print the branch name + base instead). */
+export function buildCompareUrl(
+	headBranch: string,
+	baseBranch: string,
+): string | null {
+	let originRaw = ""
+	try {
+		originRaw = execFileSync("git", ["remote", "get-url", "origin"], {
+			encoding: "utf8",
+			stdio: "pipe",
+		}).trim()
+	} catch {
+		return null
+	}
+	if (!originRaw) return null
+	let host = ""
+	let path = ""
+	const sshMatch = originRaw.match(/^[^@\s]+@([^:]+):(.+?)(?:\.git)?$/)
+	if (sshMatch) {
+		host = sshMatch[1]
+		path = sshMatch[2]
+	} else {
+		try {
+			const u = new URL(originRaw)
+			host = u.hostname
+			path = u.pathname.replace(/^\/+/, "").replace(/\.git$/, "")
+		} catch {
+			return null
+		}
+	}
+	const segments = path.split("/").filter(Boolean)
+	if (segments.length < 2) return null
+	const owner = segments[0]
+	const repo = segments.slice(1).join("/")
+	const head = encodeURIComponent(headBranch)
+	const base = encodeURIComponent(baseBranch)
+	if (host === "github.com") {
+		return `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1`
+	}
+	if (host === "gitlab.com") {
+		// new-MR form pre-fills source + target; lands on a page where
+		// "Create merge request" is one click away (no compare-then-
+		// create round trip).
+		return `https://gitlab.com/${owner}/${repo}/-/merge_requests/new?merge_request%5Bsource_branch%5D=${head}&merge_request%5Btarget_branch%5D=${base}`
+	}
+	return null
+}
+
+/** Result of openStagePullRequest: either a created PR URL, a fallback
+ *  compare-URL the user can click to open a PR manually, or a hard
+ *  failure with a message naming what went wrong. */
+export interface OpenStageMrResult {
+	branch: string
+	base: string
+	createdUrl?: string
+	compareUrl?: string
+	pushed?: boolean
+	pushError?: string
+	prError?: string
+	message: string
+}
+
+/** End-to-end "open the change request for this stage" helper. Pushes
+ *  the stage branch to origin (best-effort), tries `openPullRequest()`
+ *  (gh/glab CLI), and falls back to a provider-specific compare URL on
+ *  failure. The agent's external_review_requested response surfaces
+ *  whichever URL we produced — programmatic when possible, manual link
+ *  when not. */
+export function openStagePullRequest(opts: {
+	slug: string
+	stage: string
+	title?: string
+	body?: string
+}): OpenStageMrResult {
+	const branch = `haiku/${opts.slug}/${opts.stage}`
+	const base = `haiku/${opts.slug}/main`
+	const title =
+		opts.title ?? `H·AI·K·U: ${opts.slug} — stage ${opts.stage} review`
+	const body =
+		opts.body ??
+		`Stage \`${opts.stage}\` is ready for review on intent \`${opts.slug}\`.\n\nMerging this PR signals approval to the H·AI·K·U workflow engine.`
+
+	if (!isGitRepo()) {
+		return {
+			branch,
+			base,
+			message:
+				"This is not a git repo — the stage merge happens via on-disk stages_merged. Nothing to open.",
+		}
+	}
+
+	const push = pushBranchToOrigin(branch)
+	const result: OpenStageMrResult = {
+		branch,
+		base,
+		pushed: push.ok,
+		pushError: push.ok ? undefined : push.error,
+		message: "",
+	}
+
+	if (push.ok) {
+		const pr = openPullRequest(branch, base, title, body)
+		if (pr.ok && pr.url) {
+			result.createdUrl = pr.url
+			result.message = `Stage PR opened: ${pr.url}`
+			return result
+		}
+		result.prError = pr.error
+	}
+
+	const compare = buildCompareUrl(branch, base)
+	if (compare) {
+		result.compareUrl = compare
+		result.message = push.ok
+			? `Stage branch \`${branch}\` is pushed. The gh/glab CLI didn't create the PR (${result.prError ?? "no tool found"}). Click here to open the MR manually: ${compare}`
+			: `Failed to push \`${branch}\` (${push.error}). After resolving the push, open the MR at: ${compare}`
+		return result
+	}
+
+	result.message = push.ok
+		? `Stage branch \`${branch}\` is pushed but no provider-specific compare URL could be built (origin host not recognised). Open the MR manually from \`${branch}\` into \`${base}\` via your provider's web UI.`
+		: `Failed to push \`${branch}\` (${push.error}) and no compare URL could be built. Resolve the push, then open the MR from \`${branch}\` into \`${base}\` via your provider's web UI.`
+	return result
+}
+
+/** Result of `reconcileMisroutedStageMerges`: per-stage reconciliation
+ *  outcome. Used by haiku_run_next's pre-cursor reconciliation step to
+ *  surface either a clean fix or a structured error to the agent. */
+export interface MisroutedStageReconciliation {
+	stage: string
+	stageBranch: string
+	intentMain: string
+	mainline: string
+	/** True when the stage's commits were detected on the repo mainline
+	 *  but not yet on intent main. */
+	misrouted: boolean
+	/** True when intent main was successfully fast-forwarded to pick up
+	 *  the merge. False when reconciliation failed (divergence, etc.). */
+	reconciled: boolean
+	/** Push-to-origin status after reconciliation (best-effort). */
+	pushed: boolean
+	error?: string
+}
+
+/**
+ * Detect and recover from the "User A merged their stage PR into the
+ * repo default branch instead of `haiku/<slug>/main`" case. The
+ * symptom: `haiku/<slug>/<stage>` is merged into `main` (or whatever
+ * the repo default is) but NOT into `haiku/<slug>/main`, so the cursor's
+ * `firstUnmergedStage` keeps the stage pinned and pickup wedges.
+ *
+ * Recovery: fast-forward `haiku/<slug>/main` to the repo mainline so
+ * the merge propagates. Only safe when `haiku/<slug>/main` is a strict
+ * ancestor of mainline — otherwise the FF fails and we surface the
+ * divergence so the operator can resolve manually. Best-effort push to
+ * origin after the FF so other clones see the fix.
+ *
+ * Idempotent: if intent main already has the merge (the canonical
+ * happy path), this is a no-op and returns `misrouted: false`.
+ */
+export function reconcileMisroutedStageMerges(
+	slug: string,
+	stages: ReadonlyArray<string>,
+): MisroutedStageReconciliation[] {
+	if (!isGitRepo()) return []
+	const out: MisroutedStageReconciliation[] = []
+	const mainline = getMainlineBranch()
+	const intentMain = `haiku/${slug}/main`
+	if (!mainline || !branchExists(intentMain)) return out
+
+	for (const stage of stages) {
+		const stageBranch = `haiku/${slug}/${stage}`
+		const result: MisroutedStageReconciliation = {
+			stage,
+			stageBranch,
+			intentMain,
+			mainline,
+			misrouted: false,
+			reconciled: false,
+			pushed: false,
+		}
+		// Resolve refs we'll need (local + remote-tracking variants).
+		const stageRef =
+			tryRun(["git", "rev-parse", "--verify", stageBranch]) ||
+			tryRun(["git", "rev-parse", "--verify", `origin/${stageBranch}`])
+		if (!stageRef) continue
+		const intentMainRef =
+			tryRun(["git", "rev-parse", "--verify", intentMain]) ||
+			tryRun(["git", "rev-parse", "--verify", `origin/${intentMain}`])
+		if (!intentMainRef) continue
+		// Already merged into intent main? No reconciliation needed.
+		if (isAncestor(stageRef, intentMainRef)) {
+			const aheadOfBranch = countAheadCommits(stageRef, intentMainRef)
+			if (aheadOfBranch > 0) continue // canonical happy path
+		}
+		// Look for the stage's commits on the repo mainline (local or
+		// remote-tracking). If the stage branch is an ancestor of
+		// mainline, the merge happened — just on the wrong target.
+		const mainlineRef =
+			tryRun(["git", "rev-parse", "--verify", `origin/${mainline}`]) ||
+			tryRun(["git", "rev-parse", "--verify", mainline])
+		if (!mainlineRef) continue
+		if (!isAncestor(stageRef, mainlineRef)) continue
+		const mainlineAheadOfStage = countAheadCommits(stageRef, mainlineRef)
+		if (mainlineAheadOfStage <= 0) continue
+		result.misrouted = true
+
+		// Fast-forward intent main to mainline. Only safe when intent
+		// main is itself an ancestor of mainline (otherwise we'd
+		// silently drop divergent commits).
+		if (!isAncestor(intentMainRef, mainlineRef)) {
+			result.error = `Stage \`${stageBranch}\` was merged into \`${mainline}\` (the repo default) instead of \`${intentMain}\`, but \`${intentMain}\` has commits that aren't on \`${mainline}\` — fast-forward isn't safe. Resolve manually: \`git checkout ${intentMain} && git merge ${mainline}\` (or \`origin/${mainline}\`), resolve any conflicts, then re-run /haiku:pickup.`
+			out.push(result)
+			continue
+		}
+		// Check out intent main (transient) and FF to mainline.
+		// Skip when intent main is held by another worktree — we
+		// can't switch into it from here. The user will need to
+		// reconcile from that worktree.
+		const currentBranch = getCurrentBranch()
+		let restoreBranch = ""
+		try {
+			if (currentBranch !== intentMain) {
+				try {
+					execFileSync("git", ["checkout", intentMain], { stdio: "pipe" })
+					restoreBranch = currentBranch
+				} catch (checkoutErr) {
+					result.error = `Could not check out \`${intentMain}\` to fast-forward (${checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr)}). Reconcile manually: \`git checkout ${intentMain} && git merge --ff-only origin/${mainline}\`.`
+					out.push(result)
+					continue
+				}
+			}
+			try {
+				execFileSync("git", ["merge", "--ff-only", `origin/${mainline}`], {
+					stdio: "pipe",
+				})
+				result.reconciled = true
+			} catch {
+				// Try the local mainline as a fallback (some repos may
+				// not have origin/<mainline> tracked).
+				try {
+					execFileSync("git", ["merge", "--ff-only", mainline], {
+						stdio: "pipe",
+					})
+					result.reconciled = true
+				} catch (mergeErr) {
+					result.error = `Fast-forward of \`${intentMain}\` to \`${mainline}\` failed: ${mergeErr instanceof Error ? mergeErr.message : String(mergeErr)}. Reconcile manually: \`git checkout ${intentMain} && git merge origin/${mainline}\`, resolve any conflicts, then re-run /haiku:pickup.`
+				}
+			}
+			if (result.reconciled) {
+				const push = pushBranchToOrigin(intentMain)
+				result.pushed = push.ok
+				if (!push.ok) {
+					result.error = `Reconciled \`${intentMain}\` locally but push to origin failed: ${push.error}. The next agent on this branch needs to push manually.`
+				}
+			}
+		} catch (err) {
+			result.error = `Misrouted-merge reconciliation threw: ${err instanceof Error ? err.message : String(err)}`
+		} finally {
+			// Restore the original branch unconditionally. If a throw
+			// lands between checkout and the merge, restoring inside
+			// the try block (where it lived previously) gets skipped
+			// and the worktree is left on intentMain — every
+			// subsequent write from the agent then lands on the wrong
+			// branch. `finally` guarantees the restore runs.
+			if (restoreBranch) {
+				try {
+					execFileSync("git", ["checkout", restoreBranch], { stdio: "pipe" })
+				} catch {
+					/* non-fatal — caller's branch enforcement will catch */
+				}
+			}
+		}
+		out.push(result)
+	}
+	return out
+}
+
+/** Helpers used by reconcileMisroutedStageMerges. Internal — not exported. */
+function isAncestor(maybeAncestor: string, descendant: string): boolean {
+	if (!maybeAncestor || !descendant) return false
+	try {
+		execFileSync(
+			"git",
+			["merge-base", "--is-ancestor", maybeAncestor, descendant],
+			{ stdio: "ignore" },
+		)
+		return true
+	} catch {
+		return false
+	}
+}
+
+function countAheadCommits(behindRef: string, aheadRef: string): number {
+	const out = tryRun([
+		"git",
+		"rev-list",
+		"--count",
+		`${behindRef}..${aheadRef}`,
+	])
+	const n = Number.parseInt(out, 10)
+	return Number.isFinite(n) ? n : 0
+}
+
 /** Check if we're on the intent's main branch (continuous mode) */
 export function isOnIntentBranch(slug: string): boolean {
 	return getCurrentBranch() === `haiku/${slug}/main`
@@ -498,7 +838,7 @@ export function ensureOnIntentMain(slug: string): boolean {
 	if (!branchExists(branch)) return true
 	if (getCurrentBranch() === branch) return true
 	try {
-		run(["git", "checkout", branch])
+		safeCheckout(["checkout", branch])
 		return true
 	} catch {
 		return false
@@ -515,18 +855,18 @@ function checkoutOrCreate(branch: string, baseBranch?: string): string {
 	const exists = tryRun(["git", "rev-parse", "--verify", branch])
 	if (exists) {
 		if (getCurrentBranch() !== branch) {
-			run(["git", "checkout", branch])
+			safeCheckout(["checkout", branch])
 		}
 	} else if (baseBranch) {
 		// Fork from baseBranch in a single command so we never bounce the
 		// working tree through baseBranch first. baseBranch must exist —
 		// let `git checkout -b` throw if not so the caller knows.
-		run(["git", "checkout", "-b", branch, baseBranch])
+		safeCheckout(["checkout", "-b", branch, baseBranch])
 	} else {
 		try {
-			run(["git", "checkout", "-b", branch])
+			safeCheckout(["checkout", "-b", branch])
 		} catch {
-			/* already on it or can't create */
+			/* already on it, can't create, or worktree locked */
 		}
 	}
 	return branch
@@ -620,6 +960,7 @@ export function mergeStageBranchForward(
 				...cwdArgs,
 				"merge",
 				fromBranch,
+				"--no-ff",
 				"--no-edit",
 				"-m",
 				`haiku: merge forward ${fromStage} → ${toStage}`,
@@ -733,6 +1074,7 @@ export function mergeStageBranchIntoMain(
 					...cwdArgs,
 					"merge",
 					stageBranch,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					mergeMessage,
@@ -767,7 +1109,7 @@ export function mergeStageBranchIntoMain(
 			// doesn't refuse with "would be overwritten."
 			autoCommitDirtyTree(stageBranch)
 			try {
-				run(["git", "checkout", mainBranch])
+				safeCheckout(["checkout", mainBranch])
 			} catch (checkoutErr) {
 				const raw =
 					checkoutErr instanceof Error
@@ -867,6 +1209,7 @@ export function consolidateStageBranches(
 					cwd,
 					"merge",
 					lastStageBranch,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					"haiku: consolidate discrete stages into main",
@@ -1034,6 +1377,61 @@ export function ensureStageBranch(slug: string, stage: string): string {
  * branch, producing the exact "stage work shipped to dev without the
  * sweep fixes" problem.
  */
+/**
+ * Wrap a branch-switching `git checkout` with a worktree-lock guard.
+ * P10 (2026-05-06): every checkout that switches branches must go
+ * through this helper so locked worktrees can't be hijacked. The
+ * file-level `git checkout <ref> -- <path>` form is NOT a branch
+ * switch and doesn't need this guard — it's a content fetch.
+ *
+ * Throws on a locked worktree with a descriptive error so callers
+ * surface the failure to the user. Callers that catch in turn
+ * (ensureOnStageBranch, mergeStageBranchIntoMain, etc.) translate
+ * the throw into their own structured "block: worktree_locked"
+ * response.
+ */
+function safeCheckout(args: string[]): void {
+	if (isCurrentWorktreeLocked()) {
+		const targetHint = args[args.length - 1] ?? "<unknown>"
+		throw new Error(
+			`Refusing to \`git checkout ${args.join(" ")}\` — current worktree is locked. ` +
+				`Locked worktrees are reserved for in-flight work and must not be hijacked ` +
+				`by a parallel intent's branch enforcement. Run from a different worktree, ` +
+				`or unlock with \`git worktree unlock\` if the lock is stale. ` +
+				`(Target branch: ${targetHint})`,
+		)
+	}
+	run(["git", ...args])
+}
+
+/**
+ * Detect whether the current worktree is git-locked. P9 (2026-05-06):
+ * a locked worktree is sacred — the engine must never `git checkout`
+ * a branch on it, because that's how a parallel run_next from a
+ * different intent hijacks the working tree of an in-flight
+ * refactor. The lock file lives at `<git-dir>/worktrees/<name>/locked`
+ * for added worktrees, or `<git-dir>/locked` for the primary repo.
+ *
+ * Best-effort: returns `false` on any read error rather than throwing,
+ * because the lock check is a guard, not the main path.
+ */
+export function isCurrentWorktreeLocked(): boolean {
+	try {
+		const out = execFileSync("git", ["rev-parse", "--git-dir"], {
+			encoding: "utf8",
+			stdio: "pipe",
+		}).trim()
+		if (!out) return false
+		// `git rev-parse --git-dir` may return a relative path. Resolve
+		// against process.cwd() so the existsSync check works regardless.
+		const absGitDir = out.startsWith("/") ? out : join(process.cwd(), out)
+		const lockedPath = join(absGitDir, "locked")
+		return existsSync(lockedPath)
+	} catch {
+		return false
+	}
+}
+
 export function ensureOnStageBranch(
 	slug: string,
 	stage: string | undefined,
@@ -1046,8 +1444,13 @@ export function ensureOnStageBranch(
 	 *  emit a `commit_wip` action rather than a hard error requiring a human.
 	 *  Values: "dirty_tree" — uncommitted changes blocked a branch switch;
 	 *  "merge_conflict" — the merge left conflicts to resolve;
-	 *  "merge_in_progress" — MERGE_HEAD/REBASE_HEAD etc present. */
-	block?: "dirty_tree" | "merge_conflict" | "merge_in_progress"
+	 *  "merge_in_progress" — MERGE_HEAD/REBASE_HEAD etc present;
+	 *  "worktree_locked" — current worktree is locked, refusing to checkout. */
+	block?:
+		| "dirty_tree"
+		| "merge_conflict"
+		| "merge_in_progress"
+		| "worktree_locked"
 	/** For block=dirty_tree: the paths git reported as "would be overwritten". */
 	dirty_files?: string[]
 	/** The branch we were trying to reach when blocked. */
@@ -1055,6 +1458,37 @@ export function ensureOnStageBranch(
 } {
 	if (!isGitRepo())
 		return { ok: true, branch: "", message: "no git", switched: false }
+
+	// P9 (2026-05-06): hard refuse on locked worktrees. If the current
+	// working tree is locked (typically because another in-flight
+	// engine run or a manual `git worktree lock` reserved it for a
+	// specific purpose), DO NOT switch branches under it. Surface a
+	// clear error so the caller (or the user) sees what happened
+	// instead of a silently-hijacked tree.
+	if (isCurrentWorktreeLocked()) {
+		const targetBranchHint = stage
+			? `haiku/${slug}/${stage}`
+			: `haiku/${slug}/main`
+		const current = getCurrentBranch()
+		// Already on the target — no checkout needed; locked tree is
+		// fine because we're not switching anything.
+		if (current === targetBranchHint) {
+			return {
+				ok: true,
+				branch: current,
+				message: `worktree locked; already on '${current}', no switch needed`,
+				switched: false,
+			}
+		}
+		return {
+			ok: false,
+			branch: current,
+			message: `Refusing to checkout '${targetBranchHint}' on a locked worktree (current: '${current}'). Locked worktrees are reserved for in-flight work and must not be hijacked by a parallel intent's branch enforcement. Run from a different worktree, or unlock this one with \`git worktree unlock\` if the lock is stale.`,
+			switched: false,
+			block: "worktree_locked",
+			target_branch: targetBranchHint,
+		}
+	}
 
 	const intentMain = `haiku/${slug}/main`
 	const stageBranch = stage ? `haiku/${slug}/${stage}` : ""
@@ -1244,6 +1678,7 @@ export function ensureOnStageBranch(
 					"git",
 					"merge",
 					intentMain,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					`haiku: merge intent-main → stage ${stage} (workflow engine branch enforcement)`,
@@ -1997,7 +2432,12 @@ export function mergeUnitWorktree(
 	slug: string,
 	unit: string,
 	stage: string,
-): { success: boolean; message: string } {
+): {
+	success: boolean
+	message: string
+	isConflict?: boolean
+	conflictFiles?: string[]
+} {
 	if (!isGitRepo()) return { success: true, message: "no worktree" }
 	if (!stage)
 		return {
@@ -2161,10 +2601,24 @@ export function mergeUnitWorktree(
 			message: `merged ${unitBranch} → ${stageBranch}`,
 		}
 	} catch (err) {
-		return {
-			success: false,
-			message: err instanceof Error ? err.message : String(err),
+		// Match the structured envelope every other engine merge site
+		// returns: when this is a real merge_conflict on agent content,
+		// surface `isConflict: true`, the file paths, and a resolution
+		// message naming `git add` and `git commit`. Anything else is
+		// returned with the bare message (corruption, missing branch,
+		// dirty tree) — same shape as before.
+		const message = err instanceof Error ? err.message : String(err)
+		const conflictPaths = (err as { conflictPaths?: string[] } | null)
+			?.conflictPaths
+		if (Array.isArray(conflictPaths) && conflictPaths.length > 0) {
+			return {
+				success: false,
+				isConflict: true,
+				conflictFiles: conflictPaths,
+				message: `Merge ${unitBranch} → ${stageBranch} left ${conflictPaths.length} conflicted file(s): ${conflictPaths.join(", ")}. Resolve the conflicts on '${stageBranch}' (edit files, \`git add\`, \`git commit\`), then retry the unit merge.`,
+			}
 		}
+		return { success: false, message }
 	}
 }
 
@@ -2329,6 +2783,7 @@ export function mergeDiscoveryWorktree(
 					worktreePath,
 					"merge",
 					baseBranch,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					`haiku: sync ${stage} into discovery ${template}`,
@@ -2364,6 +2819,7 @@ export function mergeDiscoveryWorktree(
 				...(cwd ? ["-C", cwd] : []),
 				"merge",
 				discBranch,
+				"--no-ff",
 				"--no-edit",
 				"-m",
 				`haiku: merge discovery ${template} into ${stage}`,
@@ -2627,6 +3083,7 @@ export function mergeFixChainWorktree(
 					worktreePath,
 					"merge",
 					baseBranch,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					`haiku: sync ${scope} into fix-chain ${feedbackId}`,
@@ -2663,6 +3120,7 @@ export function mergeFixChainWorktree(
 				...(cwd ? ["-C", cwd] : []),
 				"merge",
 				fixBranch,
+				"--no-ff",
 				"--no-edit",
 				"-m",
 				`haiku: merge fix-chain ${feedbackId} into ${scope}`,
@@ -2810,7 +3268,7 @@ export function finalizeIntentBranches(
 	// 2. Make sure we end up on intent main.
 	if (getCurrentBranch() !== mainBranch) {
 		try {
-			run(["git", "checkout", mainBranch])
+			safeCheckout(["checkout", mainBranch])
 		} catch (err) {
 			return {
 				success: false,
@@ -2924,7 +3382,7 @@ export function prepareRevisitBranch(
 
 		// 2. Switch to target branch so merges land there.
 		if (getCurrentBranch() !== targetBranch) {
-			run(["git", "checkout", targetBranch])
+			safeCheckout(["checkout", targetBranch])
 		}
 
 		// 3. Merge main → target (approved upstream changes). On conflict,
@@ -2943,6 +3401,7 @@ export function prepareRevisitBranch(
 					"git",
 					"merge",
 					mainBranch,
+					"--no-ff",
 					"--no-edit",
 					"-m",
 					`haiku: merge main → ${targetStage} (revisit prep)`,
@@ -2983,6 +3442,7 @@ export function prepareRevisitBranch(
 						"git",
 						"merge",
 						fromBranch,
+						"--no-ff",
 						"--no-edit",
 						"-m",
 						`haiku: merge ${fromStage} → ${targetStage} (revisit carries future-stage work back)`,

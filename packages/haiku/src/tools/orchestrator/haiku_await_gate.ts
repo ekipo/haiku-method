@@ -20,24 +20,41 @@
 //   4. On infra failure: falls back to MCP elicitation when the host
 //      supports it; otherwise returns an actionable error.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
 import { ensureOnStageBranch } from "../../git-worktree.js"
+import {
+	buildApprovalRecord,
+	buildReviewRecord,
+} from "../../orchestrator/workflow/sign-slot.js"
 import {
 	buildGuardResponse,
 	completeOrReviewIntent,
 	findIncompleteStages,
 	getAwaitGateReviewSession,
-	getElicitInput,
 	isStagePreExecute,
 	listUnits,
-	resetFixLoopBolts,
 	workflowAdvancePhase,
 	workflowAdvanceStage,
 	workflowCompleteStage,
 	workflowIntentComplete,
 	writeReviewFeedbackFiles,
 } from "../../orchestrator.js"
+
+// v4: resetFixLoopBolts deleted with revisit.ts. Fix-loop bolts are
+// derived from feedback iterations[].length; there's no counter to
+// reset — terminal feedback-assessor advance closes the FB and the
+// next bolt is just the next iteration entry.
+const resetFixLoopBolts = (_slug: string, _stage: string): void => {
+	/* no-op */
+}
+
 import { reportError } from "../../sentry.js"
 import { logSessionEvent } from "../../session-metadata.js"
 import {
@@ -64,6 +81,10 @@ import {
 } from "../../state-tools.js"
 import { defineTool } from "../define.js"
 import { withAnnouncement } from "./_announce.js"
+import {
+	buildAwaitTimeoutResponse,
+	isAwaitWaitTimeoutError,
+} from "./_await_gate_timeout.js"
 import { text } from "./_text.js"
 import { withInstructions as renderInstructions } from "./_with_instructions.js"
 
@@ -74,23 +95,84 @@ function readFrontmatter(filePath: string): Record<string, unknown> {
 	return data
 }
 
+/**
+ * v4 helper: stamp the appropriate approval/review record for a gate
+ * approval. Replaces the v3 `workflowAdvancePhase/Stage/CompleteStage`
+ * call chain — in v4 the cursor sees the new sig on the next tick and
+ * routes forward (next role, merge_stage, intent_review, etc.)
+ * automatically.
+ *
+ * Mapping by gateContext:
+ *   - "intent_completion" → intent.approvals.user
+ *   - "intent_review"     → intent.approvals.user (spec is filed
+ *                           separately by review-agents)
+ *   - "elaborate_to_execute" → reviews.user on every unit in stage
+ *                              (pre-execute spec review)
+ *   - "stage_gate"        → approvals.user on every unit in stage
+ *                           (post-execute output approval)
+ *
+ * The next haiku_run_next tick walks the cursor and picks up where
+ * the new approval routes us.
+ */
+function stampGateApproval(
+	slug: string,
+	gateContext: string,
+	stage: string,
+): void {
+	const intentDirAbs = intentDir(slug)
+	const intentMd = join(intentDirAbs, "intent.md")
+
+	if (gateContext === "intent_completion" || gateContext === "intent_review") {
+		const fm = readFrontmatter(intentMd)
+		const approvals =
+			fm.approvals && typeof fm.approvals === "object"
+				? (fm.approvals as Record<string, unknown>)
+				: {}
+		// Intent-scope user approval witnesses the intent body.
+		approvals.user = buildReviewRecord(intentMd)
+		setFrontmatterField(intentMd, "approvals", approvals)
+		return
+	}
+
+	// Stage-scoped gates: stamp every unit in the stage.
+	const isPreExecute = gateContext === "elaborate_to_execute"
+	const targetField = isPreExecute ? "reviews" : "approvals"
+	const unitsDir = join(intentDirAbs, "stages", stage, "units")
+	if (!existsSync(unitsDir)) return
+	const entries = readdirSync(unitsDir)
+	for (const entry of entries) {
+		if (!entry.endsWith(".md")) continue
+		const unitPath = join(unitsDir, entry)
+		const fm = readFrontmatter(unitPath)
+		const records =
+			fm[targetField] && typeof fm[targetField] === "object"
+				? (fm[targetField] as Record<string, unknown>)
+				: {}
+		// Reviews witness the unit body; approvals witness the
+		// declared output paths.
+		if (isPreExecute) {
+			records.user = buildReviewRecord(unitPath)
+		} else {
+			const outputs = Array.isArray(fm.outputs) ? (fm.outputs as string[]) : []
+			records.user = buildApprovalRecord(intentDirAbs, outputs)
+		}
+		setFrontmatterField(unitPath, targetField, records)
+	}
+}
+
 export default defineTool({
 	name: "haiku_await_gate",
 	description:
-		"Block on a pending gate-review session for an intent until the user " +
-		"approves, requests changes, or the wait times out. Launches the review " +
-		"URL in the default browser best-effort, BUT only when no SPA tab is " +
-		"already attached for this session (live-websocket check is authoritative " +
-		"— passing `auto_open: true` will never create a duplicate tab). Set " +
-		"`auto_open: false` only when the local-browser launch is known to fail " +
-		"(headless containers, sandboxed runners). Returns the resulting " +
-		"orchestrator action (advance_stage / changes_requested / " +
-		"external_review_requested / etc.).\n\n" +
-		"Call this AFTER haiku_run_next returns a `gate_review` action — that " +
-		"action carries the review_url and session_id, and the recommended flow is " +
-		"(1) post the URL to the user in chat, (2) call this tool. The tool reads " +
-		"the persisted session_id from stage state by default; pass `session_id` " +
-		"explicitly to override.",
+		"Resume / recovery entry point for a pending gate-review session. " +
+		"Under v4 the canonical flow blocks INSIDE haiku_run_next — the " +
+		"engine prepares the session, opens the browser best-effort, awaits " +
+		"the user's decision, and returns the post-decision action all in " +
+		"one tool call. Use haiku_await_gate only when the original tick " +
+		"timed out, the MCP host disconnected, or the agent restart lost " +
+		"the in-memory blocking call; reads gate_review_session_id from " +
+		"intent.md to reattach. Returns the same post-decision action " +
+		"shape (advance_stage / advance_phase / changes_requested / " +
+		"external_review_requested / intent_complete / etc.).",
 	inputSchema: jsonSchemaOf(HAIKU_AWAIT_GATE_INPUT_SCHEMA),
 	async handle(args, signal) {
 		// AJV gate first — every MCP tool input gets a real schema check
@@ -167,7 +249,6 @@ export default defineTool({
 		const intentDirPath = `.haiku/intents/${slug}`
 
 		const _awaitGateReviewSession = getAwaitGateReviewSession()
-		const _elicitInput = getElicitInput()
 		if (!_awaitGateReviewSession) {
 			return text(
 				"Gate-review await handler not registered — server.ts wiring is broken. File a bug.",
@@ -219,10 +300,19 @@ export default defineTool({
 		}
 
 		try {
+			// Gate-review timeout (2026-05-06): bumped from 30min to 4h.
+			// 30min was too short for real human reviews (lunch, meetings,
+			// asking a colleague to look). The agent saw timeouts as errors
+			// and surfaced them noisily ("Gate review timed out — what now?")
+			// even though the human was still working. 4h covers the long
+			// tail of legitimate review duration while still bounding the
+			// MCP block in case of a stuck process. Session TTL in
+			// sessions.ts is matched so the in-memory session survives a
+			// full wait cycle.
 			const reviewResult = await _awaitGateReviewSession(sessionId, {
 				autoOpen,
 				reviewUrl,
-				timeoutMs: 30 * 60 * 1000,
+				timeoutMs: 4 * 60 * 60 * 1000,
 				signal,
 			})
 
@@ -253,8 +343,8 @@ export default defineTool({
 							.studio as string) || ""
 					// Guard: all declared stages must be completed before sealing.
 					// Belt-and-suspenders against state drift between gate-review
-					// preparation and approval (the user can take up to 30 minutes
-					// to decide; pre-tick's check at prepare-time isn't enough).
+					// preparation and approval (the user can take up to 4h to
+					// decide; pre-tick's check at prepare-time isn't enough).
 					const incompleteStages = findIncompleteStages(
 						slug,
 						studioForCompletion,
@@ -269,6 +359,7 @@ export default defineTool({
 							}),
 						)
 					}
+					stampGateApproval(slug, "intent_completion", stage)
 					workflowIntentComplete(slug)
 					syncSessionMetadata(slug, stFile)
 					const gateResult = {
@@ -283,6 +374,7 @@ export default defineTool({
 					return text(withInstructions(gateResult))
 				}
 				if (gateContext === "intent_review") {
+					stampGateApproval(slug, "intent_review", stage)
 					const intentFilePath = join(process.cwd(), intentDirPath, "intent.md")
 					setFrontmatterField(intentFilePath, "intent_reviewed", true)
 					// Pre-stage intent_review (current shape): no active stage,
@@ -319,6 +411,7 @@ export default defineTool({
 					return text(withInstructions(gateResult))
 				}
 				if (gateContext === "elaborate_to_execute" && nextPhase) {
+					stampGateApproval(slug, "elaborate_to_execute", stage)
 					workflowAdvancePhase(slug, stage, nextPhase)
 					syncSessionMetadata(slug, stFile)
 					const gateResult = {
@@ -335,6 +428,7 @@ export default defineTool({
 					return text(withInstructions(gateResult))
 				}
 				if (nextStage) {
+					stampGateApproval(slug, "stage_gate", stage)
 					workflowAdvanceStage(slug, stage, nextStage)
 					syncSessionMetadata(slug, stFile)
 					const gateResult = {
@@ -350,6 +444,7 @@ export default defineTool({
 					}
 					return text(withInstructions(gateResult))
 				}
+				stampGateApproval(slug, "stage_gate", stage)
 				workflowCompleteStage(slug, stage, "advanced")
 				syncSessionMetadata(slug, stFile)
 				const approvedStudio =
@@ -381,20 +476,65 @@ export default defineTool({
 				// both wrong for a successful external-review handoff.
 				workflowCompleteStage(slug, stage, "advanced")
 				syncSessionMetadata(slug, stFile)
+
+				// Engine-side PR opening: push the stage branch and
+				// invoke gh/glab with `--base haiku/<slug>/main` so the
+				// MR lands on the intent main branch (NOT the repo
+				// default). This was a real footgun — agents would run
+				// `gh pr create` without --base and the PR would target
+				// the repo default, breaking firstUnmergedStage detection
+				// for downstream pickup. The engine now does it
+				// programmatically; if both gh and glab fail, we surface
+				// the provider-specific compare URL so the user can open
+				// the MR in one click.
+				let externalReviewMessage: string
+				if (isGitRepo()) {
+					const { openStagePullRequest } = await import("../../git-worktree.js")
+					const opened = openStagePullRequest({ slug, stage })
+					if (opened.createdUrl) {
+						// Persist the URL on intent.md so the next tick
+						// (and the discoverReviewUrl polling in
+						// session-api) sees the PR without the agent
+						// having to round-trip back with
+						// external_review_url.
+						try {
+							const intentMd = join(intentDir(slug), "intent.md")
+							setFrontmatterField(
+								intentMd,
+								"external_review_url",
+								opened.createdUrl,
+							)
+						} catch {
+							/* non-fatal — agent can still pass via run_next */
+						}
+						externalReviewMessage = withAnnouncement(
+							`The user routed stage "${stage}" to external review. The engine opened the MR for you: ${opened.createdUrl}`,
+							`Tell the user: "I opened the MR at ${opened.createdUrl} — review and merge it when you're ready. Run /haiku:pickup after the merge to continue." The MR was created against \`haiku/${slug}/main\` (NOT the repo default) so the workflow engine can detect the merge.`,
+						)
+					} else if (opened.compareUrl) {
+						externalReviewMessage = withAnnouncement(
+							`The user routed stage "${stage}" to external review. ${opened.message}`,
+							`The engine couldn't open the MR programmatically (${opened.prError ?? opened.pushError ?? "no gh/glab on PATH"}). Tell the user to click ${opened.compareUrl} to open it manually — that link pre-fills base \`haiku/${slug}/main\` so the merge signal lands correctly. After they paste the resulting URL back to you, call haiku_run_next { intent: "${slug}", external_review_url: "<url>" }.`,
+						)
+					} else {
+						externalReviewMessage = withAnnouncement(
+							`The user routed stage "${stage}" to external review.`,
+							`${opened.message} Open ONE merge request from branch \`haiku/${slug}/${stage}\` to \`haiku/${slug}/main\` (NOT the repo default — the engine detects the merge by intent main, not by the default branch). Record the review URL via haiku_run_next { intent: "${slug}", external_review_url: "<url>" }.`,
+						)
+					}
+				} else {
+					externalReviewMessage = withAnnouncement(
+						`The user routed stage "${stage}" to external review.`,
+						`Submit the work for review through your project's review process. Record the review URL via haiku_run_next { intent: "${slug}", external_review_url: "<url>" }. Run /haiku:pickup again after the PR is merged.`,
+					)
+				}
+
 				const gateResult = {
 					action: "external_review_requested",
 					intent: slug,
 					stage,
 					feedback: reviewResult.feedback,
-					message: isGitRepo()
-						? withAnnouncement(
-								`The user routed stage "${stage}" to external review.`,
-								`Open ONE merge request from branch 'haiku/${slug}/${stage}' to 'haiku/${slug}/main'. Do NOT open separate MRs for individual units — all unit work is already merged into the stage branch. Include the H·AI·K·U browse link in the description so reviewers can see the intent, units, and knowledge artifacts. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after the PR is merged.`,
-							)
-						: withAnnouncement(
-								`The user routed stage "${stage}" to external review.`,
-								`Submit the work for review through your project's review process. Record the review URL via haiku_run_next { intent, external_review_url }. Run /haiku:pickup again after the PR is merged.`,
-							),
+					message: externalReviewMessage,
 				}
 				return text(withInstructions(gateResult))
 			}
@@ -562,21 +702,19 @@ export default defineTool({
 				}
 			}
 
-			// Timeouts: agent should retry the await tool to keep waiting.
-			if (
-				errorMsg.includes("Review timeout") ||
-				errorMsg.includes("timeout") ||
-				errorMsg.includes("Timeout")
-			) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Gate review timed out after 30 minutes with no decision. Call haiku_await_gate { intent: "${slug}" } again to keep waiting, or haiku_run_next { intent: "${slug}" } to recreate the session.`,
-						},
-					],
-					isError: true,
-				}
+			// Timeouts are NOT errors — they're "still waiting" signals.
+			// (2026-05-06) Returning isError: true caused the agent to
+			// surface the timeout to the user as a failure ("Review
+			// timed out — what should we do?") and trigger noisy retry
+			// loops, even though the human was just busy. The wait
+			// timeout bound (4h, see _awaitGateReviewSession call above)
+			// catches stuck processes; it's not a user-facing fault.
+			// Calmer message + isError: false = the agent treats this as
+			// a continuation cue and silently re-awaits. See
+			// `isAwaitWaitTimeoutError` / `buildAwaitTimeoutResponse`
+			// (top of file) for the testable helpers.
+			if (isAwaitWaitTimeoutError(errorMsg)) {
+				return buildAwaitTimeoutResponse(slug)
 			}
 
 			const agentFixable =
@@ -602,195 +740,24 @@ export default defineTool({
 
 			if (stFile) {
 				logSessionEvent(stFile, {
-					event: "gate_elicitation_fallback",
+					event: "gate_review_ui_failed",
 					intent: slug,
 					stage,
 					error: errorMsg,
 				})
 			}
 
-			if (_elicitInput) {
-				try {
-					const elicitResult = await _elicitInput({
-						message:
-							gateContext === "intent_review"
-								? `Review UI failed (${errorMsg}). Approve intent '${slug}' to begin work?`
-								: `Review UI failed (${errorMsg}). Approve stage '${stage}' specs to proceed to execution?`,
-						requestedSchema: {
-							type: "object" as const,
-							properties: {
-								decision: {
-									type: "string",
-									title: "Decision",
-									description: "Approve specs or request changes",
-									enum: ["approve", "request_changes"],
-								},
-								feedback: {
-									type: "string",
-									title: "Feedback (optional)",
-									description: "Any notes or requested changes",
-								},
-							},
-							required: ["decision"],
-						},
-					})
-
-					const postElicitGuard = ensureOnStageBranch(slug, stage)
-					if (!postElicitGuard.ok) {
-						return buildGuardResponse(
-							slug,
-							stage,
-							postElicitGuard,
-							"after elicitation",
-						)
-					}
-
-					if (elicitResult.action === "accept" && elicitResult.content) {
-						const decision = (elicitResult.content as Record<string, string>)
-							.decision
-						const feedback =
-							(elicitResult.content as Record<string, string>).feedback || ""
-						if (decision === "approve") {
-							if (gateContext === "intent_review") {
-								const intentFilePath = join(
-									process.cwd(),
-									intentDirPath,
-									"intent.md",
-								)
-								setFrontmatterField(intentFilePath, "intent_reviewed", true)
-								// Mirror of the main approval path: pre-stage gate
-								// has no active stage to advance, so stamp
-								// intent_reviewed and clear the phase. Calling
-								// workflowAdvancePhase(slug, "", "execute") here
-								// would resolve to .haiku/intents/{slug}/stages//state.json
-								// (ENOENT, swallowed by the outer catch into a
-								// generic GATE BLOCKED) and leave phase: intent_review
-								// stranded on intent.md.
-								if (stage && nextPhase) {
-									workflowAdvancePhase(slug, stage, nextPhase)
-								} else {
-									deleteFrontmatterFields(intentFilePath, ["phase"])
-									sealIntentState(slug)
-								}
-								gitCommitState(
-									`haiku: intent ${slug} approved by user (elicitation)`,
-								)
-								syncSessionMetadata(slug, stFile)
-								return text(
-									withInstructions({
-										action: "intent_approved",
-										intent: slug,
-										stage: stage || null,
-										from_phase: "intent_review",
-										to_phase: nextPhase || "execute",
-										message: stage
-											? withAnnouncement(
-													`The user approved intent "${slug}" (via elicitation fallback) — advancing to ${nextPhase || "execute"}.`,
-													"Call haiku_run_next immediately.",
-												)
-											: withAnnouncement(
-													`The user approved intent "${slug}" (via elicitation fallback) — beginning stage 0.`,
-													"Call haiku_run_next immediately.",
-												),
-									}),
-								)
-							}
-							if (gateContext === "elaborate_to_execute" && nextPhase) {
-								workflowAdvancePhase(slug, stage, nextPhase)
-								syncSessionMetadata(slug, stFile)
-								return text(
-									withInstructions({
-										action: "advance_phase",
-										intent: slug,
-										stage,
-										from_phase: "elaborate",
-										to_phase: nextPhase,
-										message: withAnnouncement(
-											`The user approved the specs for stage "${stage}" (via elicitation fallback) — advancing to ${nextPhase}.`,
-											"Call haiku_run_next immediately.",
-										),
-									}),
-								)
-							}
-							if (nextStage) {
-								workflowAdvanceStage(slug, stage, nextStage)
-								syncSessionMetadata(slug, stFile)
-								return text(
-									withInstructions({
-										action: "advance_stage",
-										intent: slug,
-										stage,
-										next_stage: nextStage,
-										gate_outcome: "advanced",
-										message: withAnnouncement(
-											`The user approved stage "${stage}" (via elicitation fallback) — advancing to "${nextStage}".`,
-											"Call haiku_run_next immediately.",
-										),
-									}),
-								)
-							}
-							workflowCompleteStage(slug, stage, "advanced")
-							syncSessionMetadata(slug, stFile)
-							const elicitStudio =
-								(readFrontmatter(join(intentDir(slug), "intent.md"))
-									.studio as string) || ""
-							return text(
-								withInstructions(
-									completeOrReviewIntent(
-										slug,
-										elicitStudio,
-										withAnnouncement(
-											`The user approved the final stage "${stage}" (via elicitation fallback) — intent complete.`,
-											"Report the completion summary to the user.",
-										),
-									),
-								),
-							)
-						}
-						syncSessionMetadata(slug, stFile)
-						const changeMsg =
-							gateContext === "intent_review"
-								? withAnnouncement(
-										`The user requested changes on intent "${slug}" (via elicitation fallback): ${feedback}.`,
-										`Revise the intent description, then call haiku_run_next { intent: "${slug}" } again.`,
-									)
-								: withAnnouncement(
-										`The user requested changes on stage "${stage}" (via elicitation fallback): ${feedback}.`,
-										`Call haiku_run_next { intent: "${slug}" } again after fixing.`,
-									)
-						return text(
-							withInstructions({
-								action: "changes_requested",
-								intent: slug,
-								stage,
-								feedback,
-								message: changeMsg,
-							}),
-						)
-					}
-					syncSessionMetadata(slug, stFile)
-					return text(
-						withInstructions({
-							action: "gate_blocked",
-							intent: slug,
-							stage,
-							message: withAnnouncement(
-								`The user cancelled gate review${stage ? ` for stage "${stage}"` : ""}.`,
-								"Call haiku_run_next again to retry, or ask the user how they'd like to proceed.",
-							),
-						}),
-					)
-				} catch {
-					/* fall through */
-				}
-			}
-
+			// 2026-05-07: elicitation fallback removed. The SPA review
+			// pane is the only review surface. If it fails, surface the
+			// error so the user can investigate (port conflict, browser
+			// blocked, etc.) rather than silently down-shifting to a
+			// non-equivalent text confirm.
 			syncSessionMetadata(slug, stFile)
 			return {
 				content: [
 					{
 						type: "text" as const,
-						text: `GATE BLOCKED: Review UI and elicitation both failed. Error: ${errorMsg}. Logged to .haiku/logs/gate-review-error.log. Call haiku_run_next { intent: "${slug}" } to recreate the review session and retry.`,
+						text: `GATE BLOCKED: Review UI failed to start. Error: ${errorMsg}. Logged to .haiku/logs/gate-review-error.log. Investigate the SPA server (port conflict? blocked browser launch?) then call haiku_run_next { intent: "${slug}" } to retry.`,
 					},
 				],
 				isError: true,

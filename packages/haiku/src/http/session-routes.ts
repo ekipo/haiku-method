@@ -26,8 +26,33 @@ import {
 } from "haiku-api"
 import { HAIKU_UI_HTML } from "../haiku-ui-html.js"
 import { broadcastIntent } from "../intent-broadcaster.js"
-import { isOpen as isFeedbackOpen } from "../orchestrator/workflow/feedback-triage-gate.js"
+
+// v4: feedback-triage-gate deleted. Replacement predicate: an FB is
+// "open" when its frontmatter `closed_at` is null. (status / closed_by
+// fields no longer exist post-migration.) Inlined here to avoid a
+// circular import via state-tools.
+const isFeedbackOpen = (fb: {
+	closed_at?: string | null
+	status?: string
+	closed_by?: string | null
+}): boolean => {
+	if (typeof fb.closed_at === "string" && fb.closed_at.length > 0) return false
+	// Migration shim: pre-v4 FBs that haven't been migrated yet still
+	// carry status / closed_by. Treat the v3 closed/addressed/rejected
+	// trio as not-open so the route doesn't 409 on legacy data.
+	if (
+		fb.status === "closed" ||
+		fb.status === "addressed" ||
+		fb.status === "rejected"
+	) {
+		return false
+	}
+	if (typeof fb.closed_by === "string" && fb.closed_by.length > 0) return false
+	return true
+}
+
 import {
+	type DirectionSelection,
 	getSession,
 	type QuestionAnnotations,
 	type QuestionAnswer,
@@ -42,6 +67,7 @@ import {
 	intentDir,
 	parseFrontmatter,
 	persistDesignDirectionSelection,
+	persistDesignDirectionUploads,
 	readFeedbackFiles,
 	readJson,
 	stageStatePath,
@@ -202,15 +228,36 @@ export function registerSessionRoutes(instance: FastifyInstance): void {
 			// still finds `design_direction_selected: true` on disk and
 			// emits the `design_direction_complete` recovery action.
 			//
-			// Two write paths:
-			//   1. Full persist via persistDesignDirectionSelection — writes
-			//      annotated PNG sidecars + state.json with screenshot paths.
-			//   2. Minimal state-only fallback — used when there are no
-			//      screenshots OR the full persist threw (disk full,
-			//      permission denied, etc). Without this fallback the
-			//      elaborate handler would re-emit design_direction_required
-			//      and the agent would loop into a 409 on the closed session.
-			let selection = parsed.data
+			// Three write paths:
+			//   1. select mode → persistDesignDirectionSelection — writes
+			//      annotated PNG sidecars + state.json with screenshot paths,
+			//      with a minimal state-only fallback when there are no
+			//      screenshots OR the full persist throws (disk full,
+			//      permission denied, etc).
+			//   2. upload mode → persistDesignDirectionUploads — decodes
+			//      designer-uploaded files onto disk under
+			//      `<stage>/artifacts/design-direction/uploads/` and stamps
+			//      `design_direction_selected: true` so the next
+			//      haiku_run_next surfaces the upload paths.
+			//   3. regenerate / generate modes → no persist. The selection
+			//      stays in the in-memory session so the await handler can
+			//      hand the agent back; the workflow's design_direction_
+			//      selected flag remains false so elaborate keeps requiring
+			//      the picker until the user picks select or upload.
+			//
+			// Without these, the elaborate handler would re-emit
+			// design_direction_required and the agent would loop into a 409
+			// on the closed session.
+			// `selection` is the runtime in-memory form of the user's
+			// response — paths-only for files, no embedded data URLs. It
+			// matches the wire shape for select / regenerate / generate
+			// modes and diverges for upload (data_url → path).
+			let selection: DirectionSelection =
+				parsed.data.mode === "upload"
+					? // Placeholder — overwritten in the upload branch below
+						// once persistDesignDirectionUploads returns the paths.
+						{ mode: "upload", files: [] }
+					: parsed.data
 			if (parsed.data.mode === "select") {
 				const ddSession = getSession(req.params.sessionId)
 				const slug =
@@ -279,12 +326,134 @@ export function registerSessionRoutes(instance: FastifyInstance): void {
 				}
 			}
 
+			if (parsed.data.mode === "upload") {
+				const ddSession = getSession(req.params.sessionId)
+				const slug =
+					ddSession?.session_type === "design_direction"
+						? ddSession.intent_slug
+						: ""
+				const activeStage = slug ? readActiveStage(slug) : ""
+				if (slug && activeStage) {
+					try {
+						const { uploads } = persistDesignDirectionUploads({
+							slug,
+							stage: activeStage,
+							files: parsed.data.files,
+							...(parsed.data.comments
+								? { comments: parsed.data.comments }
+								: {}),
+						})
+						// Replace the heavy data URLs with paths-only metadata
+						// for the in-memory session record. Authoritative
+						// storage is on disk now and the workflow surfaces
+						// uploads by path on the next haiku_run_next.
+						selection = {
+							mode: "upload",
+							files: uploads,
+							...(parsed.data.comments
+								? { comments: parsed.data.comments }
+								: {}),
+						}
+					} catch (err) {
+						req.log.error(
+							{ err },
+							"persistDesignDirectionUploads failed — designer uploads not durable",
+						)
+						reply.status(500).send({
+							error: "upload_persist_failed",
+							detail: err instanceof Error ? err.message : String(err),
+						})
+						return
+					}
+				}
+			}
+
 			updateDesignDirectionSession(req.params.sessionId, {
 				status: "answered",
 				selection,
 			})
 			const payload: DirectionSelectResponse = { ok: true }
 			reply.send(payload)
+		},
+	)
+
+	// ── Picker: SPA shell + select ─────────────────────────────────────
+	// Generic single-select picker (studio / mode / stage / confirm).
+	// Replaces MCP elicitation. The blocking tool (e.g.
+	// haiku_select_studio) waits on session.status === "answered".
+	instance.get<{ Params: { sessionId: string } }>(
+		"/picker/:sessionId",
+		async (req, reply) => {
+			const session = getSession(req.params.sessionId)
+			if (!session || session.session_type !== "picker") {
+				reply.status(404).send("Session not found")
+				return
+			}
+			reply.type("text/html; charset=utf-8").send(HAIKU_UI_HTML)
+		},
+	)
+	instance.post<{ Params: { sessionId: string } }>(
+		"/picker/:sessionId/select",
+		async (req, reply) => {
+			if (!requireTunnelAuth(req, reply, req.params.sessionId)) return
+			const session = getSession(req.params.sessionId)
+			if (!session || session.session_type !== "picker") {
+				reply.status(404).send({ error: "Session not found or expired" })
+				return
+			}
+			if (session.status === "answered") {
+				reply.status(409).send({ error: "Picker already submitted" })
+				return
+			}
+			const body = (req.body ?? {}) as Record<string, unknown>
+			const id = typeof body.id === "string" ? body.id : ""
+			if (!id) {
+				reply.status(400).send({ error: "Missing required field: id" })
+				return
+			}
+			// url_input pickers carry a free-text URL in `id` instead of
+			// a selection from a fixed set. Validate URL shape (http(s)://
+			// or git+ssh-shaped) but skip the option-set check.
+			if (session.kind === "url_input") {
+				const trimmed = id.trim()
+				if (trimmed.length < 4 || trimmed.length > 2048) {
+					reply.status(400).send({
+						error: "URL must be 4–2048 characters",
+					})
+					return
+				}
+				if (
+					!/^https?:\/\//i.test(trimmed) &&
+					!/^git@/i.test(trimmed) &&
+					!/^ssh:\/\//i.test(trimmed)
+				) {
+					reply.status(400).send({
+						error:
+							"URL must start with http://, https://, ssh://, or git@ — paste the full URL",
+					})
+					return
+				}
+				const { updatePickerSession } = await import("../sessions.js")
+				updatePickerSession(req.params.sessionId, {
+					status: "answered",
+					selection: { id: trimmed },
+				})
+				reply.send({ ok: true, id: trimmed })
+				return
+			}
+			const validIds = new Set(session.options.map((o) => o.id))
+			if (!validIds.has(id)) {
+				reply.status(400).send({
+					error: `id "${id}" is not in the option set: ${[...validIds].join(", ")}`,
+				})
+				return
+			}
+			const { updatePickerSession } = await import("../sessions.js")
+			updatePickerSession(req.params.sessionId, {
+				status: "answered",
+				selection: { id },
+			})
+			reply.send({ ok: true, id })
 		},
 	)
 

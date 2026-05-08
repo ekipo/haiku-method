@@ -51,7 +51,10 @@ import {
 	shaOf,
 	useSeenTracker,
 } from "./useSeenTracker"
-import { composeWalkthroughItems } from "./walkthrough"
+import {
+	composeWalkthroughItems,
+	resolveWalkthroughForDetail,
+} from "./walkthrough"
 
 export interface StageReviewProps {
 	session: ReviewPageSessionData
@@ -198,8 +201,19 @@ function statusPillClass(status: string | undefined): string {
 /** Project the feedback items that carry an `inline_anchor` into the
  *  shape `<InlineComments>` needs for re-painting previously-saved
  *  highlights. Filters out closed / rejected items — those are
- *  resolved, no reason to clutter the artifact body. */
-function deriveExistingAnchors(items: readonly FeedbackItemData[]): Array<{
+ *  resolved, no reason to clutter the artifact body.
+ *
+ *  IMPORTANT: this filter is for the PERSISTENT highlight layer
+ *  (`inline-comments-saved`), NOT for the click-to-flash path. A
+ *  reviewer clicking a closed feedback card still scrolls to the
+ *  excerpt and flashes it for ~1.6s — that path is driven by
+ *  `flashAnchor` (see `-stage-content.tsx`), which reads
+ *  `item.inline_anchor` regardless of status. The closed-FB experience
+ *  is "tap to remember what I said about this," not "show me a
+ *  permanent yellow stripe over every prior comment." */
+export function deriveExistingAnchors(
+	items: readonly FeedbackItemData[],
+): Array<{
 	commentId?: string
 	selectedText: string
 	paragraph?: number
@@ -491,7 +505,7 @@ export function StageReview({
 	// module for the routing table. Memoized on the same triggers as
 	// before — recomputing every render is intended.
 	const gateContext = session.gate_context
-	const walkthroughItems = useMemo(
+	const gateWalkthroughItems = useMemo(
 		() =>
 			composeWalkthroughItems(gateContext, {
 				units,
@@ -500,6 +514,23 @@ export function StageReview({
 			}),
 		// biome-ignore lint/correctness/useExhaustiveDependencies: knowledgeVMs/outputVMs are derived arrays that change identity each render but only the contained name strings matter for walkthrough order; recomputing on every render is the intended behavior
 		[gateContext, units, knowledgeVMs, outputVMs],
+	)
+	// UX fix (2026-05-06): when the reviewer is browsing a tab that's
+	// NOT in the gate's walkthrough set (e.g. on Knowledge during an
+	// elaborate_to_execute gate which scopes to units-only), the
+	// prev/next buttons should walk WITHIN the current tab — not yank
+	// the reviewer back to units they're not focused on.
+	// `resolveWalkthroughForDetail` owns the fallback logic; covered
+	// by walkthrough.test.ts.
+	const walkthroughItems = useMemo(
+		() =>
+			resolveWalkthroughForDetail(gateWalkthroughItems, detail, {
+				units,
+				knowledgeVMs,
+				outputVMs,
+			}),
+		// biome-ignore lint/correctness/useExhaustiveDependencies: derived arrays whose identity flips per render; only the names matter
+		[detail, gateWalkthroughItems, units, knowledgeVMs, outputVMs],
 	)
 	const walkIndex = detail
 		? walkthroughItems.findIndex(

@@ -55,7 +55,8 @@ function sweepPresence(): void {
 			(session.session_type === "review" && session.status !== "pending") ||
 			(session.session_type === "question" && session.status !== "pending") ||
 			(session.session_type === "design_direction" &&
-				session.status !== "pending")
+				session.status !== "pending") ||
+			(session.session_type === "picker" && session.status !== "pending")
 		) {
 			continue
 		}
@@ -224,6 +225,15 @@ export interface ReviewSession {
 	/** ISO timestamp set when the most recent await ended (decision,
 	 *  timeout, or abort). */
 	last_await_ended_at?: string | null
+	/** ISO timestamp set the first time an await tool emitted a
+	 *  user-facing announcement (the "review ready at <URL>" copy that
+	 *  the agent posts to the human). Subsequent await-tool calls on
+	 *  the same session check this and SKIP the announcement to avoid
+	 *  re-announcing the same URL on every retry / timeout cycle. The
+	 *  user already knows; nothing changed. Cleared when the session
+	 *  is replaced (a new haiku_run_next session_id wipes the old
+	 *  session entirely, so this is implicitly per-session). */
+	announced_at?: string | null
 	/** Parsed data for the SPA — stored at session creation so /api/session can return it */
 	parsedIntent?: unknown
 	parsedUnits?: unknown[]
@@ -307,9 +317,18 @@ export interface DesignArchetypeData {
 	preview_html: string
 }
 
-/** A user's response to a design-direction picker. Either a final
- *  selection (`mode: "select"`) or a regenerate request asking the
- *  agent for more variants (`mode: "regenerate"`). */
+/** A user's response to a design-direction picker. Four modes:
+ *   - `select`     final pick of one archetype (with optional pins +
+ *                  screenshot annotations).
+ *   - `regenerate` agent should produce more variants, keeping a subset.
+ *   - `upload`     designer provided finished designs as the chosen
+ *                  direction; no archetype generation needed. The HTTP
+ *                  submit route writes the files to disk and stores the
+ *                  resulting paths on the session for the await handler
+ *                  + the next-tick surface to read.
+ *   - `generate`   intake signal: user has nothing to upload and wants
+ *                  the agent to generate archetypes. The agent then
+ *                  produces them and calls `pick_design_direction` again. */
 export type DirectionSelection =
 	| {
 			mode: "select"
@@ -328,6 +347,21 @@ export type DirectionSelection =
 			keep: string[]
 			comments?: string
 	  }
+	| {
+			mode: "upload"
+			files: Array<{
+				filename: string
+				/** Intent-relative path under `.haiku/intents/<slug>/`,
+				 *  e.g. `stages/design/artifacts/design-direction/uploads/up-01-mobile.png`. */
+				path: string
+				caption?: string
+			}>
+			comments?: string
+	  }
+	| {
+			mode: "generate"
+			comments?: string
+	  }
 
 export interface DesignDirectionSession {
 	session_type: "design_direction"
@@ -338,9 +372,40 @@ export interface DesignDirectionSession {
 	selection: DirectionSelection | null
 }
 
+/** Generic single-select picker: studio/mode/stage selection,
+ *  destructive-action confirm, and any other "choose one from a list"
+ *  surface. Replaces MCP elicitation: the SPA renders the options,
+ *  the user picks, the wire posts to `/picker/:id/select` which
+ *  flips status → "answered". The blocking tool (e.g.
+ *  `haiku_select_studio`) drains the result and returns the
+ *  agent's next-step instruction. */
+export interface PickerOption {
+	id: string
+	label: string
+	description?: string
+}
+
+export interface PickerSelection {
+	id: string
+}
+
+export type PickerKind = "studio" | "mode" | "stage" | "confirm" | "url_input"
+
+export interface PickerSession {
+	session_type: "picker"
+	session_id: string
+	intent_slug: string
+	kind: PickerKind
+	title: string
+	prompt: string
+	options: PickerOption[]
+	status: "pending" | "answered"
+	selection: PickerSelection | null
+}
+
 const sessions = new Map<
 	string,
-	ReviewSession | QuestionSession | DesignDirectionSession
+	ReviewSession | QuestionSession | DesignDirectionSession | PickerSession
 >()
 
 // ─── Previous-review snapshots (for re-review delta) ────────────────
@@ -367,9 +432,14 @@ export function clearPreviousReviewSnapshot(intentDir: string): void {
 	previousReviewByIntentDir.delete(intentDir)
 }
 
-// Cap total in-memory sessions and apply a 30-minute TTL to prevent unbounded growth
+// Cap total in-memory sessions and apply a TTL to prevent unbounded
+// growth. Bumped from 30min → 4h on 2026-05-06 to match the
+// haiku_await_gate review timeout — at 30min, a session created at
+// the start of a long human review would evict mid-wait and the
+// agent would see "session not found" instead of "still waiting."
+// MAX_SESSIONS still bounds memory regardless.
 const MAX_SESSIONS = 100
-const SESSION_TTL_MS = 30 * 60 * 1000
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000
 const sessionCreatedAt = new Map<string, number>()
 
 /** Drop the previous-review snapshot for an intent_dir if no remaining
@@ -474,9 +544,45 @@ export function createDesignDirectionSession(
 	return session
 }
 
+export function createPickerSession(
+	params: Omit<
+		PickerSession,
+		"session_type" | "session_id" | "status" | "selection"
+	>,
+): PickerSession {
+	evictSessions()
+	const session_id = newSessionId()
+	const session: PickerSession = {
+		...params,
+		session_type: "picker",
+		session_id,
+		status: "pending",
+		selection: null,
+	}
+	sessions.set(session_id, session)
+	sessionCreatedAt.set(session_id, Date.now())
+	return session
+}
+
+export function updatePickerSession(
+	sessionId: string,
+	updates: Partial<Pick<PickerSession, "status" | "selection">>,
+): PickerSession | undefined {
+	const session = sessions.get(sessionId)
+	if (!session || session.session_type !== "picker") return undefined
+	Object.assign(session, updates)
+	notifySessionUpdate(sessionId)
+	return session
+}
+
 export function getSession(
 	sessionId: string,
-): ReviewSession | QuestionSession | DesignDirectionSession | undefined {
+):
+	| ReviewSession
+	| QuestionSession
+	| DesignDirectionSession
+	| PickerSession
+	| undefined {
 	return sessions.get(sessionId)
 }
 
@@ -556,6 +662,7 @@ export function updateSession(
 			| "await_count"
 			| "last_await_started_at"
 			| "last_await_ended_at"
+			| "announced_at"
 		>
 	>,
 ): ReviewSession | undefined {

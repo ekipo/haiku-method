@@ -24,6 +24,7 @@ import {
 	listVisibleIntents,
 	MAX_RATIONALE_BYTES,
 	MAX_RATIONALE_EXCERPT_BYTES,
+	parseFrontmatter,
 	readClaimedAuthorId,
 	setFrontmatterField,
 	stateToolDefs,
@@ -149,17 +150,22 @@ writeFileSync(
 		2,
 	),
 )
-// Unit on last hat (single-hat stage) with NO outputs — should trip unit_outputs_empty
+// v4: status/hat/bolt/hat_started_at frontmatter fields are gone.
+// In-flight unit state is captured by iterations[] only — the most
+// recent entry must have completed_at: null and result: null for the
+// hat to be "in flight" and advance_hat to act on it.
 writeFileSync(
 	join(intentDirPath, "stages", "analysis", "units", "unit-01-no-outputs.md"),
 	`---
 name: unit-01-no-outputs
 type: research
-status: active
 depends_on: []
-bolt: 1
-hat: analyst
-hat_started_at: 2020-01-01T00:00:00Z
+started_at: "2020-01-01T00:00:00Z"
+iterations:
+  - hat: analyst
+    started_at: "2020-01-01T00:00:00Z"
+    completed_at: null
+    result: null
 outputs: []
 ---
 
@@ -174,11 +180,13 @@ writeFileSync(
 	`---
 name: unit-02-with-outputs
 type: research
-status: active
 depends_on: []
-bolt: 1
-hat: analyst
-hat_started_at: 2020-01-01T00:00:00Z
+started_at: "2020-01-01T00:00:00Z"
+iterations:
+  - hat: analyst
+    started_at: "2020-01-01T00:00:00Z"
+    completed_at: null
+    result: null
 outputs:
   - knowledge/findings.md
 ---
@@ -838,7 +846,7 @@ try {
 		const result = handleStateTool("haiku_feedback_reject", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-01\\..\\secret",
+			feedback_id: "FB-001\\..\\secret",
 			reason: "test",
 		})
 		assert.strictEqual(result.isError, true)
@@ -1155,15 +1163,20 @@ body
 			`---\nname: ${unitName}\nstatus: pending\nhat: ""\nbolt: 0\n---\n# ${unitName}\n`,
 		)
 		try {
+			// v4 FSM-driven fields: started_at, discovery, iterations,
+			// reviews, approvals. v3-only fields (status, hat, bolt,
+			// hat_started_at, completed_at, scope_reject_attempts) are
+			// gone from the schema entirely — the gate doesn't reject
+			// them as FSM-forbidden because they're not in the FSM list,
+			// they're just unknown deprecated names. v4 unit_set silently
+			// accepts unknowns (additionalProperties: true); the
+			// migrator's deny-list scrubs deprecated names on read.
 			for (const field of [
-				"status",
-				"hat",
-				"bolt",
-				"iterations",
 				"started_at",
-				"completed_at",
-				"hat_started_at",
-				"scope_reject_attempts",
+				"discovery",
+				"iterations",
+				"reviews",
+				"approvals",
 			]) {
 				const result = handleStateTool("haiku_unit_set", {
 					intent: intentSlug,
@@ -1293,52 +1306,8 @@ body
 		assert.deepStrictEqual(units, [])
 	})
 
-	// ── haiku_unit_increment_bolt ─────────────────────────────────────────────
-
-	console.log("\n=== haiku_unit_increment_bolt ===")
-
-	test("increments bolt counter", () => {
-		// unit-01 starts at bolt 2
-		const result = handleStateTool("haiku_unit_increment_bolt", {
-			intent: intentSlug,
-			stage: "inception",
-			unit: "unit-01-discovery",
-		})
-		assert.strictEqual(getTextResult(result), "3")
-	})
-
-	test("increments again correctly", () => {
-		const result = handleStateTool("haiku_unit_increment_bolt", {
-			intent: intentSlug,
-			stage: "inception",
-			unit: "unit-01-discovery",
-		})
-		assert.strictEqual(getTextResult(result), "4")
-	})
-
-	test("enforces max bolt limit", () => {
-		// Explicitly set bolt to 4 so this test doesn't depend on prior test side effects.
-		// Use setFrontmatterField directly to store bolt as a proper number (haiku_unit_set stores strings).
-		const uPath = unitPath(intentSlug, "inception", "unit-01-discovery")
-		setFrontmatterField(uPath, "bolt", 4)
-
-		// Incrementing from 4 should go to 5 (the limit).
-		const result = handleStateTool("haiku_unit_increment_bolt", {
-			intent: intentSlug,
-			stage: "inception",
-			unit: "unit-01-discovery",
-		})
-		assert.strictEqual(getTextResult(result), "5")
-
-		// Next increment should fail (exceeds max of 5)
-		const exceeded = handleStateTool("haiku_unit_increment_bolt", {
-			intent: intentSlug,
-			stage: "inception",
-			unit: "unit-01-discovery",
-		})
-		const parsed = JSON.parse(getTextResult(exceeded))
-		assert.strictEqual(parsed.error, "max_bolts_exceeded")
-	})
+	// v4: haiku_unit_increment_bolt removed. Bolt is derived from
+	// iterations.length; agents never increment it directly.
 
 	// ── haiku_unit_reject_hat ─────────────────────────────────────────────────
 
@@ -1468,111 +1437,11 @@ body
 		assert.ok(!errored, `expected success, got: ${text}`)
 	})
 
-	// ── haiku_unit_advance_hat: per-hat run_quality_gates auto-reject ─────────
-
-	console.log("\n=== haiku_unit_advance_hat: run_quality_gates auto-reject ===")
-
-	test("auto-rejects when builder hat with run_quality_gates fails gates", () => {
-		const result = handleStateTool("haiku_unit_advance_hat", {
-			intent: intentSlug,
-			unit: "unit-01-gates-fail",
-		})
-		const text = getTextResult(result)
-		// Response is the Workflow Result envelope path; the persisted state should
-		// show bolt+1, hat unchanged.
-		const fmRaw = readFileSync(
-			join(intentDirPath, "stages", "gated", "units", "unit-01-gates-fail.md"),
-			"utf8",
-		)
-		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
-		assert.ok(
-			/^bolt: 2$/m.test(fm),
-			`expected bolt: 2 after auto-reject, got: ${fm}`,
-		)
-		assert.ok(
-			/^hat: builder$/m.test(fm),
-			`expected hat to remain builder, got: ${fm}`,
-		)
-		assert.ok(
-			text.includes("Workflow Result written to:"),
-			`expected Workflow Result envelope, got: ${text}`,
-		)
-		assert.ok(
-			text.includes("gates failed") || text.includes("always-fail"),
-			`expected gate-fail context in envelope, got: ${text}`,
-		)
-	})
-
-	test("advances normally when builder hat with run_quality_gates passes gates", () => {
-		const result = handleStateTool("haiku_unit_advance_hat", {
-			intent: intentSlug,
-			unit: "unit-02-gates-pass",
-		})
-		const text = getTextResult(result)
-		// Response is JSON error or success — gates passed, so advance
-		// proceeds. The unit's hat should now be reviewer (the next hat),
-		// bolt should remain 1.
-		const fmRaw = readFileSync(
-			join(intentDirPath, "stages", "gated", "units", "unit-02-gates-pass.md"),
-			"utf8",
-		)
-		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
-		assert.ok(
-			/^bolt: 1$/m.test(fm),
-			`expected bolt to remain 1 after gate-pass advance, got: ${fm}`,
-		)
-		assert.ok(
-			/^hat: reviewer$/m.test(fm),
-			`expected hat to advance to reviewer, got: ${fm}`,
-		)
-		// Should NOT contain auto-reject markers
-		assert.ok(
-			!text.includes("always-fail"),
-			`expected no gate-fail context, got: ${text}`,
-		)
-	})
-
-	test("returns max_bolts_exceeded when run_quality_gates fail at bolt 5", () => {
-		const result = handleStateTool("haiku_unit_advance_hat", {
-			intent: intentSlug,
-			unit: "unit-03-gates-cap",
-		})
-		const parsed = JSON.parse(getTextResult(result))
-		assert.strictEqual(parsed.error, "max_bolts_exceeded")
-		assert.strictEqual(parsed.reason, "quality_gate_auto_reject")
-		assert.strictEqual(parsed.bolt, 5)
-		assert.ok(
-			Array.isArray(parsed.failures) && parsed.failures.length > 0,
-			"expected failures array",
-		)
-	})
-
-	test("hats without run_quality_gates do not trigger gate auto-reject", () => {
-		const result = handleStateTool("haiku_unit_advance_hat", {
-			intent: intentSlug,
-			unit: "unit-04-no-boolean",
-		})
-		const text = getTextResult(result)
-		const fmRaw = readFileSync(
-			join(intentDirPath, "stages", "gated", "units", "unit-04-no-boolean.md"),
-			"utf8",
-		)
-		const fm = fmRaw.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ""
-		// Planner doesn't declare the boolean, so gates aren't checked
-		// here — advance proceeds despite the always-fail gate definition.
-		assert.ok(
-			/^bolt: 1$/m.test(fm),
-			`expected bolt to remain 1 (no auto-reject), got: ${fm}`,
-		)
-		assert.ok(
-			/^hat: builder$/m.test(fm),
-			`expected hat to advance to builder (next), got: ${fm}`,
-		)
-		assert.ok(
-			!text.includes("always-fail"),
-			`expected no gate-fail context (gates skipped), got: ${text}`,
-		)
-	})
+	// v4: per-hat run_quality_gates auto-reject removed. quality_gates
+	// is now an explicit `approvals.quality_gates` actor in the cursor's
+	// post-execute approval track — no longer a hat-level enforcement.
+	// The 4 tests that asserted the per-hat boolean's auto-reject path
+	// are gone with the feature.
 
 	// ── haiku_decision_record ────────────────────────────────────────────────
 
@@ -1798,21 +1667,23 @@ body
 		assert.strictEqual(parsed.current_status, "active")
 	})
 
-	test("haiku_unit_set rejects status writes outright (FSM-driven)", () => {
-		// `status` is FSM-driven — agents must never set it directly.
-		// fsm_field_forbidden catches every status write (including the
-		// value=completed shape), so haiku_unit_advance_hat is the only
-		// path to a completed unit.
+	test("haiku_unit_set rejects approvals writes outright (FSM-driven)", () => {
+		// v4: status is no longer a unit field. The equivalent invariant
+		// is that `approvals` is FSM-driven — agents must never set it
+		// directly. fsm_field_forbidden catches the write, so terminal
+		// haiku_unit_advance_hat (which merges the unit branch) is the
+		// only sanctioned completion path; user/reviewer approvals are
+		// stamped by haiku_await_gate and the dispatch tools.
 		const result = handleStateTool("haiku_unit_set", {
 			intent: intentSlug,
 			stage: "inception",
 			unit: "unit-02-elaborate",
-			field: "status",
-			value: "completed",
+			field: "approvals",
+			value: { user: { at: "2026-01-01T00:00:00Z" } },
 		})
 		const parsed = JSON.parse(getTextResult(result))
 		assert.strictEqual(parsed.error, "fsm_field_forbidden")
-		assert.strictEqual(parsed.field, "status")
+		assert.strictEqual(parsed.field, "approvals")
 	})
 
 	test("haiku_unit_set allows non-FSM field writes on pending units", () => {
@@ -1836,17 +1707,126 @@ body
 		assert.ok(getTextResult(result).includes("ok"))
 	})
 
+	test("haiku_unit_set allows quality_gates edits on COMPLETED units (Mike's loop fix)", () => {
+		// Mike's session 2026-05-07: agent surfaced broken quality_gates on a
+		// completed unit. v3+v4 forward-only lifecycle blocked haiku_unit_set,
+		// leaving direct file editing as the only escape — exactly the kind
+		// of "engine has no answer" trap we want to avoid. Fix: quality_gates
+		// joins `outputs` as a lifecycle-mutable field. Gate definitions are
+		// check specs, not workflow state, so updating them doesn't violate
+		// forward-only (you can't change what was produced, only how it's
+		// verified).
+		const cunit = unitPath(intentSlug, "inception", "unit-02-elaborate")
+		setFrontmatterField(cunit, "status", "completed")
+		const result = handleStateTool("haiku_unit_set", {
+			intent: intentSlug,
+			stage: "inception",
+			unit: "unit-02-elaborate",
+			field: "quality_gates",
+			value: [
+				{
+					name: "compile clean",
+					command: "cd services/api && MIX_ENV=test mix compile --warnings-as-errors",
+				},
+			],
+		})
+		assert.ok(
+			!result.isError,
+			`expected quality_gates exemption to allow the write on a completed unit; got: ${getTextResult(result)}`,
+		)
+		// Reset so subsequent tests in this file don't inherit the
+		// completed status flip.
+		setFrontmatterField(cunit, "status", "pending")
+	})
+
+	test("haiku_unit_set still rejects OTHER field edits on completed units (lifecycle invariant intact)", () => {
+		// Companion to the quality_gates exemption above: confirms the
+		// exemption is narrow. Editing `description` (or any other non-
+		// exempt field) on a completed unit still gets the lifecycle
+		// rejection — we didn't accidentally open the floodgates.
+		const cunit = unitPath(intentSlug, "inception", "unit-02-elaborate")
+		setFrontmatterField(cunit, "status", "completed")
+		const result = handleStateTool("haiku_unit_set", {
+			intent: intentSlug,
+			stage: "inception",
+			unit: "unit-02-elaborate",
+			field: "description",
+			value: "trying to rewrite history",
+		})
+		const parsed = JSON.parse(getTextResult(result))
+		assert.strictEqual(parsed.error, "lifecycle_violation")
+		assert.strictEqual(parsed.current_status, "completed")
+		setFrontmatterField(cunit, "status", "pending")
+	})
+
+	test("haiku_unit_set persists Mike's elixir-do-else command without YAML mangling", () => {
+		// Regression test for the YAML serialization concern from Mike's
+		// session: the gate command contained `do: :ok, else: ...` which
+		// looks like YAML mapping keys. When Mike hand-edited the file,
+		// his hand-typed YAML broke. The engine's path through
+		// haiku_unit_set + gray-matter + js-yaml picks a folded-scalar
+		// style automatically and round-trips correctly. This test
+		// asserts the round-trip is byte-stable through the real engine
+		// path (not just an in-memory fixture). Combined with the
+		// lifecycle exemption above, Mike would've fixed his gate via
+		// the engine — no hand edit, no parse error, no loop.
+		const cunit = unitPath(intentSlug, "inception", "unit-02-elaborate")
+		setFrontmatterField(cunit, "status", "completed")
+
+		const mikesCommand =
+			`cd services/api && MIX_ENV=test elixir -S mix run -e ` +
+			`'Code.ensure_compiled!(Oban.Pro.Worker); IO.puts(if function_exported?(Oban.Pro.Worker, :get_weight, 1), do: :ok, else: (raise "get_weight/1 not exported"))' ` +
+			`2>&1 | grep -q ok`
+
+		const setResult = handleStateTool("haiku_unit_set", {
+			intent: intentSlug,
+			stage: "inception",
+			unit: "unit-02-elaborate",
+			field: "quality_gates",
+			value: [
+				{
+					name: "weight/1 dispatch (get_weight/1) is exported on Oban.Pro.Worker",
+					command: mikesCommand,
+				},
+			],
+		})
+		assert.ok(
+			!setResult.isError,
+			`expected the write to succeed; got: ${getTextResult(setResult)}`,
+		)
+
+		// Read the file back through the same parser the engine uses
+		// elsewhere (parseFrontmatter is gray-matter under the hood).
+		// Assert the command came back byte-identical.
+		const raw = readFileSync(cunit, "utf8")
+		const { data: backFm } = parseFrontmatter(raw)
+		const gates = backFm.quality_gates
+		assert.ok(Array.isArray(gates), "quality_gates should be an array")
+		assert.strictEqual(gates.length, 1)
+		assert.strictEqual(
+			gates[0].command,
+			mikesCommand,
+			`round-trip mismatch:\n  expected: ${JSON.stringify(mikesCommand)}\n  actual:   ${JSON.stringify(gates[0].command)}`,
+		)
+
+		setFrontmatterField(cunit, "status", "pending")
+	})
+
 	// ── haiku_unit_write (FM validators + DAG cycle detection + lifecycle) ──
 
 	console.log("\n=== haiku_unit_write ===")
 
 	test("haiku_unit_write rejects FSM-driven fields in frontmatter", () => {
+		// v4 FSM-driven fields: started_at, discovery, iterations,
+		// reviews, approvals. status is no longer a unit field.
 		const result = handleStateTool("haiku_unit_write", {
 			intent: intentSlug,
 			stage: "inception",
 			unit: "unit-99-test-fsm",
 			body: "## Mission\n\nTest unit body.",
-			frontmatter: { status: "active" }, // forbidden
+			frontmatter: {
+				approvals: { user: { at: "2026-01-01T00:00:00Z" } },
+			},
 		})
 		const parsed = JSON.parse(getTextResult(result))
 		assert.strictEqual(parsed.error, "frontmatter_validation_failed")
@@ -1963,7 +1943,7 @@ Closed body content.
 		const result = handleStateTool("haiku_feedback_read", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-01",
+			feedback_id: 1,
 		})
 		const parsed = JSON.parse(getTextResult(result))
 		assert.ok("title" in parsed)
@@ -1977,7 +1957,7 @@ Closed body content.
 		const result = handleStateTool("haiku_feedback_write", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-01",
+			feedback_id: 1,
 			body: "Updated diagnosis: root cause is X; proposed action: Y.",
 		})
 		const parsed = JSON.parse(getTextResult(result))
@@ -1988,7 +1968,7 @@ Closed body content.
 		const result = handleStateTool("haiku_feedback_write", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-01",
+			feedback_id: 1,
 			body: "",
 		})
 		const parsed = JSON.parse(getTextResult(result))
@@ -1999,7 +1979,7 @@ Closed body content.
 		const result = handleStateTool("haiku_feedback_write", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-02",
+			feedback_id: 2,
 			body: "Trying to rewrite closed FB.",
 		})
 		const parsed = JSON.parse(getTextResult(result))
@@ -2007,26 +1987,25 @@ Closed body content.
 		assert.strictEqual(parsed.current_status, "closed")
 	})
 
-	test("haiku_feedback_update blocks updates on terminal FBs", () => {
+	test("haiku_feedback_update returns feedback_update_removed_in_v4 (tool removed)", () => {
 		const result = handleStateTool("haiku_feedback_update", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-02",
+			feedback_id: 2,
 			status: "pending",
 		})
 		const parsed = JSON.parse(getTextResult(result))
-		assert.strictEqual(parsed.error, "lifecycle_violation")
-		assert.strictEqual(parsed.current_status, "closed")
+		assert.strictEqual(parsed.error, "feedback_update_removed_in_v4")
 	})
 
 	test("haiku_feedback_read returns feedback_not_found for missing FB", () => {
-		// Numeric ID to satisfy the FB-NN AJV pattern; the file just
-		// doesn't exist on disk, so the handler responds with the
-		// `feedback_not_found` semantic code (not the input-gate code).
+		// In-range numeric ID that doesn't exist on disk → handler
+		// responds with the `feedback_not_found` semantic code (not the
+		// input-gate code).
 		const result = handleStateTool("haiku_feedback_read", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-9999",
+			feedback_id: 999,
 		})
 		const parsed = JSON.parse(getTextResult(result))
 		assert.strictEqual(parsed.error, "feedback_not_found")
@@ -2036,7 +2015,7 @@ Closed body content.
 
 	console.log("\n=== haiku_feedback_advance_hat / _reject_hat ===")
 
-	// Stand up a fresh FB for advance/reject testing (separate from the FB-02
+	// Stand up a fresh FB for advance/reject testing (separate from the FB-002
 	// closed fixture above to avoid coupling tests).
 	writeFileSync(
 		join(fbDir, "03-advance-test.md"),
@@ -2050,6 +2029,23 @@ created_at: 2026-04-26T00:00:00Z
 ---
 
 Body for advance test.
+`,
+	)
+	// FB-004 — separate fixture for the reply-required guard test so it
+	// doesn't coupled with the B4 sequence above.
+	writeFileSync(
+		join(fbDir, "04-reply-required-test.md"),
+		`---
+title: Reply-required guard FB
+status: pending
+hat: fixer
+origin: adversarial-review
+author: completeness
+author_type: agent
+created_at: 2026-05-06T00:00:00Z
+---
+
+Body for reply-required guard test.
 `,
 	)
 
@@ -2087,7 +2083,7 @@ Test stage.
 		const r1 = handleStateTool("haiku_feedback_advance_hat", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-03",
+			feedback_id: 3,
 		})
 		const p1 = JSON.parse(getTextResult(r1))
 		assert.strictEqual(p1.ok, true)
@@ -2095,10 +2091,15 @@ Test stage.
 		assert.strictEqual(p1.closed, false)
 
 		// Call 2: assessor advances (curHat=fixer). MUST close.
+		// Reply-on-closure (2026-05-06): the terminal advance now
+		// requires a `reply` string. Without it the call returns
+		// `reply_required`. Pass one so this regression test still
+		// exercises closure semantics, not the reply guard.
 		const r2 = handleStateTool("haiku_feedback_advance_hat", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-03",
+			feedback_id: 3,
+			reply: "Test fix landed; verifier signed off.",
 		})
 		const p2 = JSON.parse(getTextResult(r2))
 		assert.strictEqual(p2.ok, true)
@@ -2110,11 +2111,25 @@ Test stage.
 		)
 	})
 
-	test("haiku_feedback_advance_hat refuses on already-closed FB (FB-02)", () => {
+	test("haiku_feedback_advance_hat: terminal advance without `reply` returns reply_required", () => {
+		// Same fixture as B4 above, but skipping `reply` on the terminal
+		// call. The handler must reject with the stable named error so
+		// agents and tests can match on it.
+		const r = handleStateTool("haiku_feedback_advance_hat", {
+			intent: intentSlug,
+			stage: "inception",
+			feedback_id: 4,
+		})
+		const p = JSON.parse(getTextResult(r))
+		assert.strictEqual(r.isError, true)
+		assert.strictEqual(p.error, "reply_required")
+	})
+
+	test("haiku_feedback_advance_hat refuses on already-closed FB (FB-002)", () => {
 		const result = handleStateTool("haiku_feedback_advance_hat", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-02",
+			feedback_id: 2,
 		})
 		const parsed = JSON.parse(getTextResult(result))
 		assert.strictEqual(parsed.error, "lifecycle_violation")
@@ -2125,7 +2140,7 @@ Test stage.
 		const result = handleStateTool("haiku_feedback_reject_hat", {
 			intent: intentSlug,
 			stage: "inception",
-			feedback_id: "FB-02",
+			feedback_id: 2,
 			reason: "test",
 		})
 		const parsed = JSON.parse(getTextResult(result))

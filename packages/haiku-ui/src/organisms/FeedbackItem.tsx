@@ -139,6 +139,10 @@ export interface FeedbackItemProps {
 		body: string,
 		closeAsAnswered?: boolean,
 	) => Promise<void>
+	/** Optional handler for dismissing the closure-reply card. Fired when
+	 *  the reviewer clicks "Dismiss" on the agent's "Resolved" panel.
+	 *  Parent owns persistence (POST to dismiss-reply endpoint). */
+	onDismissClosureReply?: (id: string) => Promise<void>
 	/** Server mutation is in flight — show a spinner + disable buttons so
 	 *  the user can't double-click through the round trip. The optimistic
 	 *  state has already been applied locally; this is a confirmation
@@ -185,6 +189,7 @@ export const FeedbackItem = forwardRef<HTMLDivElement, FeedbackItemProps>(
 			onStatusChange,
 			onDelete,
 			onReply,
+			onDismissClosureReply,
 			pending,
 			style,
 			className,
@@ -475,6 +480,126 @@ export const FeedbackItem = forwardRef<HTMLDivElement, FeedbackItemProps>(
 								</button>
 							)}
 						</div>
+						{/* Closure reply — set by the terminal fix-hat advance.
+						    Distinct from generic `replies` because it carries
+						    `unread` semantics (filterable in the sidebar) and
+						    represents the AGENT's resolution-of-record. */}
+						{item.closure_reply && (
+							<div
+								className={`mt-3 rounded-md border-l-4 ${
+									item.closure_reply_unread
+										? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-400 dark:border-emerald-500"
+										: "bg-stone-50 dark:bg-stone-800/40 border-stone-300 dark:border-stone-600"
+								} p-3`}
+								data-testid={`feedback-closure-reply-${item.feedback_id}`}
+							>
+								<div className="flex items-start justify-between gap-3">
+									<div className="flex-1 min-w-0">
+										<div className="flex items-center gap-2 mb-1">
+											<span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+												Resolved
+											</span>
+											{item.closure_reply_unread && (
+												<span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-700 text-white">
+													new
+												</span>
+											)}
+											{item.closure_reply.at && (
+												<time
+													dateTime={item.closure_reply.at}
+													className="text-[11px] text-stone-500 dark:text-stone-400"
+												>
+													{item.closure_reply.at
+														.slice(0, 16)
+														.replace("T", " ")}
+												</time>
+											)}
+										</div>
+										<div className="text-xs text-stone-700 dark:text-stone-200 whitespace-pre-wrap [overflow-wrap:anywhere]">
+											{item.closure_reply.text}
+										</div>
+									</div>
+									{item.closure_reply_unread && onDismissClosureReply && (
+										<button
+											type="button"
+											onClick={(e) => {
+												e.stopPropagation()
+												void onDismissClosureReply(item.feedback_id)
+											}}
+											className={`shrink-0 ${ACTION_BUTTON_BASE} ${DISMISS_CLASSES}`}
+										>
+											Dismiss
+										</button>
+									)}
+								</div>
+							</div>
+						)}
+						{/* Fix-hat history — surfaces the chain of hats the workflow
+						    engine ran against this finding, with per-iteration
+						    result + reason + commit. Answers "what did the agent
+						    do to address this?" — closure_reply is the agent's
+						    plain-language summary; iterations[] is the audit
+						    trail behind it. Default-collapsed so it doesn't
+						    crowd the resolution callout. */}
+						{item.iterations && item.iterations.length > 0 && (
+							<details
+								className="mt-3 text-xs"
+								data-testid={`feedback-iterations-${item.feedback_id}`}
+							>
+								<summary className="cursor-pointer select-none text-stone-600 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-200 font-medium">
+									Fix history ({item.iterations.length}{" "}
+									{item.iterations.length === 1 ? "step" : "steps"})
+								</summary>
+								<ol className="mt-2 space-y-1.5 border-l-2 border-stone-200 dark:border-stone-700 pl-3">
+									{item.iterations.map((it, idx) => {
+										const resultClass =
+											it.result === "closed"
+												? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+												: it.result === "advanced"
+													? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+													: it.result === "reopened"
+														? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+														: it.result === "rejected"
+															? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+															: "bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300"
+										return (
+											<li
+												// biome-ignore lint/suspicious/noArrayIndexKey: iterations[] is append-only and ordered; the index is the canonical key
+												key={`${item.feedback_id}-iter-${idx}`}
+												className="text-stone-700 dark:text-stone-200"
+											>
+												<div className="flex items-center gap-2 flex-wrap">
+													<span className="font-mono text-[11px] text-stone-500 dark:text-stone-400">
+														bolt {it.bolt}
+													</span>
+													<span className="font-semibold">{it.hat}</span>
+													{it.result && (
+														<span
+															className={`px-1.5 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wider ${resultClass}`}
+														>
+															{it.result}
+														</span>
+													)}
+													{it.commit && (
+														<code
+															className="text-[11px] text-stone-500 dark:text-stone-400 font-mono"
+															title={it.commit}
+														>
+															{it.commit.slice(0, 7)}
+														</code>
+													)}
+												</div>
+												{it.reason && (
+													<div className="mt-0.5 text-stone-600 dark:text-stone-300 [overflow-wrap:anywhere]">
+														{it.reason}
+													</div>
+												)}
+											</li>
+										)
+									})}
+								</ol>
+							</details>
+						)}
 						{/* Replies thread — always visible on expand when the
 						    item has any replies, so the conversation reads
 						    top-to-bottom without an extra click. */}

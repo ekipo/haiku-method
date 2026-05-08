@@ -19,7 +19,8 @@ const intentStageUnit = {
 	stage: Type.String({ minLength: 1, description: "Stage name" }),
 	unit: Type.String({
 		minLength: 1,
-		description: "Unit name (no .md extension)",
+		description:
+			"Unit name (no .md extension). Convention: `unit-NNN-slug` (3-digit zero-pad, max 999). Legacy 2-digit names (`unit-01-foo`) still resolve via numeric-prefix matching — pass either width and the engine matches by `(number, slug)` parts.",
 	}),
 } as const
 
@@ -138,21 +139,8 @@ export const validateHaikuUnitRejectHatInputSchema = stateAjv.compile(
 	HAIKU_UNIT_REJECT_HAT_INPUT_SCHEMA,
 )
 
-// ── haiku_unit_increment_bolt ─────────────────────────────────────
-
-export const HAIKU_UNIT_INCREMENT_BOLT_INPUT_SCHEMA = Type.Object(
-	{
-		...intentStageUnit,
-		state_file: stateFile,
-	},
-	{ additionalProperties: false },
-)
-export type HaikuUnitIncrementBoltInput = Static<
-	typeof HAIKU_UNIT_INCREMENT_BOLT_INPUT_SCHEMA
->
-export const validateHaikuUnitIncrementBoltInputSchema = stateAjv.compile(
-	HAIKU_UNIT_INCREMENT_BOLT_INPUT_SCHEMA,
-)
+// v4: haiku_unit_increment_bolt removed. Bolt is derived from
+// iterations.length; agents never increment it directly.
 
 // ── haiku_unit_read ───────────────────────────────────────────────
 
@@ -196,7 +184,7 @@ export const HAIKU_UNIT_WRITE_INPUT_SCHEMA = Type.Object(
 		unit: Type.String({
 			minLength: 1,
 			description:
-				"Unit name without `.md` extension, e.g. `unit-01-foo`. Convention: `unit-NN-slug` with zero-padded NN.",
+				"Unit name without `.md` extension, e.g. `unit-001-foo`. Convention: `unit-NNN-slug` with 3-digit zero-padded number (max 999). Legacy 2-digit names (`unit-01-foo`) still resolve via numeric-prefix matching.",
 		}),
 		// `body` typed as plain string (no minLength here). The handler
 		// runs a dedicated `empty_body` check after trim() so the agent

@@ -62,6 +62,15 @@ function dispatchOrchestratorAction(slug: string): OrchestratorActionType {
 	}
 }
 
+// Loop-guard helpers live in a sibling module so tests can import them
+// without dragging in the circular `index.ts` ↔ `orchestrator.ts` chain
+// this file is part of.
+import {
+	actionSignature,
+	loopAbortResponse,
+	RUN_NEXT_LOOP_CAP,
+} from "./_loop_guard.js"
+
 /**
  * Extract the orchestrator action name from a haiku_await_gate
  * response. The await tool renders its result as `<json>\n\n---\n\n<instructions>`
@@ -104,11 +113,15 @@ async function runSelectionPicker(
 	signal?: AbortSignal,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
 	const { orchestratorToolHandlers } = await import("./index.js")
-	const tool = orchestratorToolHandlers.get(actionName as string)
+	// Cursor actions are bare names (`select_studio`); handler map keys are
+	// the MCP tool names (`haiku_select_studio`). The mapping is fixed so
+	// agents never see either form — the picker is engine-driven inline.
+	const toolName = `haiku_${actionName}`
+	const tool = orchestratorToolHandlers.get(toolName)
 	if (!tool) {
 		return {
 			ok: false,
-			message: `Engine bug: no handler registered for selection action '${actionName}'.`,
+			message: `Engine bug: no handler registered for selection action '${actionName}' (looked up as '${toolName}').`,
 		}
 	}
 	try {
@@ -124,6 +137,33 @@ async function runSelectionPicker(
 					.join("\n")
 					.trim() || `Picker failed for ${actionName}.`
 			return { ok: false, message: text }
+		}
+		// Cancellation guard. The picker tools return a JSON body with
+		// `action: "cancelled"` when the SPA times out (default 30 min)
+		// or the user dismisses the prompt without choosing — that's NOT
+		// flagged as `isError` because the agent might want to surface a
+		// retry prompt. But here we're inside the engine's blocking tick
+		// loop; if we treat cancellation as success we re-tick, the
+		// cursor still sees the field unset, the picker fires again, and
+		// the call hangs for another 30 minutes per iteration. Treat
+		// cancellation as terminal so the agent gets one clear message
+		// and can decide whether to retry. See #333.
+		const bodyText = result.content
+			?.map((c) => (c.type === "text" ? c.text : ""))
+			.join("\n")
+			.trim()
+		if (bodyText) {
+			try {
+				const parsed = JSON.parse(bodyText) as { action?: unknown }
+				if (parsed?.action === "cancelled") {
+					return {
+						ok: false,
+						message: `Picker for ${actionName} was cancelled or timed out without a selection. Re-run \`haiku_run_next\` to surface the picker again.`,
+					}
+				}
+			} catch {
+				/* not JSON — selection-tool responses are always JSON, so this is fine */
+			}
 		}
 		return { ok: true }
 	} catch (err) {
@@ -500,6 +540,87 @@ export default defineTool({
 			)
 		}
 
+		// Sweep completed discovery worktrees back into the stage branch
+		// before the cursor walks. The decompose prompt promises this
+		// integration; without it the cursor (running on the stage branch)
+		// never sees the discovery output sitting on the discovery branch
+		// and re-emits the same dispatch every tick. See #333. Both
+		// conflict and non-conflict failures surface as a hard stop —
+		// silently logging non-conflict failures would re-create the
+		// original loop bug since the cursor's existence check would still
+		// fail on the next tick and respawn discovery subagents.
+		try {
+			const { sweepDiscoveryWorktrees } = await import("../../git-worktree.js")
+			// Read intent.md once for the stages list so the parser can split
+			// hyphenated stage names correctly. Best-effort — the sweep falls
+			// back to first-hyphen splitting when no stages list is available.
+			let knownStages: string[] = []
+			try {
+				const intentMd = join(findHaikuRoot(), "intents", slug, "intent.md")
+				if (existsSync(intentMd)) {
+					const fm = readFrontmatter(intentMd)
+					if (Array.isArray(fm.stages)) {
+						knownStages = (fm.stages as unknown[]).filter(
+							(s): s is string => typeof s === "string",
+						)
+					}
+				}
+			} catch {
+				/* fall through with empty list */
+			}
+			const sweepResults = sweepDiscoveryWorktrees(slug, knownStages)
+			const conflicts = sweepResults.filter((r) => r.isConflict)
+			if (conflicts.length > 0) {
+				const lines = conflicts.map((c) => {
+					const files = (c.conflictFiles || []).join(", ")
+					return `- discovery \`${c.template}\` on stage \`${c.stage}\`: ${c.message}${files ? ` (files: ${files})` : ""}`
+				})
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Discovery merge conflicts must be resolved before the workflow can continue:\n\n${lines.join("\n")}\n\nResolve the conflicts inside each discovery worktree, commit, then re-run \`haiku_run_next\`.`,
+						},
+					],
+					isError: true,
+				}
+			}
+			const failures = sweepResults.filter((r) => !r.success && !r.isConflict)
+			if (failures.length > 0) {
+				const lines = failures.map(
+					(f) =>
+						`- discovery \`${f.template}\` on stage \`${f.stage}\`: ${f.message}`,
+				)
+				console.error(
+					`[haiku_run_next] discovery merge failures: ${failures
+						.map((f) => `${f.stage}/${f.template}: ${f.message}`)
+						.join("; ")}`,
+				)
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Discovery worktree merge failed (non-conflict). Re-run \`haiku_run_next\` to retry; if it persists, inspect the worktree(s) under \`.haiku/worktrees/${slug}/discovery-*\` and file an issue.\n\n${lines.join("\n")}`,
+						},
+					],
+					isError: true,
+				}
+			}
+		} catch (err) {
+			console.error(
+				`[haiku_run_next] sweepDiscoveryWorktrees failed: ${err instanceof Error ? err.message : String(err)}`,
+			)
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Discovery worktree sweep threw: ${err instanceof Error ? err.message : String(err)}. Re-run \`haiku_run_next\` to retry.`,
+					},
+				],
+				isError: true,
+			}
+		}
+
 		// Workflow-engine dispatch: read disk → derive state → run
 		// per-state handler. The handler registry lives in
 		// orchestrator/workflow/handlers/.
@@ -513,19 +634,43 @@ export default defineTool({
 		// (`/haiku:change-mode`, etc.) but the tick path drives them
 		// engine-side here so the agent stays out of the loop.
 		let result = dispatchOrchestratorAction(slug)
-		while (
-			result.action === "select_studio" ||
-			result.action === "select_mode" ||
-			result.action === "select_stage"
-		) {
-			const pickerResult = await runSelectionPicker(result.action, slug, signal)
-			if (!pickerResult.ok) {
-				return {
-					content: [{ type: "text" as const, text: pickerResult.message }],
-					isError: true,
+		{
+			let iterations = 0
+			while (
+				result.action === "select_studio" ||
+				result.action === "select_mode" ||
+				result.action === "select_stage"
+			) {
+				const sigBefore = actionSignature(result)
+				if (++iterations > RUN_NEXT_LOOP_CAP) {
+					return loopAbortResponse("select_*", iterations, result, "cap")
+				}
+				const pickerResult = await runSelectionPicker(
+					result.action,
+					slug,
+					signal,
+				)
+				if (!pickerResult.ok) {
+					return {
+						content: [{ type: "text" as const, text: pickerResult.message }],
+						isError: true,
+					}
+				}
+				result = dispatchOrchestratorAction(slug)
+				if (
+					(result.action === "select_studio" ||
+						result.action === "select_mode" ||
+						result.action === "select_stage") &&
+					actionSignature(result) === sigBefore
+				) {
+					return loopAbortResponse(
+						"select_*",
+						iterations,
+						result,
+						"no_progress",
+					)
 				}
 			}
-			result = dispatchOrchestratorAction(slug)
 		}
 
 		// Surface-once stamping for design_direction_complete /
@@ -598,11 +743,31 @@ export default defineTool({
 		// through them), and when the FB has `origin: "drift"`, refresh
 		// the witnessed reviews/approvals timestamps on the targeted
 		// unit so the drift sweep stops flagging the same commit.
+		let closeFbIterations = 0
+		let closeFbLastSig: string | null = null
 		while (
 			result.action === "close_feedback" &&
 			typeof result.stage === "string" &&
 			typeof result.feedback_id === "string"
 		) {
+			const sig = actionSignature(result)
+			if (++closeFbIterations > RUN_NEXT_LOOP_CAP) {
+				return loopAbortResponse(
+					"close_feedback",
+					closeFbIterations,
+					result,
+					"cap",
+				)
+			}
+			if (sig === closeFbLastSig) {
+				return loopAbortResponse(
+					"close_feedback",
+					closeFbIterations,
+					result,
+					"no_progress",
+				)
+			}
+			closeFbLastSig = sig
 			try {
 				const stage = result.stage as string
 				const fbId = result.feedback_id as string
@@ -721,10 +886,30 @@ export default defineTool({
 			}
 		}
 
+		let mergeStageIterations = 0
+		let mergeStageLastSig: string | null = null
 		while (
 			result.action === "merge_stage" &&
 			typeof result.stage === "string"
 		) {
+			const sig = actionSignature(result)
+			if (++mergeStageIterations > RUN_NEXT_LOOP_CAP) {
+				return loopAbortResponse(
+					"merge_stage",
+					mergeStageIterations,
+					result,
+					"cap",
+				)
+			}
+			if (sig === mergeStageLastSig) {
+				return loopAbortResponse(
+					"merge_stage",
+					mergeStageIterations,
+					result,
+					"no_progress",
+				)
+			}
+			mergeStageLastSig = sig
 			const stageToMerge = result.stage
 			try {
 				const { isGitRepo } = await import("../../state-tools.js")
@@ -929,7 +1114,27 @@ export default defineTool({
 		// haiku_await_gate" two-step. haiku_await_gate stays as a
 		// resume entry point for the case where the original tick
 		// timed out or was interrupted.
+		let gateReviewIterations = 0
+		let gateReviewLastSig: string | null = null
 		while (result.action === "gate_review") {
+			const sig = actionSignature(result)
+			if (++gateReviewIterations > RUN_NEXT_LOOP_CAP) {
+				return loopAbortResponse(
+					"gate_review",
+					gateReviewIterations,
+					result,
+					"cap",
+				)
+			}
+			if (sig === gateReviewLastSig) {
+				return loopAbortResponse(
+					"gate_review",
+					gateReviewIterations,
+					result,
+					"no_progress",
+				)
+			}
+			gateReviewLastSig = sig
 			const stage = (result.stage as string | null) ?? ""
 			const nextStage = result.next_stage as string | null
 			const nextPhase = result.next_phase as string | null

@@ -26,12 +26,37 @@ import {
 	writeFileSync as fsWriteFileSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { isGitRepo, primaryRepoRoot } from "./state-tools.js"
+
+/** Default cap for git network ops (fetch / push / ls-remote). Without
+ *  a timeout, an unresponsive remote, an SSH-key prompt, or an HTTPS-auth
+ *  prompt hangs `haiku_run_next` indefinitely from the agent's view.
+ *  See gigsmart/haiku-method#333. Exported so other modules that shell
+ *  out to git network ops (state-tools.ts, side-effects.ts) can apply
+ *  the same bound without re-deriving the constant. */
+export const GIT_NETWORK_TIMEOUT_MS = 30_000
+
+/** Env that suppresses git's interactive credential / SSH prompts so a
+ *  network op fails fast instead of blocking on stdin. Combined with the
+ *  timeout, ensures we never hang. Exported alongside
+ *  `GIT_NETWORK_TIMEOUT_MS` for the same reason. */
+export const GIT_NONINTERACTIVE_ENV: NodeJS.ProcessEnv = {
+	...process.env,
+	GIT_TERMINAL_PROMPT: "0",
+	// Force a no-op askpass — if the remote needs HTTPS creds or an SSH
+	// passphrase, exit immediately rather than prompting. (`true` is the
+	// POSIX command that exits 0 without input.)
+	GIT_ASKPASS: "true",
+	SSH_ASKPASS: "true",
+	SSH_ASKPASS_REQUIRE: "never",
+}
 
 function run(args: string[], cwd?: string): string {
 	return execFileSync(args[0], args.slice(1), {
@@ -44,6 +69,25 @@ function run(args: string[], cwd?: string): string {
 function tryRun(args: string[], cwd?: string): string {
 	try {
 		return run(args, cwd)
+	} catch {
+		return ""
+	}
+}
+
+/** Variant of `tryRun` for git operations that talk to a remote
+ *  (`fetch origin`, `push origin`, `ls-remote`). Bounded by
+ *  `GIT_NETWORK_TIMEOUT_MS` and runs with credential / SSH prompts
+ *  suppressed, so an unresponsive remote or auth prompt fails fast
+ *  instead of hanging the MCP call. See gigsmart/haiku-method#333. */
+function tryRunNetwork(args: string[], cwd?: string): string {
+	try {
+		return execFileSync(args[0], args.slice(1), {
+			encoding: "utf8",
+			stdio: "pipe",
+			cwd,
+			timeout: GIT_NETWORK_TIMEOUT_MS,
+			env: GIT_NONINTERACTIVE_ENV,
+		}).trim()
 	} catch {
 		return ""
 	}
@@ -107,11 +151,16 @@ export function resolveMainlineRef(): string {
 }
 
 /** Fetch from origin so subsequent ref lookups and worktree creations see the
- *  current remote state. Non-fatal — returns false on failure (offline, no remote). */
+ *  current remote state. Non-fatal — returns false on failure (offline, no
+ *  remote, auth prompt suppressed, timeout). */
 export function fetchOrigin(): boolean {
 	if (!isGitRepo()) return false
 	try {
-		execFileSync("git", ["fetch", "--prune", "origin"], { stdio: "pipe" })
+		execFileSync("git", ["fetch", "--prune", "origin"], {
+			stdio: "pipe",
+			timeout: GIT_NETWORK_TIMEOUT_MS,
+			env: GIT_NONINTERACTIVE_ENV,
+		})
 		return true
 	} catch {
 		return false
@@ -325,7 +374,11 @@ export function commitAndPushFromWorktree(
 			execFileSync(
 				"git",
 				["-C", worktreePath, "push", "origin", `HEAD:refs/heads/${branch}`],
-				{ stdio: "pipe" },
+				{
+					stdio: "pipe",
+					timeout: GIT_NETWORK_TIMEOUT_MS,
+					env: GIT_NONINTERACTIVE_ENV,
+				},
 			)
 			return { ok: true }
 		} catch (err) {
@@ -350,7 +403,7 @@ export function commitAndPushFromWorktree(
 	const isNonFastForward =
 		/non-fast-forward|fetch first|behind the remote/i.test(first.error ?? "")
 	if (isNonFastForward) {
-		tryRun(["git", "-C", worktreePath, "fetch", "origin", branch])
+		tryRunNetwork(["git", "-C", worktreePath, "fetch", "origin", branch])
 		try {
 			execFileSync("git", ["-C", worktreePath, "rebase", `origin/${branch}`], {
 				stdio: "pipe",
@@ -423,14 +476,18 @@ export function openPullRequest(
 				"--body",
 				body,
 			)
-			const out = execFileSync("gh", args, { encoding: "utf8" }).trim()
+			const out = execFileSync("gh", args, {
+				encoding: "utf8",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
+			}).trim()
 			return { ok: true, url: out }
 		}
 		// glab: `glab mr list` returns a tabular row like `!123  title  branch  ...`,
 		// not JSON, so we extract the MR number via a !NNN regex (not a substring
 		// includes, which would false-positive on labels or error text) and then
 		// call `glab mr view --output json` to get a proper URL.
-		const existing = tryRun([
+		const existing = tryRunNetwork([
 			"glab",
 			"mr",
 			"list",
@@ -444,7 +501,14 @@ export function openPullRequest(
 		const mrNumberMatch = existing.match(/^!(\d+)\b/m)
 		if (mrNumberMatch) {
 			const mrNum = mrNumberMatch[1]
-			const viewJson = tryRun(["glab", "mr", "view", mrNum, "--output", "json"])
+			const viewJson = tryRunNetwork([
+				"glab",
+				"mr",
+				"view",
+				mrNum,
+				"--output",
+				"json",
+			])
 			if (viewJson) {
 				try {
 					const parsed = JSON.parse(viewJson) as { web_url?: string }
@@ -466,7 +530,11 @@ export function openPullRequest(
 			"--description",
 			body,
 		)
-		const out = execFileSync("glab", args, { encoding: "utf8" }).trim()
+		const out = execFileSync("glab", args, {
+			encoding: "utf8",
+			timeout: GIT_NETWORK_TIMEOUT_MS,
+			env: GIT_NONINTERACTIVE_ENV,
+		}).trim()
 		return { ok: true, url: out }
 	} catch (err) {
 		return {
@@ -477,7 +545,9 @@ export function openPullRequest(
 }
 
 /** Push a branch to its origin (creates upstream if missing). Returns
- *  ok:true on success, ok:false with the raw error on failure. */
+ *  ok:true on success, ok:false with the raw error on failure. Bounded
+ *  by `GIT_NETWORK_TIMEOUT_MS` and runs with prompts suppressed so an
+ *  unresponsive remote or auth prompt fails fast instead of hanging. */
 export function pushBranchToOrigin(branch: string): {
 	ok: boolean
 	error?: string
@@ -486,6 +556,8 @@ export function pushBranchToOrigin(branch: string): {
 		execFileSync("git", ["push", "-u", "origin", branch], {
 			encoding: "utf8",
 			stdio: "pipe",
+			timeout: GIT_NETWORK_TIMEOUT_MS,
+			env: GIT_NONINTERACTIVE_ENV,
 		})
 		return { ok: true }
 	} catch (err) {
@@ -739,6 +811,8 @@ export function markPullRequestReady(url: string): {
 			execFileSync("gh", ["pr", "ready", url], {
 				encoding: "utf8",
 				stdio: "pipe",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
 			})
 			return { ok: true }
 		}
@@ -751,6 +825,8 @@ export function markPullRequestReady(url: string): {
 			execFileSync("glab", ["mr", "update", iidMatch[1], "--ready"], {
 				encoding: "utf8",
 				stdio: "pipe",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
 			})
 			return { ok: true }
 		}
@@ -2477,9 +2553,10 @@ export function cleanupOrphanedStageBranches(slug: string): {
 		const segment = stripped.slice(`haiku/${slug}/`.length)
 		if (segment.startsWith("unit-")) continue
 		if (!isBranchMerged(stripped, mainBranch)) continue
-		// git push origin --delete is destructive; wrap in tryRun so a
-		// permission or network issue doesn't crash the workflow engine.
-		if (tryRun(["git", "push", "origin", "--delete", stripped])) {
+		// git push origin --delete is destructive; wrap in tryRunNetwork so
+		// a permission, auth-prompt, or unresponsive-remote issue fails
+		// fast within the network timeout instead of hanging the workflow.
+		if (tryRunNetwork(["git", "push", "origin", "--delete", stripped])) {
 			result.deleted_remote.push(stripped)
 		}
 	}
@@ -3259,6 +3336,102 @@ export function mergeDiscoveryWorktree(
 			message: err instanceof Error ? err.message : String(err),
 		}
 	}
+}
+
+/**
+ * Sweep `.haiku/worktrees/{slug}/discovery-*` and merge each completed
+ * discovery worktree back into its stage branch.
+ *
+ * Why this exists:
+ *   `decompose.ts` promises "the workflow engine merges their work back
+ *   into the stage branch on the next haiku_run_next." Nothing actually
+ *   called `mergeDiscoveryWorktree`, so the discovery file lived only on
+ *   the discovery branch. The cursor's discovery-existence check
+ *   (`cursor.ts` step 3) reads `process.cwd()/<location>` while checked
+ *   out on the stage branch — it never sees the file → `discovery_required`
+ *   re-fires every tick. See gigsmart/haiku-method#333.
+ *
+ * Called pre-cursor by `haiku_run_next`. Best-effort: per-worktree
+ * failures log and skip; conflicts are surfaced through the merge result
+ * so callers can decide whether to escalate. Returns one entry per
+ * worktree found.
+ *
+ * `stages` lets us split worktree names like `discovery-{stage}-{template}`
+ * even when the stage itself contains hyphens (e.g. `design-discovery`).
+ * Caller should pass `intent.md`'s `stages:` array. When omitted or empty
+ * the parser falls back to splitting on the first hyphen — correct for
+ * single-word stage names, lossy for hyphenated ones.
+ */
+export function sweepDiscoveryWorktrees(
+	slug: string,
+	stages?: ReadonlyArray<string>,
+): Array<{
+	stage: string
+	template: string
+	success: boolean
+	message: string
+	isConflict?: boolean
+	conflictFiles?: string[]
+}> {
+	if (!isGitRepo()) return []
+	const worktreeBase = join(primaryRepoRoot(), ".haiku", "worktrees", slug)
+	if (!existsSync(worktreeBase)) return []
+	let entries: string[]
+	try {
+		entries = readdirSync(worktreeBase)
+	} catch {
+		return []
+	}
+	// Sort known stages longest-first so a stage `design-discovery` matches
+	// before a stage `design` would steal the prefix of a worktree named
+	// `discovery-design-discovery-foo`.
+	const knownStages = (stages ?? [])
+		.filter((s) => typeof s === "string" && s.length > 0)
+		.slice()
+		.sort((a, b) => b.length - a.length)
+	const results: Array<{
+		stage: string
+		template: string
+		success: boolean
+		message: string
+		isConflict?: boolean
+		conflictFiles?: string[]
+	}> = []
+	for (const name of entries) {
+		// Discovery worktree dir name: `discovery-{stage}-{template}`.
+		if (!name.startsWith("discovery-")) continue
+		const rest = name.slice("discovery-".length)
+		let stage = ""
+		let template = ""
+		const matched = knownStages.find((s) => rest.startsWith(`${s}-`))
+		if (matched) {
+			stage = matched
+			template = rest.slice(matched.length + 1)
+		} else {
+			const dashIdx = rest.indexOf("-")
+			if (dashIdx <= 0) continue
+			stage = rest.slice(0, dashIdx)
+			template = rest.slice(dashIdx + 1)
+		}
+		if (!stage || !template) continue
+		try {
+			if (!statSync(join(worktreeBase, name)).isDirectory()) continue
+		} catch {
+			continue
+		}
+		try {
+			const merged = mergeDiscoveryWorktree(slug, stage, template)
+			results.push({ stage, template, ...merged })
+		} catch (err) {
+			results.push({
+				stage,
+				template,
+				success: false,
+				message: err instanceof Error ? err.message : String(err),
+			})
+		}
+	}
+	return results
 }
 
 /** Discard a discovery worktree without merging. */

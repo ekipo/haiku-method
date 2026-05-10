@@ -42,6 +42,8 @@ import {
 	ensureOnIntentMain,
 	ensureOnStageBranch,
 	finalizeIntentBranches,
+	GIT_NETWORK_TIMEOUT_MS,
+	GIT_NONINTERACTIVE_ENV,
 	isBranchMerged,
 	isOnStageBranch,
 	markPullRequestReady,
@@ -174,8 +176,12 @@ export function workflowStartStage(slug: string, stage: string): void {
 	if (prevStage && branchExists(prevStageBranch)) {
 		deleteStageBranch(slug, prevStage)
 		try {
+			// Bound the network op so an unresponsive remote / auth prompt
+			// can't hang the MCP call. See gigsmart/haiku-method#333.
 			execFileSync("git", ["push", "origin", "--delete", prevStageBranch], {
 				stdio: "pipe",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
 			})
 		} catch {
 			/* non-fatal */
@@ -369,8 +375,12 @@ function workflowFinalizeStageIntoIntentMain(
 	if (branchExists(stageBranch)) {
 		deleteStageBranch(slug, stage)
 		try {
+			// Bound the network op so an unresponsive remote / auth prompt
+			// can't hang the MCP call. See gigsmart/haiku-method#333.
 			execFileSync("git", ["push", "origin", "--delete", stageBranch], {
 				stdio: "pipe",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
 			})
 		} catch {
 			/* non-fatal: offline, no push perms, or branch already gone */

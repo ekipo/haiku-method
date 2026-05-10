@@ -599,7 +599,7 @@ export function openStagePullRequest(opts: {
 			branch,
 			base,
 			message:
-				"This is not a git repo — the stage merge happens via on-disk stages_merged. Nothing to open.",
+				"This is not a git repo — stage progression is driven by per-unit signature state, not a git merge. Nothing to open.",
 		}
 	}
 
@@ -973,6 +973,132 @@ export function reconcileMisroutedStageMerges(
 	return out
 }
 
+/** Result of `reconcileIntentBranches`: per-tick branch-alignment outcome. */
+export interface IntentBranchReconciliation {
+	/** True when intent main was fast-forwarded from the repo default. */
+	intentMainFastForwarded: boolean
+	/** True when the current stage branch was brought up to intent main
+	 *  (only fires when the worktree is on a stage branch). */
+	stageBranchFastForwarded: boolean
+	/** Set when a divergence prevented a fast-forward; the tick still
+	 *  continues, but the agent should be told about it. */
+	error?: string
+}
+
+/**
+ * Pre-tick branch alignment. Run BEFORE the cursor walk so both
+ * canonical refs reflect the latest committed state:
+ *
+ *   1. `git fetch origin` — refresh remote refs.
+ *   2. Fast-forward `haiku/<slug>/main` from `origin/<default>`.
+ *      The user can merge a stage PR onto the repo default instead
+ *      of intent main; this step propagates that merge to intent
+ *      main. When the worktree is on a stage branch, the FF goes
+ *      through `git fetch . origin/<default>:haiku/<slug>/main` —
+ *      a refspec write that updates the local ref without touching
+ *      HEAD or the working tree. When the worktree is already on
+ *      intent main, `git merge --ff-only` does the same job.
+ *   3. Bring the current stage branch up to intent main (only when
+ *      the worktree IS on a stage branch). Architecture invariant:
+ *      stage branches must be ahead of main, never behind. If
+ *      intent main moved forward in step 2, the stage needs to
+ *      pick those commits up before any per-stage walk.
+ *
+ * Best-effort: divergence cases set `error` but the function never
+ * throws and never blocks the tick. Non-FF cases leave the refs
+ * where they were so the agent can reconcile manually.
+ *
+ * No-op outside git mode.
+ */
+export function reconcileIntentBranches(
+	slug: string,
+): IntentBranchReconciliation {
+	const result: IntentBranchReconciliation = {
+		intentMainFastForwarded: false,
+		stageBranchFastForwarded: false,
+	}
+	if (!isGitRepo()) return result
+	fetchOrigin()
+
+	const intentMain = `haiku/${slug}/main`
+	const mainline = getMainlineBranch()
+	if (!branchExists(intentMain) || !mainline) return result
+	const currentBranch = getCurrentBranch()
+
+	// Step 2: FF intent main from origin/<default>.
+	const intentMainRef = tryRun(["git", "rev-parse", "--verify", intentMain])
+	const originDefaultRef =
+		tryRun(["git", "rev-parse", "--verify", `origin/${mainline}`]) ||
+		tryRun(["git", "rev-parse", "--verify", mainline])
+	if (intentMainRef && originDefaultRef && intentMainRef !== originDefaultRef) {
+		if (isAncestor(intentMainRef, originDefaultRef)) {
+			if (currentBranch === intentMain) {
+				try {
+					execFileSync("git", ["merge", "--ff-only", `origin/${mainline}`], {
+						stdio: "pipe",
+					})
+					result.intentMainFastForwarded = true
+				} catch (err) {
+					result.error = `Failed to FF ${intentMain} from origin/${mainline}: ${err instanceof Error ? err.message : String(err)}`
+				}
+			} else {
+				try {
+					execFileSync(
+						"git",
+						["fetch", ".", `origin/${mainline}:${intentMain}`],
+						{ stdio: "pipe" },
+					)
+					result.intentMainFastForwarded = true
+				} catch (err) {
+					result.error = `Failed to FF ${intentMain} from origin/${mainline} via refspec: ${err instanceof Error ? err.message : String(err)}`
+				}
+			}
+		} else if (!isAncestor(originDefaultRef, intentMainRef)) {
+			result.error = `${intentMain} has diverged from origin/${mainline} — fast-forward isn't safe. Resolve manually.`
+		}
+		// Else (origin default is ancestor of intent main): intent main is
+		// already ahead, nothing to FF.
+	}
+
+	// Step 3: bring the current stage branch up to intent main (only
+	// when we're on it — other stage branches don't matter for this
+	// tick, and we can't merge into a branch we're not on).
+	const stagePrefix = `haiku/${slug}/`
+	const isOnStageBranchOfThisIntent =
+		currentBranch.startsWith(stagePrefix) && currentBranch !== intentMain
+	if (isOnStageBranchOfThisIntent) {
+		const updatedIntentMainRef =
+			tryRun(["git", "rev-parse", "--verify", intentMain]) || intentMainRef
+		const stageRef = tryRun(["git", "rev-parse", "--verify", currentBranch])
+		if (
+			stageRef &&
+			updatedIntentMainRef &&
+			stageRef !== updatedIntentMainRef &&
+			isAncestor(stageRef, updatedIntentMainRef)
+		) {
+			// Stage is strictly behind main; pick up main's new commits.
+			// `--ff-only` is the only correct operation here — when the
+			// stage IS an ancestor of intent main, fast-forward is always
+			// the merge result. The previous `--no-ff` fallback was
+			// unreachable: any condition that breaks `--ff-only` (dirty
+			// working tree, locked index, etc.) breaks `--no-ff` the same
+			// way. Surface the failure instead of hiding it behind a
+			// fallback that can't help.
+			try {
+				execFileSync("git", ["merge", "--ff-only", intentMain], {
+					stdio: "pipe",
+				})
+				result.stageBranchFastForwarded = true
+			} catch (mergeErr) {
+				const existing = result.error ? `${result.error}\n` : ""
+				result.error = `${existing}Failed to fast-forward ${currentBranch} from ${intentMain}: ${mergeErr instanceof Error ? mergeErr.message : String(mergeErr)}`
+			}
+		}
+	}
+
+	return result
+}
+
 /** Helpers used by reconcileMisroutedStageMerges. Internal — not exported. */
 function isAncestor(maybeAncestor: string, descendant: string): boolean {
 	if (!maybeAncestor || !descendant) return false
@@ -1234,10 +1360,11 @@ export function mergeStageBranchIntoMain(
 	/** True when the function returned success without performing a
 	 *  merge — the source branch was missing locally and on origin (v3
 	 *  merged-and-deleted), or the environment isn't a git repo at all.
-	 *  Callers that drive a `merge_stage` loop must consult this flag
-	 *  to know they need to advance the cursor's state another way
-	 *  (e.g. stamp `stages_merged` on intent.md) — without it, the
-	 *  cursor re-emits `merge_stage` for the same stage forever. */
+	 *  Callers can safely re-tick: in git mode the original v3 merge
+	 *  already put the stage's unit files on intent main, so
+	 *  `firstUnmergedStage` walks past on the next tick; in fs mode the
+	 *  cursor uses per-unit signature state via `isStageFullySigned`.
+	 *  No `stages_merged` stamp needed (the field is dead in v4). */
 	noop?: boolean
 } {
 	if (!isGitRepo()) return { success: true, message: "no git", noop: true }
@@ -1249,12 +1376,14 @@ export function mergeStageBranchIntoMain(
 		// Source-branch missing recovery. v3 merged-and-deleted stage
 		// branches once the stage was complete, so migrated intents will
 		// reach this code path with a stage branch that no longer exists
-		// either locally or on origin. The cursor's `isStageBranchMerged`
-		// guard treats that as merged-already and short-circuits, but if
-		// a caller dispatches the merge directly (or origin is reachable
-		// but the local clone is stale) the rev-parse below would throw
-		// and the engine would loop on `merge_stage`. Treat both-missing
-		// as a no-op success so the workflow can advance.
+		// either locally or on origin. `firstUnmergedStage` reads unit
+		// files on intent main — when the stage branch is gone, intent
+		// main already carries the merged units (from the original v3
+		// merge), so the cursor walks past naturally. But if a caller
+		// dispatches the merge directly (or origin is reachable but the
+		// local clone is stale), the rev-parse below would throw and the
+		// engine would loop on `merge_stage`. Treat both-missing as a
+		// no-op success so the workflow can advance.
 		const localStage = tryRun(["git", "rev-parse", "--verify", stageBranch])
 		const originStage = tryRun([
 			"git",
@@ -1704,6 +1833,16 @@ export function ensureOnStageBranch(
 
 	const intentMain = `haiku/${slug}/main`
 	const stageBranch = stage ? `haiku/${slug}/${stage}` : ""
+	// When a stage is named but its branch doesn't exist, fork it from
+	// intent main so stage-scoped writes have somewhere to land. The
+	// disk-state cursor model expects every active stage to have its
+	// own branch — without this auto-fork, writes would float onto
+	// intent main and `firstUnmergedStage` (which reads intent main's
+	// tree) would interpret the in-flight content as "stage merged"
+	// and walk past.
+	if (stage && stageBranch && !branchExists(stageBranch)) {
+		ensureStageBranch(slug, stage)
+	}
 	const targetBranch =
 		stage && branchExists(stageBranch) ? stageBranch : intentMain
 	const current = getCurrentBranch()
@@ -1798,9 +1937,17 @@ export function ensureOnStageBranch(
 		}
 	}
 
-	// Detect an in-progress merge/rebase/cherry-pick before attempting
-	// checkout. git's error messages are cryptic; surface the state clearly
-	// so the agent knows to finish the in-progress operation first.
+	// Detect an in-progress merge/rebase/cherry-pick BEFORE the
+	// auto-commit below. git's error messages are cryptic; surface the
+	// state clearly so the agent knows to finish the in-progress
+	// operation first.
+	//
+	// **Order matters.** The dirty-tree auto-commit calls
+	// `git add -A && git commit`. During a `MERGE_HEAD` state, that
+	// completes the pending merge as a two-parent commit instead of
+	// creating a WIP commit — silently consuming the merge state and
+	// hiding it from the operator. Returning `merge_in_progress`
+	// before auto-commit prevents that footgun.
 	const gitDir = tryRun(["git", "rev-parse", "--git-dir"])
 	if (gitDir) {
 		for (const marker of [
@@ -1818,6 +1965,28 @@ export function ensureOnStageBranch(
 					block: "merge_in_progress",
 					target_branch: targetBranch,
 				}
+			}
+		}
+	}
+
+	// Auto-commit any dirty tree on the source branch before
+	// switching. New (untracked or modified) files that don't conflict
+	// with the target branch's tree would otherwise float along to the
+	// target uncommitted — the cursor's `firstUnmergedStage` then
+	// sees stage content on intent main when it should still be
+	// branch-isolated. Per the architectural rule "stage-scoped writes
+	// belong on the stage branch," we commit them on the source first.
+	const dirtyStatus = tryRun(["git", "status", "--porcelain"])
+	if (dirtyStatus) {
+		const committed = autoCommitDirtyTree(current)
+		if (!committed.ok) {
+			return {
+				ok: false,
+				branch: current,
+				message: `Pre-checkout auto-commit on '${current}' failed: ${committed.message}. Resolve the working tree manually before retrying.`,
+				switched: false,
+				block: "dirty_tree",
+				target_branch: targetBranch,
 			}
 		}
 	}

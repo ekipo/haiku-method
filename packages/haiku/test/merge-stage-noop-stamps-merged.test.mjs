@@ -6,18 +6,18 @@
 // the source branch is missing locally and on origin (Bug D's recovery
 // path). Without this test's contract, the haiku_run_next while-loop
 // would re-call `dispatchOrchestratorAction`, get the same `merge_stage`
-// action back (because `stages_merged` is absent from intent.md and
-// `isStageBranchMerged` returns false on a missing branch), call the
-// merge function again, etc — spinning forever within a single tool
-// invocation.
+// action back, call the merge function again, etc — spinning forever
+// within a single tool invocation.
 //
 // The contract this test pins:
 //   1. The merge function flags no-op success with `noop: true` so
 //      callers can detect the case without string-matching the message.
-//   2. Calling code (haiku_run_next) is responsible for stamping
-//      `stages_merged` after a no-op so the next dispatch advances
-//      the cursor past the now-stamped stage. Tested via a direct
-//      cursor walk after stamping.
+//   2. Calling code (haiku_run_next) re-ticks after a no-op; the
+//      cursor walks past via unit files already on intent main from
+//      the original v3 merge (or, in fs mode, via per-unit signature
+//      state). No `stages_merged` stamp needed — the field is dead in
+//      v4. Tested via a direct cursor walk after writing the units to
+//      intent main's view.
 
 import assert from "node:assert"
 import { execFileSync } from "node:child_process"
@@ -25,7 +25,6 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs"
@@ -76,8 +75,9 @@ const PLUGIN_ROOT = join(findRepoRoot(), "plugin")
  * Without the no-op stamping in haiku_run_next:
  *   - mergeStageBranchIntoMain returns success (noop)
  *   - dispatchOrchestratorAction re-derives position
- *   - firstUnmergedStage sees: stages_merged is empty, isStageBranchMerged
- *     returns false (branch missing) → returns the same stage
+ *   - firstUnmergedStage sees: no unit files on intent main for this
+ *     stage (neither the v3 stages_merged stamp nor a stage branch
+ *     exists) → returns the same stage
  *   - while-loop calls merge again → spin
  */
 function setupSpinTrap(slug) {
@@ -133,7 +133,7 @@ test("missing-source-branch merge returns noop=true (caller signal)", () => {
 		assert.strictEqual(
 			result.noop,
 			true,
-			"missing-branch path must signal noop=true so callers can stamp stages_merged",
+			"missing-branch path must signal noop=true so callers can advance the cursor (write the stage's unit files onto intent main under the disk-state model)",
 		)
 	} finally {
 		restoreCwd()
@@ -146,7 +146,7 @@ test("missing-source-branch merge returns noop=true (caller signal)", () => {
 	}
 })
 
-test("after caller stamps stages_merged, firstUnmergedStage advances past the noop'd stage", () => {
+test("after the noop'd stage's unit files land on intent main, firstUnmergedStage advances past it", () => {
 	_resetIsGitRepoForTests()
 	const slug = "spin-after-stamp"
 	const { tmp, intentDir } = setupSpinTrap(slug)
@@ -154,8 +154,9 @@ test("after caller stamps stages_merged, firstUnmergedStage advances past the no
 	process.env.CLAUDE_PLUGIN_ROOT = PLUGIN_ROOT
 	try {
 		process.chdir(tmp)
-		// Pre-stamp: cursor sees inception as unmerged (branch missing,
-		// not in stages_merged) — this is what the spin would loop on.
+		// Pre-condition: cursor sees inception as unmerged (branch missing,
+		// no unit files on intent main for this stage) — this is what
+		// the spin would loop on.
 		const before = firstUnmergedStage(slug, "software")
 		assert.strictEqual(
 			before,
@@ -163,15 +164,22 @@ test("after caller stamps stages_merged, firstUnmergedStage advances past the no
 			`pre-stamp the cursor must pin to inception (the spin trap), got: ${before}`,
 		)
 
-		// Simulate haiku_run_next's noop-handling: stamp inception onto
-		// stages_merged.
-		const intentMd = join(intentDir, "intent.md")
-		const raw = readFileSync(intentMd, "utf8")
-		const parsed = matter(raw)
-		parsed.data.stages_merged = ["inception"]
-		writeFileSync(intentMd, matter.stringify(parsed.content, parsed.data))
+		// Simulate haiku_run_next's noop-handling under the new
+		// disk-state cursor model: instead of stamping `stages_merged`
+		// (deprecated), write the inception stage's content onto
+		// intent main. The disk presence of the stage's units IS the
+		// "merged" signal.
+		const inceptionUnits = join(intentDir, "stages", "inception", "units")
+		mkdirSync(inceptionUnits, { recursive: true })
+		writeFileSync(
+			join(inceptionUnits, "unit-01-merged.md"),
+			matter.stringify("# merged\n", {
+				title: "merged",
+				started_at: new Date().toISOString(),
+			}),
+		)
 
-		// Post-stamp: cursor must advance to the next unmerged stage.
+		// Post-write: cursor must advance to the next unmerged stage.
 		const after = firstUnmergedStage(slug, "software")
 		assert.notStrictEqual(
 			after,

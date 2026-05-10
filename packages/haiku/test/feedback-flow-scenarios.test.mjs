@@ -8,12 +8,26 @@
 
 import assert from "node:assert"
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 import matter from "gray-matter"
-import { initTestRepo, makeFeedback, makeIntent, makeStudio } from "./_v4-fixtures.mjs"
+import {
+	initTestRepo,
+	makeFeedback,
+	makeIntent,
+	makeStudio,
+	onStageBranch,
+} from "./_v4-fixtures.mjs"
 
 const HAS_GIT = (() => {
 	try {
@@ -42,12 +56,8 @@ async function withRepo(slug, fn) {
 }
 
 async function runTick(slug) {
-	const { dispatchOrchestratorAction } = await import(
-		"../src/orchestrator/workflow/run-tick.js"
-	)
-	const { clearStudioCache } = await import("../src/studio-reader.js")
-	clearStudioCache()
-	return dispatchOrchestratorAction(slug, "")
+	const { runTickWithBranchAlignment } = await import("./_v4-fixtures.mjs")
+	return runTickWithBranchAlignment(slug)
 }
 
 function readFm(path) {
@@ -55,12 +65,13 @@ function readFm(path) {
 }
 
 function writeUnit(intentDir, stage, name, fm) {
-	const unitsDir = join(intentDir, "stages", stage, "units")
-	mkdirSync(unitsDir, { recursive: true })
-	writeFileSync(
-		join(unitsDir, `${name}.md`),
-		matter.stringify(`# ${name}\n`, fm),
-	)
+	const slug = intentDir.split("/").pop() ?? ""
+	const repoRoot = intentDir.split("/").slice(0, -3).join("/")
+	const path = join(intentDir, "stages", stage, "units", `${name}.md`)
+	onStageBranch(repoRoot, slug, stage, () => {
+		mkdirSync(join(intentDir, "stages", stage, "units"), { recursive: true })
+		writeFileSync(path, matter.stringify(`# ${name}\n`, fm))
+	})
 }
 
 // ── Per-stage independence ───────────────────────────────────────────
@@ -176,57 +187,60 @@ test("intent-scope FB is preserved separately from stage-scope FBs", async () =>
 
 test("open FB on earlier stage preempts current-stage work", async () => {
 	if (!HAS_GIT) return
-	await withRepo("test-fb-cross-stage", async ({ repoRoot, intentDir, slug }) => {
-		makeStudio({
-			repoRoot,
-			studio: "test",
-			stages: [
-				{
-					name: "a",
-					hats: ["planner", "verifier"],
-					fix_hats: ["classifier", "planner", "feedback-assessor"],
-					review: "ask",
-					review_agents: ["code-reviewer"],
-				},
-				{
-					name: "b",
-					hats: ["planner", "verifier"],
-					fix_hats: ["classifier", "planner", "feedback-assessor"],
-					review: "ask",
-					review_agents: ["code-reviewer"],
-				},
-			],
-		})
-		makeIntent({ intentDir, slug, studio: "test" })
+	await withRepo(
+		"test-fb-cross-stage",
+		async ({ repoRoot, intentDir, slug }) => {
+			makeStudio({
+				repoRoot,
+				studio: "test",
+				stages: [
+					{
+						name: "a",
+						hats: ["planner", "verifier"],
+						fix_hats: ["classifier", "planner", "feedback-assessor"],
+						review: "ask",
+						review_agents: ["code-reviewer"],
+					},
+					{
+						name: "b",
+						hats: ["planner", "verifier"],
+						fix_hats: ["classifier", "planner", "feedback-assessor"],
+						review: "ask",
+						review_agents: ["code-reviewer"],
+					},
+				],
+			})
+			makeIntent({ intentDir, slug, studio: "test" })
 
-		// Stage `a`: empty + open FB
-		makeFeedback({
-			intentDir,
-			stage: "a",
-			id: "01",
-			title: "a-stage fb",
-			body: "needs attention",
-			closed: false,
-		})
-		// Stage `b`: wave-ready unit
-		writeUnit(intentDir, "b", "unit-01", {
-			title: "u1",
-			depends_on: [],
-			started_at: null,
-			iterations: [],
-			reviews: {},
-			approvals: {},
-			discovery: {},
-		})
+			// Stage `a`: empty + open FB
+			makeFeedback({
+				intentDir,
+				stage: "a",
+				id: "01",
+				title: "a-stage fb",
+				body: "needs attention",
+				closed: false,
+			})
+			// Stage `b`: wave-ready unit
+			writeUnit(intentDir, "b", "unit-01", {
+				title: "u1",
+				depends_on: [],
+				started_at: null,
+				iterations: [],
+				reviews: {},
+				approvals: {},
+				discovery: {},
+			})
 
-		const action = await runTick(slug)
-		// Open FB on earlier stage must take priority over stage B's
-		// wave-ready unit.
-		assert.ok(
-			action.action === "start_feedback_hat" || action.stage === "a",
-			`expected stage-a preemption; got: action=${action.action} stage=${action.stage}`,
-		)
-	})
+			const action = await runTick(slug)
+			// Open FB on earlier stage must take priority over stage B's
+			// wave-ready unit.
+			assert.ok(
+				action.action === "start_feedback_hat" || action.stage === "a",
+				`expected stage-a preemption; got: action=${action.action} stage=${action.stage}`,
+			)
+		},
+	)
 })
 
 // ── Replies thread ───────────────────────────────────────────────────
@@ -324,10 +338,7 @@ test("closure_reply + closure_reply_unread true survive parse, dismissable via d
 		// closure_reply itself is unchanged (the reply text persists
 		// post-dismiss; only the unread flag flips).
 		const updated = { ...before, closure_reply_unread: false }
-		writeFileSync(
-			fbPath,
-			matter.stringify("Original.\n", updated),
-		)
+		writeFileSync(fbPath, matter.stringify("Original.\n", updated))
 		const after = readFm(fbPath)
 		assert.strictEqual(after.closure_reply_unread, false)
 		assert.strictEqual(after.closure_reply.text, before.closure_reply.text)
@@ -394,43 +405,46 @@ test("FB with malformed iterations frontmatter doesn't crash readFeedbackFiles",
 
 test("set_targets refuses to classify already-closed FB (lifecycle guard)", async () => {
 	if (!HAS_GIT) return
-	await withRepo("test-fb-closed-classify", async ({ repoRoot, intentDir, slug }) => {
-		makeStudio({ repoRoot, studio: "test" })
-		makeIntent({ intentDir, slug, studio: "test" })
+	await withRepo(
+		"test-fb-closed-classify",
+		async ({ repoRoot, intentDir, slug }) => {
+			makeStudio({ repoRoot, studio: "test" })
+			makeIntent({ intentDir, slug, studio: "test" })
 
-		const fbDir = join(intentDir, "stages", "design", "feedback")
-		mkdirSync(fbDir, { recursive: true })
-		writeFileSync(
-			join(fbDir, "04-closed.md"),
-			matter.stringify("body\n", {
-				title: "Closed",
-				origin: "user-chat",
-				author: "user",
-				author_type: "human",
-				status: "closed",
-				closed_at: "2026-05-06T12:00:00Z",
-				targets: { unit: null, invalidates: [] },
-			}),
-		)
-		// Initialize git for branch-enforcement guard.
-		execFileSync("git", ["add", "-A"], { cwd: repoRoot, stdio: "pipe" })
-		execFileSync("git", ["commit", "-m", "fb fixture"], {
-			cwd: repoRoot,
-			stdio: "pipe",
-		})
+			const fbDir = join(intentDir, "stages", "design", "feedback")
+			mkdirSync(fbDir, { recursive: true })
+			writeFileSync(
+				join(fbDir, "04-closed.md"),
+				matter.stringify("body\n", {
+					title: "Closed",
+					origin: "user-chat",
+					author: "user",
+					author_type: "human",
+					status: "closed",
+					closed_at: "2026-05-06T12:00:00Z",
+					targets: { unit: null, invalidates: [] },
+				}),
+			)
+			// Initialize git for branch-enforcement guard.
+			execFileSync("git", ["add", "-A"], { cwd: repoRoot, stdio: "pipe" })
+			execFileSync("git", ["commit", "-m", "fb fixture"], {
+				cwd: repoRoot,
+				stdio: "pipe",
+			})
 
-		const { handleStateTool } = await import("../src/state-tools.ts")
-		const r = handleStateTool("haiku_feedback_set_targets", {
-			intent: slug,
-			stage: "design",
-			feedback_id: 4,
-			target_unit: "unit-99",
-			target_invalidates: ["user"],
-		})
-		const block = r.content.find((c) => c.type === "text")
-		assert.ok(block)
-		const p = JSON.parse(block.text)
-		assert.strictEqual(r.isError, true)
-		assert.strictEqual(p.error, "lifecycle_violation")
-	})
+			const { handleStateTool } = await import("../src/state-tools.ts")
+			const r = handleStateTool("haiku_feedback_set_targets", {
+				intent: slug,
+				stage: "design",
+				feedback_id: 4,
+				target_unit: "unit-99",
+				target_invalidates: ["user"],
+			})
+			const block = r.content.find((c) => c.type === "text")
+			assert.ok(block)
+			const p = JSON.parse(block.text)
+			assert.strictEqual(r.isError, true)
+			assert.strictEqual(p.error, "lifecycle_violation")
+		},
+	)
 })

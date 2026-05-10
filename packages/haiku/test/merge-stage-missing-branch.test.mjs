@@ -1,14 +1,16 @@
 #!/usr/bin/env npx tsx
 // merge-stage-missing-branch.test.mjs — Coverage for the "v3
-// merged-and-deleted stage branch" recovery in `isStageBranchMerged`
+// merged-and-deleted stage branch" recovery in `firstUnmergedStage`
 // (cursor.ts) and `mergeStageBranchIntoMain` (git-worktree.ts).
 //
 // In v3, the workflow merged stage branches into intent main and
 // deleted them. Migrated v3→v4 intents reach v4 with branch names that
-// no longer exist locally or on origin. Without the recovery path, the
-// cursor's `isStageBranchMerged` returns false (no branch ref) →
-// `firstUnmergedStage` pins the stage → cursor emits `merge_stage`
-// every tick → merge fails → infinite loop.
+// no longer exist locally or on origin. The v4 cursor reads unit files
+// on intent main as the merged signal — when the migrator landed those
+// units on main during v3, `firstUnmergedStage` walks past the stage
+// naturally. The risk path: a caller dispatches `merge_stage` directly
+// against the missing branch — without the recovery, merge fails and
+// the engine loops on `merge_stage` every tick.
 //
 // Two tests:
 //   1. `firstUnmergedStage` skips stages whose branch is missing.
@@ -121,11 +123,14 @@ function setupMigratedRepo(slug) {
 		"precondition: haiku/<slug>/inception should not exist",
 	)
 
-	// Write intent.md with `stages_merged` stamped — this is what the
-	// migrator does on v3→v4 conversion when it detects v3 state.json
-	// `status: "completed"` for those stages. The cursor's
-	// firstUnmergedStage uses this list to skip stages whose branches
-	// are gone.
+	// Write intent.md + simulate "merged" stages by writing per-stage
+	// unit files into the intent dir on intent main. Under the new
+	// disk-state cursor model, intent main's filesystem IS the
+	// "merged stages" signal — `firstUnmergedStage` walks
+	// `stages/<X>/units/` and returns the first stage with no units.
+	// Inception and design get unit files (they're merged); product
+	// stays empty (the cursor should pin there).
+	git(tmp, "checkout", `haiku/${slug}/main`)
 	const intentDir = join(tmp, ".haiku", "intents", slug)
 	mkdirSync(intentDir, { recursive: true })
 	writeFileSync(
@@ -135,8 +140,25 @@ function setupMigratedRepo(slug) {
 			studio: "software",
 			mode: "continuous",
 			plugin_version: "4.0.0",
-			stages_merged: ["inception", "design"],
 		}),
+	)
+	for (const stage of ["inception", "design"]) {
+		const unitsDir = join(intentDir, "stages", stage, "units")
+		mkdirSync(unitsDir, { recursive: true })
+		writeFileSync(
+			join(unitsDir, "unit-01-merged.md"),
+			matter.stringify("# merged unit\n", {
+				title: "merged",
+				started_at: new Date().toISOString(),
+			}),
+		)
+	}
+	git(tmp, "add", "-A")
+	git(
+		tmp,
+		"commit",
+		"-m",
+		"v3 migrated: inception+design content on intent main",
 	)
 
 	return tmp

@@ -1,8 +1,11 @@
 // orchestrator/workflow/side-effects.ts — All workflow-engine state
-// mutators. Every function here writes disk (state.json,
-// intent.md frontmatter), runs git operations (branch create / merge
-// / reap), or both. The workflow handlers in `handlers/` call these
-// after deciding what action to emit.
+// mutators. Every function here writes disk (intent.md frontmatter,
+// per-stage sidecar JSONL logs like iterations.jsonl), runs git
+// operations (branch create / merge / reap), or both. State.json is
+// dead in v4 — stage status / phase / gate outcome are derived on
+// demand from per-unit FM and branch-merge state via
+// `derived-stage-state.ts`. The workflow handlers in `handlers/`
+// call the functions here after deciding what action to emit.
 //
 // The split from emission keeps the contract clean: handlers are
 // (mostly) pure functions that compute an OrchestratorAction from
@@ -11,11 +14,15 @@
 //
 // Functions:
 //   - workflowStartStage              — enter a stage (branch isolation,
-//     pos-0 reset, Guard 1/3, first iteration, frontmatter active_stage)
-//   - workflowAdvancePhase            — change a stage's phase
-//   - workflowCompleteStage           — mark a stage completed
+//     prev-stage merge+reap, Guard 3 cleanup, first iteration log
+//     entry, intent.md active_stage)
+//   - workflowAdvancePhase            — telemetry-only no-op (v4 derives
+//     phase from per-unit FM)
+//   - workflowCompleteStage           — close iteration log + drift
+//     marker cleanup (status/completed_at/gate_outcome are derived)
 //   - workflowAdvanceStage            — atomic complete+enter-next
-//   - workflowGateAsk                 — enter the gate phase
+//   - workflowGateAsk                 — telemetry-only no-op (v4 derives
+//     phase=gate from per-unit approvals state)
 //   - workflowEnterIntentCompletionReview — set intent.phase = awaiting...
 //   - workflowFinalizeStageIntoIntentMain — final-stage merge+reap+switch
 //   - completeOrReviewIntent          — terminal completion routing
@@ -41,7 +48,6 @@ import {
 	mergeStageBranchForward,
 	mergeStageBranchIntoMain,
 	pushStageBranch,
-	writeOnIntentMain,
 } from "../../git-worktree.js"
 import { withIntentMainLock } from "../../locks.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
@@ -54,14 +60,12 @@ import {
 	intentDir,
 	isGitRepo,
 	parseFrontmatter,
-	readJson,
 	setFrontmatterField,
-	stageStatePath,
 	timestamp,
-	writeJson,
 } from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
 import { clearMarkersForRevisitSync } from "./baseline-clear-marker.js"
+import { deriveStageState } from "./derived-stage-state.js"
 
 /** Best-effort push of the stage branch to origin after an engine
  *  state mutation. Swallows everything: never throws, never blocks the
@@ -115,8 +119,9 @@ function findPreviousStage(slug: string, stage: string): string | undefined {
  *    4. Reap A's branch (commits now live on main). Delete remote too.
  *    5. Checkout B: if B's branch already exists (go-back), merge main
  *       forward into it; otherwise create B from main.
- *    6. Guard 1 (entry pos-0 reset): write pos-0 default state.json
- *       onto main for the entered stage via temp worktree.
+ *    6. Open the first iteration entry on the per-stage iterations.jsonl
+ *       log (status="active" + phase="elaborate" are derived from this
+ *       on the next tick — there is no state.json write).
  *    7. Guard 3 (post-stage cleanup): scan again for orphans that
  *       slipped through the merge-reap cycle.
  *
@@ -177,24 +182,12 @@ export function workflowStartStage(slug: string, stage: string): void {
 		}
 	}
 
-	// Guard 1: pos-0 reset on main, then mirror locally.
-	const posZeroState = {
-		stage,
-		status: "active",
-		phase: "elaborate",
-		started_at: timestamp(),
-		completed_at: null,
-		gate_entered_at: null,
-		gate_outcome: null,
-		visits: 0,
-	}
-	const stageStateRelPath = `.haiku/intents/${slug}/stages/${stage}/state.json`
-	writeOnIntentMain(
-		slug,
-		stageStateRelPath,
-		`${JSON.stringify(posZeroState, null, 2)}\n`,
-		`haiku: reset ${stage} state.json to pos 0 on stage entry (Guard 1)`,
-	)
+	// v4: no state.json write on stage entry. The previous Guard-1
+	// pos-0 reset is replaced by the absence of the file — the v4
+	// cursor + `deriveStageState` derive `status: "active"`,
+	// `phase: "elaborate"` from the empty units/ directory + the
+	// stage branch existing. Per ARCHITECTURE.md / cursor.ts header:
+	// "no state.json anywhere."
 
 	if (!isOnStageBranch(slug, stage)) {
 		const stageBranch = `haiku/${slug}/${stage}`
@@ -209,9 +202,6 @@ export function workflowStartStage(slug: string, stage: string): void {
 			createStageBranch(slug, stage)
 		}
 	}
-
-	const path = stageStatePath(slug, stage)
-	writeJson(path, posZeroState)
 
 	appendStageIteration(slug, stage, { trigger: "initial" })
 
@@ -232,10 +222,12 @@ export function workflowAdvancePhase(
 	stage: string,
 	toPhase: string,
 ): void {
-	const path = stageStatePath(slug, stage)
-	const data = readJson(path)
-	data.phase = toPhase
-	writeJson(path, data)
+	// v4: phase is derived from per-unit FM (verifier-slot completion
+	// across hat sequences). The engine no longer stamps `phase:` on
+	// state.json — `deriveStageState` reads the truth from disk on
+	// every tick. This call survives only as a telemetry hook so the
+	// "phase changed" event is still observable; the state mutation
+	// it used to perform is now the no-op the v4 model makes it.
 	emitTelemetry("haiku.stage.phase", { intent: slug, stage, phase: toPhase })
 	sealIntentState(slug)
 }
@@ -245,12 +237,11 @@ export function workflowCompleteStage(
 	stage: string,
 	gateOutcome: string,
 ): void {
-	const path = stageStatePath(slug, stage)
-	const data = readJson(path)
-	data.status = "completed"
-	data.completed_at = timestamp()
-	data.gate_outcome = gateOutcome
-	writeJson(path, data)
+	// v4: status / completed_at / gate_outcome are derived from
+	// branch-merge state + per-unit approvals. No state.json mutation.
+	// `closeCurrentStageIteration` still runs to maintain the per-stage
+	// iteration log (loop detection, cap checking) — that log is the
+	// next piece slated for migration to a JSONL disk artifact.
 	closeCurrentStageIteration(
 		slug,
 		stage,
@@ -315,11 +306,12 @@ export function workflowAdvanceStage(
 }
 
 export function workflowGateAsk(slug: string, stage: string): void {
-	const path = stageStatePath(slug, stage)
-	const data = readJson(path)
-	data.phase = "gate"
-	data.gate_entered_at = timestamp()
-	writeJson(path, data)
+	// v4: phase=gate / gate_entered_at are derived from per-unit
+	// approvals state (all reviews signed, awaiting approvals).
+	// `gate_entered_at` doesn't have a derived equivalent yet — it's
+	// an "I just entered the gate phase" timestamp. Future work: stamp
+	// on a per-stage gate-session marker file. For now, telemetry
+	// captures the transition and that's enough for the engine.
 	emitTelemetry("haiku.gate.entered", { intent: slug, stage })
 	sealIntentState(slug)
 }
@@ -389,8 +381,7 @@ function workflowFinalizeStageIntoIntentMain(
 }
 
 /** Guard: walk every stage declared in `resolveIntentStages(intent, studio)`
- *  and verify each has a `state.json` with `status: completed`. Returns the
- *  names of any stages that are missing or not yet completed.
+ *  and return the names of any whose derived status isn't `"completed"`.
  *
  *  Called from `completeOrReviewIntent` (pre-review-entry and pre-immediate-
  *  complete paths) and from the human-approval path in `haiku_run_next.ts`
@@ -398,6 +389,11 @@ function workflowFinalizeStageIntoIntentMain(
  *  gate while upstream stages are still pending — e.g., the user manually
  *  reopened a completed intent or an unusual topology left gaps — this catches
  *  it before sealing and routes back to the incomplete stage.
+ *
+ *  v4 derivation: `deriveStageState` reports `status: "completed"` when the
+ *  stage's units appear on intent main's tree (= the stage merged forward).
+ *  No stage `state.json` read — the file is migrator-deleted in v4 and the
+ *  workflow engine no longer recreates it.
  *
  *  Composite intents (studio === "composite") deliberately resolve to an empty
  *  stages list here — there is no `plugin/studios/composite/STUDIO.md` because
@@ -414,19 +410,20 @@ export function findIncompleteStages(
 	const intentFile = join(iDir, "intent.md")
 	const intent = existsSync(intentFile) ? readFrontmatter(intentFile) : {}
 	const stages = resolveIntentStages(intent, studio)
+	const intentMode =
+		typeof intent.mode === "string" && (intent.mode as string).length > 0
+			? (intent.mode as string)
+			: "continuous"
 	const incomplete: string[] = []
 	for (const stage of stages) {
-		const statePath = root
-			? join(iDir, "stages", stage, "state.json")
-			: stageStatePath(slug, stage)
-		if (!existsSync(statePath)) {
-			incomplete.push(stage)
-			continue
-		}
-		const state = readJson(statePath)
-		if ((state.status as string) !== "completed") {
-			incomplete.push(stage)
-		}
+		const derived = deriveStageState({
+			slug,
+			studio,
+			stage,
+			intentDir: iDir,
+			intentMode,
+		})
+		if (derived.status !== "completed") incomplete.push(stage)
 	}
 	return incomplete
 }

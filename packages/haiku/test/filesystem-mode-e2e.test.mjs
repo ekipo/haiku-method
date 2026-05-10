@@ -11,12 +11,13 @@
 //     real git commit; the drift system itself works in fs mode and
 //     is covered by drift-no-false-positives.
 //
-// Stage progression in fs mode is tracked by `intent.md.stages_merged`
-// (a list of stage names that the engine appends to when run_next
-// executes its merge_stage handler). The cursor's firstUnmergedStage
-// returns the first stage NOT in that list.
+// Stage progression in fs mode is determined by per-unit signature
+// state. The cursor's `firstUnmergedStage` uses `isStageFullySigned`
+// (terminal hat advance + every required approval role signed) to
+// walk past completed stages. The `merge_stage` handler in fs mode
+// is a no-op that re-ticks without writing anything; the cursor
+// observes the next call's input as already-signed and advances.
 
-import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
 	existsSync,
@@ -29,6 +30,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 import matter from "gray-matter"
 import { makeFeedback, makeIntent, makeStudio } from "./_v4-fixtures.mjs"
@@ -177,7 +179,11 @@ function applyResponse(intentDir, action) {
 		}
 		case "start_feedback_hat": {
 			for (const fbId of action.feedback_ids || []) {
-				const files = readdirSync(fbDir).filter((f) => { const n = Number.parseInt(String(fbId).replace(/^FB-/i, ""), 10); const m = f.match(/^(\d+)-/); return m && Number.parseInt(m[1], 10) === n; })
+				const files = readdirSync(fbDir).filter((f) => {
+					const n = Number.parseInt(String(fbId).replace(/^FB-/i, ""), 10)
+					const m = f.match(/^(\d+)-/)
+					return m && Number.parseInt(m[1], 10) === n
+				})
 				for (const f of files) {
 					const path = join(fbDir, f)
 					const fm = readFm(path)
@@ -194,9 +200,14 @@ function applyResponse(intentDir, action) {
 			break
 		}
 		case "close_feedback": {
-			const files = readdirSync(fbDir).filter((f) =>
-				{ const n = Number.parseInt(String(action.feedback_id).replace(/^FB-/i, ""), 10); const m = f.match(/^(\d+)-/); return m && Number.parseInt(m[1], 10) === n; },
-			)
+			const files = readdirSync(fbDir).filter((f) => {
+				const n = Number.parseInt(
+					String(action.feedback_id).replace(/^FB-/i, ""),
+					10,
+				)
+				const m = f.match(/^(\d+)-/)
+				return m && Number.parseInt(m[1], 10) === n
+			})
 			for (const f of files) {
 				const path = join(fbDir, f)
 				const fm = readFm(path)
@@ -268,18 +279,11 @@ function applyResponse(intentDir, action) {
 			break
 		}
 		case "merge_stage": {
-			// In fs mode the engine appends to intent.md.stages_merged
-			// rather than running git merge. Mirror that here so the
-			// cursor's firstUnmergedStage advances on the next tick.
-			const intentMd = join(intentDir, "intent.md")
-			const fm = readFm(intentMd)
-			const merged = Array.isArray(fm.stages_merged) ? fm.stages_merged : []
-			if (!merged.includes(stage)) {
-				writeFm(intentMd, {
-					...fm,
-					stages_merged: [...merged, stage],
-				})
-			}
+			// In fs mode this is a no-op. The cursor's `isStageFullySigned`
+			// already returns true (terminal hat advance + approvals all
+			// signed), so the next tick walks past via `firstUnmergedStage`
+			// without anything written here. Kept as an explicit case to
+			// document the contract.
 			break
 		}
 		default:
@@ -288,12 +292,8 @@ function applyResponse(intentDir, action) {
 }
 
 async function runTick(slug) {
-	const { dispatchOrchestratorAction } = await import(
-		`${SRC}/orchestrator/workflow/run-tick.ts`
-	)
-	const { clearStudioCache } = await import(`${SRC}/studio-reader.ts`)
-	clearStudioCache()
-	return dispatchOrchestratorAction(slug, "")
+	const { runTickWithBranchAlignment } = await import("./_v4-fixtures.mjs")
+	return runTickWithBranchAlignment(slug)
 }
 
 async function driveToSealed(slug, intentDir, maxTicks = 100) {
@@ -334,11 +334,26 @@ test("fs-mode continuous: 3-stage pipeline reaches sealed without git", async ()
 
 		const { seen } = await driveToSealed(slug, intentDir)
 		assert.equal(seen[seen.length - 1], "sealed//")
-		// Three merge_stage ticks (one per stage).
-		const merges = seen.filter((t) => t.startsWith("merge_stage/"))
+		// Pipeline traversed every configured stage and reached
+		// intent-level review. Under the new disk-state cursor model,
+		// fs mode walks naturally past fully-signed stages — there's
+		// no physical merge to perform, so no `merge_stage` action is
+		// emitted. The cursor's progression IS visible by the
+		// per-stage actions plus the intent-level finale.
+		const stagesSeen = new Set(
+			seen
+				.map((t) => t.split("/")[1])
+				.filter((s) => s === "a" || s === "b" || s === "c"),
+		)
+		assert.deepStrictEqual(
+			[...stagesSeen].sort(),
+			["a", "b", "c"],
+			`pipeline must touch every stage; saw: ${[...stagesSeen].sort().join(", ")}`,
+		)
+		const intentReviews = seen.filter((t) => t.startsWith("intent_review/"))
 		assert.ok(
-			merges.length >= 3,
-			`expected ≥3 merge_stage ticks; got ${merges.length}: ${merges.join(", ")}`,
+			intentReviews.length >= 1,
+			`pipeline must reach intent-level review; got: ${seen.slice(-5).join(" → ")}`,
 		)
 	})
 })
@@ -386,11 +401,7 @@ test("fs-mode change: continuous → autopilot mid-flight; pipeline seals", asyn
 			const action = await runTick(slug)
 			const tuple = `${action.action}/${action.stage ?? ""}/${action.hat ?? action.role ?? action.agent ?? ""}`
 			if (flipped) seenAfter.push(tuple)
-			if (
-				!flipped &&
-				action.action === "user_gate" &&
-				action.stage === "a"
-			) {
+			if (!flipped && action.action === "user_gate" && action.stage === "a") {
 				const intentMd = join(intentDir, "intent.md")
 				const fm = readFm(intentMd)
 				writeFm(intentMd, { ...fm, mode: "autopilot" })
@@ -435,9 +446,14 @@ test("fs-mode FB mid-flight: opens after stage A merge, fix loop runs, pipeline 
 			seen.push(
 				`${action.action}/${action.stage ?? ""}/${action.hat ?? action.role ?? action.agent ?? ""}`,
 			)
+			// Inject the FB once stage A reaches its final approval gate
+			// (dispatch_quality_gates for stage A). Under the new
+			// disk-state model, fs mode doesn't emit a separate
+			// `merge_stage` action — it walks past fully-signed stages
+			// naturally — so we hook the last per-stage action instead.
 			if (
 				!injectedFb &&
-				action.action === "merge_stage" &&
+				action.action === "dispatch_quality_gates" &&
 				action.stage === "a"
 			) {
 				applyResponse(intentDir, action)

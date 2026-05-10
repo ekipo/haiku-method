@@ -34,6 +34,7 @@ import {
 	ensureOnStageBranch,
 	fetchOrigin,
 	pushStageBranch,
+	reconcileIntentBranches,
 } from "../../git-worktree.js"
 import { adaptInstructions } from "../../harness-instructions.js"
 import { firstUnmergedStage } from "../../orchestrator/workflow/cursor.js"
@@ -372,26 +373,72 @@ export default defineTool({
 			}
 		}
 
+		// Pre-tick branch reconciliation. Bring both canonical refs up
+		// to date BEFORE we read either tree:
+		//
+		//   - `haiku/<slug>/main` ← `origin/<default>` (FF only). When
+		//     the worktree is on a stage branch, this is a refspec write
+		//     that doesn't touch HEAD or the working tree.
+		//   - current stage branch ← `haiku/<slug>/main` (only when
+		//     we're on a stage branch). Architecture invariant: stage
+		//     branches must be ahead of main, never behind.
+		//
+		// Best-effort: divergence cases set `error` but the tick still
+		// proceeds. The cursor walk that follows will surface a real
+		// action against whatever state exists.
+		{
+			const reconcile = reconcileIntentBranches(slug)
+			if (reconcile.error) {
+				console.error(`[haiku_run_next] reconcile: ${reconcile.error}`)
+			}
+		}
+
 		// Stage-branch enforcement: before ANY stage-scoped write, align
-		// the current checkout with the active stage branch. If main has
-		// drifted ahead (feedback files or state leaked there), merge
-		// main → stage first so the workflow engine sees a consistent view. No-op in
-		// filesystem mode. Must run BEFORE the external_review_url write
-		// below — otherwise that write could land on the wrong branch.
+		// the current checkout with the active stage branch.
+		//
+		// **Two-step branch dance**: the cursor's `firstUnmergedStage`
+		// reads intent main's filesystem to name the active stage —
+		// because intent main's tree IS the canonical "what stages have
+		// landed" signal. The stage's actual cursor position (in-flight
+		// units, hat sequence, signed reviews) lives on the stage branch
+		// and only merges to main at stage end. So:
+		//
+		//   1. switch to intent main → walk filesystem → name the stage
+		//   2. switch to that stage's branch → cursor walks the per-stage
+		//      cascade against the in-flight unit work that lives there
+		//
+		// Reading from any other branch lies. Both checkouts go through
+		// `ensureOnStageBranch` so dirty trees auto-commit and stage
+		// branches FF from main as needed.
+		//
+		// No-op in filesystem mode. Must run BEFORE the
+		// external_review_url write below — otherwise that write could
+		// land on the wrong branch.
 		{
 			const intentFile = join(findHaikuRoot(), "intents", slug, "intent.md")
 			if (existsSync(intentFile)) {
 				const im = readFrontmatter(intentFile)
-				// v4: active_stage is derived (first stage not merged into
-				// intent main). intent.md no longer carries it. Resolve via
-				// cursor.firstUnmergedStage which uses git --is-ancestor.
 				const studio = (im.studio as string) || ""
+				// Step 1: ensure on intent main so firstUnmergedStage reads
+				// the authoritative tree. Pass `undefined` for stage —
+				// `ensureOnStageBranch` routes to `haiku/<slug>/main` when
+				// no stage is named.
+				const mainGuard = ensureOnStageBranch(slug, undefined)
+				if (!mainGuard.ok) {
+					return buildGuardResponse(
+						slug,
+						undefined,
+						mainGuard,
+						"run_next entry — intent main",
+					)
+				}
+				// Step 2: walk intent main's filesystem to name the active
+				// stage. Falls back to the legacy active_stage stamp only
+				// when studio config isn't loadable yet (pre-select_studio)
+				// or `firstUnmergedStage` throws on disk read.
 				let activeStage = ""
 				if (studio) {
 					try {
-						const { firstUnmergedStage } = await import(
-							"../../orchestrator/workflow/cursor.js"
-						)
 						activeStage = firstUnmergedStage(slug, studio) || ""
 					} catch {
 						activeStage = (im.active_stage as string) || ""
@@ -399,6 +446,8 @@ export default defineTool({
 				} else {
 					activeStage = (im.active_stage as string) || ""
 				}
+				// Step 3: switch to the active stage's branch so the cursor
+				// walk sees in-flight unit work.
 				const guard = ensureOnStageBranch(slug, activeStage || undefined)
 				if (!guard.ok) {
 					return buildGuardResponse(slug, activeStage, guard, "run_next entry")
@@ -680,26 +729,12 @@ export default defineTool({
 			try {
 				const { isGitRepo } = await import("../../state-tools.js")
 				if (!isGitRepo()) {
-					// Filesystem mode: no git merge to perform. Mark the
-					// stage as merged on intent.md.stages_merged so the
-					// cursor's firstUnmergedStage advances on the next
-					// tick. (Same observable effect as a successful git
-					// merge, just without the SCM machinery.)
-					const intentMd = join(findHaikuRoot(), "intents", slug, "intent.md")
-					if (existsSync(intentMd)) {
-						const raw = readFileSync(intentMd, "utf8")
-						const parsed = parseFrontmatter(raw)
-						const fm = parsed.data as Record<string, unknown>
-						const merged: string[] = Array.isArray(fm.stages_merged)
-							? (fm.stages_merged as string[])
-							: []
-						if (!merged.includes(stageToMerge)) {
-							setFrontmatterField(intentMd, "stages_merged", [
-								...merged,
-								stageToMerge,
-							])
-						}
-					}
+					// Filesystem mode: no git merge to perform. The new
+					// disk-state cursor walks past fully-signed stages
+					// directly via `isStageFullySigned`, so this code
+					// path is reached only as a defensive no-op (e.g.
+					// legacy callers that explicitly emit merge_stage).
+					// Re-tick and let the cursor advance.
 					result = dispatchOrchestratorAction(slug)
 					continue
 				}
@@ -736,36 +771,13 @@ export default defineTool({
 					break
 				}
 				// No-op success path: branch was missing locally + on
-				// origin (v3 merged-and-deleted) so the merge function
-				// short-circuited without actually performing a merge.
-				// Without stamping `stages_merged` here, the next
-				// `dispatchOrchestratorAction` would see the same
-				// branch-missing-and-not-merged state and emit
-				// `merge_stage` for the same stage again — the loop
-				// would spin forever within a single tool call. Mirror
-				// the filesystem-mode branch above and stamp the stage
-				// onto intent.md so the cursor advances on the next
-				// iteration. Mostly redundant with the migrator's step 5
-				// (which already stamps `stages_merged` from v3 state.json
-				// statuses), but defensive in case the migrator skipped
-				// or its writeMatter failed silently.
-				if (mergeOutcome.noop) {
-					const intentMd = join(findHaikuRoot(), "intents", slug, "intent.md")
-					if (existsSync(intentMd)) {
-						const raw = readFileSync(intentMd, "utf8")
-						const parsed = parseFrontmatter(raw)
-						const fm = parsed.data as Record<string, unknown>
-						const merged: string[] = Array.isArray(fm.stages_merged)
-							? (fm.stages_merged as string[])
-							: []
-						if (!merged.includes(stageToMerge)) {
-							setFrontmatterField(intentMd, "stages_merged", [
-								...merged,
-								stageToMerge,
-							])
-						}
-					}
-				}
+				// origin (v3 merged-and-deleted), so the merge function
+				// short-circuited without performing a merge. Under the
+				// disk-state cursor model, that case is fine on its own
+				// — the unit files for the stage are already on intent
+				// main (otherwise the merge would never have happened in
+				// v3), so `firstUnmergedStage` walks past on the next
+				// tick. No stamp needed.
 				result = dispatchOrchestratorAction(slug)
 			} catch (err) {
 				console.error(

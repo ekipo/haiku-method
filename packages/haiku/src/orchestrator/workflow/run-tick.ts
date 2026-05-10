@@ -16,7 +16,7 @@ import { join } from "node:path"
 import matter from "gray-matter"
 import { broadcastIntent } from "../../intent-broadcaster.js"
 import type { OrchestratorAction } from "../../orchestrator.js"
-import { intentDir, setFrontmatterField } from "../../state-tools.js"
+import { intentDir } from "../../state-tools.js"
 import { emitTelemetry } from "../../telemetry.js"
 import { getPluginVersion } from "../../version.js"
 import { migrateIntent } from "../migrate-registry.js"
@@ -29,10 +29,6 @@ import {
 	type CursorPosition,
 	derivePosition,
 } from "./cursor.js"
-import {
-	inferStagesMergedFromGit,
-	reconcileStagesMerged,
-} from "./infer-stages-merged.js"
 
 /** Result of a single workflow tick. */
 export interface WorkflowTickResult {
@@ -182,12 +178,7 @@ export function runWorkflowTick(
 					}
 					if (d.state_json_deleted > 0) {
 						lines.push(
-							`- ${d.state_json_deleted} stage \`state.json\` file(s) deleted — v4 derives stage position from git via \`firstUnmergedStage\`, not from state.json`,
-						)
-					}
-					if (d.stages_merged_stamped > 0) {
-						lines.push(
-							`- ${d.stages_merged_stamped} stage(s) marked as merged on intent.md (\`stages_merged:\`) — preserves the v3 \`status: completed\` signal so the cursor doesn't re-emit \`merge_stage\` for stages whose branches were merged-and-deleted in 3.x`,
+							`- ${d.state_json_deleted} stage \`state.json\` file(s) deleted — v4 derives stage position from disk (unit files on intent main in git mode, per-unit signature state in fs mode), not from state.json`,
 						)
 					}
 					if (d.drift_artifacts_deleted > 0) {
@@ -209,7 +200,7 @@ export function runWorkflowTick(
 					lines.push("")
 					lines.push("**What v4 derives instead of stores**:")
 					lines.push(
-						"- Active stage: walked from git branch state (`firstUnmergedStage`)",
+						"- Active stage: derived from the current branch name on a stage branch, or by walking intent main's filesystem (`activeStageFromBranchOrFilesystem` → `firstUnmergedStage`)",
 					)
 					lines.push("- Current phase: decided per-tick by the cursor walk")
 					lines.push(
@@ -289,46 +280,6 @@ export function runWorkflowTick(
 	const stages = Array.isArray(intentFm.stages)
 		? (intentFm.stages as unknown[])
 		: []
-
-	// Idempotent stages_merged back-fill from git history. Catches
-	// already-migrated intents that lost the completion signal: v3's
-	// "create FB" path could clobber state.json from "completed" back
-	// to "active", so the migrator's primary check missed the signal,
-	// and the cursor rewinds the entire stage on first v4 tick. We
-	// re-derive from git's commit-message log on every tick — the
-	// stamp is monotonic (only grows), and inferStagesMergedFromGit
-	// scopes to configured stages so renames don't pollute the list.
-	// See orchestrator/workflow/infer-stages-merged.ts for the patterns.
-	if (stages.length > 0) {
-		try {
-			const stageList = stages.filter((s): s is string => typeof s === "string")
-			const existing = Array.isArray(intentFm.stages_merged)
-				? (intentFm.stages_merged as string[])
-				: []
-			// Skip the git subprocess once stages_merged already covers every
-			// configured stage — recovery is complete and there's nothing
-			// left to infer. The stamp is monotonic, so once it's full it
-			// stays full.
-			const existingSet = new Set(existing)
-			const recoveryComplete = stageList.every((s) => existingSet.has(s))
-			if (!recoveryComplete) {
-				const inferred = inferStagesMergedFromGit(slug, stageList)
-				if (inferred.length > 0) {
-					const reconciled = reconcileStagesMerged(existing, inferred)
-					if (reconciled.changed) {
-						setFrontmatterField(intentMdPath, "stages_merged", reconciled.value)
-						// Refresh in-memory copy so the cursor walk below sees
-						// the freshly-stamped list.
-						intentFm = parseIntentFm(intentMdPath)
-					}
-				}
-			}
-		} catch (err) {
-			console.error(
-				`[haiku] inferStagesMergedFromGit failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`,
-			)
-		}
-	}
 
 	if (mode === "quick" && stages.length === 0) {
 		return {

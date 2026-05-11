@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-05-11
+
+### Added
+- New `haiku_discovery_complete` tool for agents to mark discovery work as done during elaboration.
+
+### Fixed
+- Discovery items now correctly scope to the active stage, preventing discovery work from earlier stages from being incorrectly reprocessed during later stage transitions.
+
 ## [4.2.3] - 2026-05-10
 
 ### Fixed

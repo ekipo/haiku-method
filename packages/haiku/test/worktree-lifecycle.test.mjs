@@ -31,7 +31,6 @@ import {
 	mergeDiscoveryWorktree,
 	mergeFixChainWorktree,
 	mergeStageBranchForward,
-	sweepDiscoveryWorktrees,
 } from "../src/git-worktree.ts"
 import {
 	_resetIsGitRepoForTests,
@@ -761,173 +760,21 @@ await test("surfaces untracked-files-specific remediation when foreign worktree 
 	}
 })
 
-// ── sweepDiscoveryWorktrees (regression: gigsmart/haiku-method#333) ───────
+// `sweepDiscoveryWorktrees` deleted in the #333 follow-up. The engine
+// no longer merges discovery worktrees as part of every tick — that
+// approach (a) re-merged leftover worktrees from completed stages,
+// re-opening their merge gates, and (b) violated the principle that
+// engine state must come from disk, not from git topology. Subagents
+// now call `haiku_discovery_complete { intent, stage, template }` to
+// trigger the merge-back themselves; see
+// `haiku-discovery-complete.test.mjs` for its coverage.
 //
-// `decompose.ts` promises "the workflow engine merges their work back
-// into the stage branch on the next haiku_run_next." Until this fix
-// nothing called `mergeDiscoveryWorktree`, so the discovery file lived
-// only on the discovery branch. The cursor's existence check on the
-// stage branch never saw it → `discovery_required` re-fired every tick.
+// `mergeDiscoveryWorktree` itself is retained — it's the underlying
+// primitive `haiku_discovery_complete` calls. Its tests live above.
 
-console.log(
-	"\n=== sweepDiscoveryWorktrees (regression: stuck discovery dispatch loop) ===",
-)
+console.log("\n=== sweepDiscoveryWorktrees DELETED (#333) ===")
 
-await test("sweep merges every completed discovery worktree into its stage branch", () => {
-	const { tmp, slug, stage } = setupRepo()
-	try {
-		process.chdir(tmp)
-		git(tmp, "branch", `haiku/${slug}/${stage}`, `haiku/${slug}/main`)
-		git(tmp, "checkout", `haiku/${slug}/${stage}`)
-
-		// Two discovery worktrees both with completed artifacts (the
-		// real-world fan-out shape).
-		for (const template of ["architecture", "competitive"]) {
-			const wt = createDiscoveryWorktree(slug, stage, template)
-			const artifactPath = join(
-				wt,
-				".haiku",
-				"intents",
-				slug,
-				"knowledge",
-				`${template.toUpperCase()}.md`,
-			)
-			mkdirSync(join(artifactPath, ".."), { recursive: true })
-			writeFileSync(artifactPath, `# ${template}\n`)
-			git(wt, "add", "-A")
-			git(wt, "commit", "-m", `${template} discovery`)
-		}
-
-		const results = sweepDiscoveryWorktrees(slug)
-		assert.strictEqual(results.length, 2, "found both worktrees")
-		for (const r of results) {
-			assert.ok(r.success, `${r.template} merged: ${r.message}`)
-		}
-
-		// Both artifacts now visible on the stage branch tree.
-		for (const template of ["architecture", "competitive"]) {
-			const stageCopy = join(
-				tmp,
-				".haiku",
-				"intents",
-				slug,
-				"knowledge",
-				`${template.toUpperCase()}.md`,
-			)
-			assert.ok(existsSync(stageCopy), `${template} landed on stage branch`)
-		}
-	} finally {
-		cleanupRepo(tmp)
-	}
-})
-
-await test("sweep is a no-op when no discovery worktrees exist", () => {
-	const { tmp, slug } = setupRepo()
-	try {
-		process.chdir(tmp)
-		const results = sweepDiscoveryWorktrees(slug)
-		assert.deepStrictEqual(results, [])
-	} finally {
-		cleanupRepo(tmp)
-	}
-})
-
-await test("sweep parses stage and template names containing hyphens when stages list is supplied", () => {
-	const { tmp, slug } = setupRepo({ stage: "design-discovery" })
-	try {
-		process.chdir(tmp)
-		git(tmp, "branch", `haiku/${slug}/design-discovery`, `haiku/${slug}/main`)
-		git(tmp, "checkout", `haiku/${slug}/design-discovery`)
-
-		const wt = createDiscoveryWorktree(
-			slug,
-			"design-discovery",
-			"design-system-anchor",
-		)
-		const artifactPath = join(
-			wt,
-			".haiku",
-			"intents",
-			slug,
-			"knowledge",
-			"DESIGN-SYSTEM-ANCHOR.md",
-		)
-		mkdirSync(join(artifactPath, ".."), { recursive: true })
-		writeFileSync(artifactPath, "# anchor\n")
-		git(wt, "add", "-A")
-		git(wt, "commit", "-m", "anchor discovery")
-
-		const results = sweepDiscoveryWorktrees(slug, [
-			"inception",
-			"design-discovery",
-			"development",
-		])
-		assert.strictEqual(results.length, 1)
-		assert.strictEqual(results[0].stage, "design-discovery")
-		assert.strictEqual(results[0].template, "design-system-anchor")
-		assert.ok(results[0].success, results[0].message)
-		assert.ok(
-			existsSync(
-				join(
-					tmp,
-					".haiku",
-					"intents",
-					slug,
-					"knowledge",
-					"DESIGN-SYSTEM-ANCHOR.md",
-				),
-			),
-		)
-	} finally {
-		cleanupRepo(tmp)
-	}
-})
-
-await test("sweep surfaces conflicts so haiku_run_next can hard-stop instead of looping", () => {
-	const { tmp, slug, stage } = setupRepo()
-	try {
-		process.chdir(tmp)
-		git(tmp, "branch", `haiku/${slug}/${stage}`, `haiku/${slug}/main`)
-		git(tmp, "checkout", `haiku/${slug}/${stage}`)
-
-		// Land a baseline file on the stage branch that the discovery
-		// worktree will diverge from.
-		const sharedRel = join(".haiku", "intents", slug, "knowledge")
-		mkdirSync(join(tmp, sharedRel), { recursive: true })
-		writeFileSync(join(tmp, sharedRel, "ARCHITECTURE.md"), "stage baseline\n")
-		git(tmp, "add", "-A")
-		git(tmp, "commit", "-m", "stage baseline")
-
-		// Discovery worktree forks from the previous stage tip, then
-		// rewrites the same file. After the worktree's own merge of the
-		// stage branch, the conflict surfaces.
-		const wt = createDiscoveryWorktree(slug, stage, "architecture")
-		const wtArtifact = join(wt, sharedRel, "ARCHITECTURE.md")
-		writeFileSync(wtArtifact, "discovery edit\n")
-		git(wt, "add", "-A")
-		git(wt, "commit", "-m", "discovery edit")
-
-		// Stage branch advances on the same file too.
-		writeFileSync(join(tmp, sharedRel, "ARCHITECTURE.md"), "stage edit\n")
-		git(tmp, "add", "-A")
-		git(tmp, "commit", "-m", "stage advance")
-
-		const results = sweepDiscoveryWorktrees(slug, [stage])
-		assert.strictEqual(results.length, 1)
-		assert.strictEqual(results[0].success, false)
-		assert.strictEqual(
-			results[0].isConflict,
-			true,
-			`expected isConflict=true so haiku_run_next surfaces a hard stop; got: ${JSON.stringify(results[0])}`,
-		)
-		assert.ok(
-			results[0].conflictFiles && results[0].conflictFiles.length > 0,
-			`expected conflictFiles list; got: ${JSON.stringify(results[0])}`,
-		)
-	} finally {
-		cleanupRepo(tmp)
-	}
-})
+// All sweep-specific tests deleted alongside the function.
 
 // ── Path + name helpers ────────────────────────────────────────────────────
 

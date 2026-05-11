@@ -37,7 +37,7 @@ import {
 	reconcileIntentBranches,
 } from "../../git-worktree.js"
 import { adaptInstructions } from "../../harness-instructions.js"
-import { firstUnmergedStage } from "../../orchestrator/workflow/cursor.js"
+import { findCurrentStage } from "../../orchestrator/workflow/cursor.js"
 import { runWorkflowTick } from "../../orchestrator/workflow/run-tick.js"
 import type { OrchestratorAction as OrchestratorActionType } from "../../orchestrator.js"
 import {
@@ -49,9 +49,19 @@ import {
 } from "../../orchestrator.js"
 
 /** Single-source dispatch: one workflow tick → one action. Handles
- *  the intent-not-found and registry-gap cases inline. */
-function dispatchOrchestratorAction(slug: string): OrchestratorActionType {
-	const tick = runWorkflowTick(slug)
+ *  the intent-not-found and registry-gap cases inline.
+ *
+ *  `activeStageHint` is the stage the runtime computed on intent main
+ *  BEFORE the branch dance switched to the stage branch. derivePosition
+ *  uses it instead of recomputing from the current tree, which would
+ *  lie because signed-but-unmerged units exist on the stage branch
+ *  and look "done" to a fresh findCurrentStage walk — that would
+ *  suppress merge_stage emission. */
+function dispatchOrchestratorAction(
+	slug: string,
+	activeStageHint?: string | null,
+): OrchestratorActionType {
+	const tick = runWorkflowTick(slug, undefined, activeStageHint)
 	if (tick?.action) return tick.action
 	if (!tick) {
 		return { action: "error", message: `Intent '${slug}' not found` }
@@ -59,6 +69,21 @@ function dispatchOrchestratorAction(slug: string): OrchestratorActionType {
 	return {
 		action: "error",
 		message: `runWorkflowTick produced no action for intent '${slug}' (track: ${tick.position.track}). The cursor is mid-wave or sealed — wait for outstanding subagents and retick.`,
+	}
+}
+
+/** Local helper used by `recomputeActiveStage` in the request handler.
+ *  Returns the current branch name, or "" if not in a git repo or the
+ *  command fails. Defined at module scope so the closure inside the
+ *  handler can reach it without re-importing. */
+function safeCurrentBranchHere(): string {
+	try {
+		return execFileSync("git", ["branch", "--show-current"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim()
+	} catch {
+		return ""
 	}
 }
 
@@ -288,6 +313,73 @@ export default defineTool({
 		}
 		const stFile = args.state_file as string | undefined
 
+		// Active-stage hint computed on intent main during the pre-tick
+		// dance. Threaded into every dispatchOrchestratorAction call so
+		// derivePosition doesn't recompute from the wrong vantage (the
+		// stage branch's tree shows signed-but-not-yet-merged units as
+		// "done", which would walk the cursor past the active stage and
+		// suppress the merge_stage emission).
+		//
+		// Updated by `recomputeActiveStage()` after any action that
+		// might advance the cursor (merge_stage success, intent_review,
+		// etc.). null means "no active stage" (every stage past on
+		// intent main — fall through to intent-level approvals).
+		let handlerActiveStage: string | null = null
+		const recomputeActiveStage = (): void => {
+			try {
+				const intentFile = join(findHaikuRoot(), "intents", slug, "intent.md")
+				if (!existsSync(intentFile)) return
+				const im = readFrontmatter(intentFile)
+				const studio = (im.studio as string) || ""
+				if (!studio) return
+				// Compute on intent main. Save current branch, switch,
+				// compute, switch back. No-op in filesystem mode.
+				const original = isGitRepo() ? safeCurrentBranchHere() : ""
+				const intentMain = `haiku/${slug}/main`
+				let switched = false
+				if (isGitRepo() && original && original !== intentMain) {
+					try {
+						execFileSync("git", ["checkout", "-q", intentMain], {
+							stdio: "pipe",
+						})
+						switched = true
+					} catch {
+						/* couldn't switch; fall back to current */
+					}
+				}
+				try {
+					handlerActiveStage = findCurrentStage(slug, studio) || null
+				} catch {
+					handlerActiveStage = null
+				}
+				if (switched && original) {
+					try {
+						execFileSync("git", ["checkout", "-q", original], {
+							stdio: "pipe",
+						})
+					} catch (restoreErr) {
+						// Stranded on intent main. The active-stage hint is
+						// already computed, but any writes during the rest of
+						// this tick (close_feedback, merge_stage, etc.) would
+						// land on intent main instead of the stage branch.
+						// `ensureOnStageBranch` on the next tick re-aligns,
+						// but the within-tick writes are misrouted. Log it so
+						// the failure mode is visible if it ever surfaces in
+						// the wild — same class of bug this whole PR fixes.
+						console.error(
+							`[haiku_run_next] recomputeActiveStage: failed to restore branch '${original}' after switching to '${intentMain}' for findCurrentStage: ${
+								restoreErr instanceof Error
+									? restoreErr.message
+									: String(restoreErr)
+							}`,
+						)
+					}
+				}
+			} catch {
+				/* keep prior value */
+			}
+		}
+
 		const branchCheck = validateBranch(slug, "intent")
 		if (branchCheck) {
 			return {
@@ -302,7 +394,7 @@ export default defineTool({
 		//
 		// The footgun: User A's stage PR landed on the repo default
 		// (`main`) instead of `haiku/<slug>/main`, so the cursor's
-		// firstUnmergedStage check keeps the stage pinned and User B's
+		// findCurrentStage check keeps the stage pinned and User B's
 		// pickup never advances. Reconciliation fast-forwards intent
 		// main to the repo default when safe, so the merge propagates
 		// to where the cursor expects it.
@@ -379,7 +471,7 @@ export default defineTool({
 					const im = readFrontmatter(intentFile)
 					const studio = (im.studio as string) || ""
 					if (studio) {
-						const activeStage = firstUnmergedStage(slug, studio)
+						const activeStage = findCurrentStage(slug, studio)
 						if (activeStage) {
 							const branch = `haiku/${slug}/${activeStage}`
 							try {
@@ -436,7 +528,7 @@ export default defineTool({
 		// Stage-branch enforcement: before ANY stage-scoped write, align
 		// the current checkout with the active stage branch.
 		//
-		// **Two-step branch dance**: the cursor's `firstUnmergedStage`
+		// **Two-step branch dance**: the cursor's `findCurrentStage`
 		// reads intent main's filesystem to name the active stage —
 		// because intent main's tree IS the canonical "what stages have
 		// landed" signal. The stage's actual cursor position (in-flight
@@ -459,7 +551,8 @@ export default defineTool({
 			if (existsSync(intentFile)) {
 				const im = readFrontmatter(intentFile)
 				const studio = (im.studio as string) || ""
-				// Step 1: ensure on intent main so firstUnmergedStage reads
+				const mode = (im.mode as string) || ""
+				// Step 1: ensure on intent main so findCurrentStage reads
 				// the authoritative tree. Pass `undefined` for stage —
 				// `ensureOnStageBranch` routes to `haiku/<slug>/main` when
 				// no stage is named.
@@ -472,25 +565,31 @@ export default defineTool({
 						"run_next entry — intent main",
 					)
 				}
-				// Step 2: walk intent main's filesystem to name the active
-				// stage. Falls back to the legacy active_stage stamp only
-				// when studio config isn't loadable yet (pre-select_studio)
-				// or `firstUnmergedStage` throws on disk read.
-				let activeStage = ""
-				if (studio) {
+				// Step 2: only switch to a stage branch when BOTH studio
+				// AND mode are set. Switching before that means the
+				// selection chain (select_studio / select_mode) would run
+				// against a stage branch — wrong, the chain belongs on
+				// intent main. See gigsmart/haiku-method#333: "you should
+				// not be on ANY stage branch [pre-selection]. If you are,
+				// then you went into a branch before the studio or mode
+				// was set."
+				if (studio && mode) {
 					try {
-						activeStage = firstUnmergedStage(slug, studio) || ""
+						handlerActiveStage = findCurrentStage(slug, studio) || null
 					} catch {
-						activeStage = (im.active_stage as string) || ""
+						handlerActiveStage = null
 					}
-				} else {
-					activeStage = (im.active_stage as string) || ""
-				}
-				// Step 3: switch to the active stage's branch so the cursor
-				// walk sees in-flight unit work.
-				const guard = ensureOnStageBranch(slug, activeStage || undefined)
-				if (!guard.ok) {
-					return buildGuardResponse(slug, activeStage, guard, "run_next entry")
+					if (handlerActiveStage) {
+						const guard = ensureOnStageBranch(slug, handlerActiveStage)
+						if (!guard.ok) {
+							return buildGuardResponse(
+								slug,
+								handlerActiveStage,
+								guard,
+								"run_next entry",
+							)
+						}
+					}
 				}
 			}
 		}
@@ -501,7 +600,7 @@ export default defineTool({
 		// v4: external_review_url is no longer persisted on stage state.json
 		// (state.json is gone). Discrete-mode external review now signals
 		// approval through the actual GitHub MR merge into intent main —
-		// the cursor's firstUnmergedStage check naturally advances when the
+		// the cursor's findCurrentStage check naturally advances when the
 		// merge lands. The url itself, if a caller still passes it, is
 		// stamped on intent.md as a transient marker for the review UI to
 		// display; nothing in the engine reads it.
@@ -540,86 +639,19 @@ export default defineTool({
 			)
 		}
 
-		// Sweep completed discovery worktrees back into the stage branch
-		// before the cursor walks. The decompose prompt promises this
-		// integration; without it the cursor (running on the stage branch)
-		// never sees the discovery output sitting on the discovery branch
-		// and re-emits the same dispatch every tick. See #333. Both
-		// conflict and non-conflict failures surface as a hard stop —
-		// silently logging non-conflict failures would re-create the
-		// original loop bug since the cursor's existence check would still
-		// fail on the next tick and respawn discovery subagents.
-		try {
-			const { sweepDiscoveryWorktrees } = await import("../../git-worktree.js")
-			// Read intent.md once for the stages list so the parser can split
-			// hyphenated stage names correctly. Best-effort — the sweep falls
-			// back to first-hyphen splitting when no stages list is available.
-			let knownStages: string[] = []
-			try {
-				const intentMd = join(findHaikuRoot(), "intents", slug, "intent.md")
-				if (existsSync(intentMd)) {
-					const fm = readFrontmatter(intentMd)
-					if (Array.isArray(fm.stages)) {
-						knownStages = (fm.stages as unknown[]).filter(
-							(s): s is string => typeof s === "string",
-						)
-					}
-				}
-			} catch {
-				/* fall through with empty list */
-			}
-			const sweepResults = sweepDiscoveryWorktrees(slug, knownStages)
-			const conflicts = sweepResults.filter((r) => r.isConflict)
-			if (conflicts.length > 0) {
-				const lines = conflicts.map((c) => {
-					const files = (c.conflictFiles || []).join(", ")
-					return `- discovery \`${c.template}\` on stage \`${c.stage}\`: ${c.message}${files ? ` (files: ${files})` : ""}`
-				})
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Discovery merge conflicts must be resolved before the workflow can continue:\n\n${lines.join("\n")}\n\nResolve the conflicts inside each discovery worktree, commit, then re-run \`haiku_run_next\`.`,
-						},
-					],
-					isError: true,
-				}
-			}
-			const failures = sweepResults.filter((r) => !r.success && !r.isConflict)
-			if (failures.length > 0) {
-				const lines = failures.map(
-					(f) =>
-						`- discovery \`${f.template}\` on stage \`${f.stage}\`: ${f.message}`,
-				)
-				console.error(
-					`[haiku_run_next] discovery merge failures: ${failures
-						.map((f) => `${f.stage}/${f.template}: ${f.message}`)
-						.join("; ")}`,
-				)
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: `Discovery worktree merge failed (non-conflict). Re-run \`haiku_run_next\` to retry; if it persists, inspect the worktree(s) under \`.haiku/worktrees/${slug}/discovery-*\` and file an issue.\n\n${lines.join("\n")}`,
-						},
-					],
-					isError: true,
-				}
-			}
-		} catch (err) {
-			console.error(
-				`[haiku_run_next] sweepDiscoveryWorktrees failed: ${err instanceof Error ? err.message : String(err)}`,
-			)
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: `Discovery worktree sweep threw: ${err instanceof Error ? err.message : String(err)}. Re-run \`haiku_run_next\` to retry.`,
-					},
-				],
-				isError: true,
-			}
-		}
+		// Discovery worktree merge-back is the SUBAGENT's responsibility.
+		// The dispatch prompt (decompose.ts) instructs each discovery
+		// subagent to call `haiku_discovery_complete { intent, stage,
+		// template }` after committing its artifact inside the isolation
+		// worktree. That tool takes `withStageLock(slug, stage)` so
+		// parallel siblings serialize, calls `mergeDiscoveryWorktree`,
+		// and reaps the worktree + branch. The engine takes no action on
+		// `.haiku/worktrees/<slug>/discovery-*` directories from this
+		// path — the cursor's only signal is whether the artifact file
+		// exists on disk at the template's `location:`. If it doesn't,
+		// the cursor re-emits `discovery_required` and the agent
+		// redispatches. See gigsmart/haiku-method#333 for why the
+		// previous engine-side sweep here was deleted.
 
 		// Workflow-engine dispatch: read disk → derive state → run
 		// per-state handler. The handler registry lives in
@@ -633,7 +665,8 @@ export default defineTool({
 		// MCP tools still exist for explicit user-driven invocation
 		// (`/haiku:change-mode`, etc.) but the tick path drives them
 		// engine-side here so the agent stays out of the loop.
-		let result = dispatchOrchestratorAction(slug)
+		recomputeActiveStage()
+		let result = dispatchOrchestratorAction(slug, handlerActiveStage)
 		{
 			let iterations = 0
 			while (
@@ -656,7 +689,8 @@ export default defineTool({
 						isError: true,
 					}
 				}
-				result = dispatchOrchestratorAction(slug)
+				recomputeActiveStage()
+				result = dispatchOrchestratorAction(slug, handlerActiveStage)
 				if (
 					(result.action === "select_studio" ||
 						result.action === "select_mode" ||
@@ -848,7 +882,8 @@ export default defineTool({
 						setFrontmatterField(unitPath, "approvals", approvals)
 					}
 				}
-				result = dispatchOrchestratorAction(slug)
+				recomputeActiveStage()
+				result = dispatchOrchestratorAction(slug, handlerActiveStage)
 			} catch (err) {
 				console.error(
 					`[haiku_run_next] close_feedback execution failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -877,7 +912,8 @@ export default defineTool({
 				const intentMd = join(findHaikuRoot(), "intents", slug, "intent.md")
 				if (existsSync(intentMd)) {
 					setFrontmatterField(intentMd, "sealed_at", new Date().toISOString())
-					result = dispatchOrchestratorAction(slug)
+					recomputeActiveStage()
+					result = dispatchOrchestratorAction(slug, handlerActiveStage)
 				}
 			} catch (err) {
 				console.error(
@@ -920,7 +956,8 @@ export default defineTool({
 					// path is reached only as a defensive no-op (e.g.
 					// legacy callers that explicitly emit merge_stage).
 					// Re-tick and let the cursor advance.
-					result = dispatchOrchestratorAction(slug)
+					recomputeActiveStage()
+					result = dispatchOrchestratorAction(slug, handlerActiveStage)
 					continue
 				}
 				const { mergeStageBranchIntoMain } = await import(
@@ -961,9 +998,10 @@ export default defineTool({
 				// disk-state cursor model, that case is fine on its own
 				// — the unit files for the stage are already on intent
 				// main (otherwise the merge would never have happened in
-				// v3), so `firstUnmergedStage` walks past on the next
+				// v3), so `findCurrentStage` walks past on the next
 				// tick. No stamp needed.
-				result = dispatchOrchestratorAction(slug)
+				recomputeActiveStage()
+				result = dispatchOrchestratorAction(slug, handlerActiveStage)
 			} catch (err) {
 				console.error(
 					`[haiku_run_next] merge_stage execution failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -973,9 +1011,9 @@ export default defineTool({
 		}
 
 		// Revisit-branch guard: when the cursor returned a Track-B
-		// action whose `stage` is *earlier* than firstUnmergedStage
+		// action whose `stage` is *earlier* than findCurrentStage
 		// (a feedback rewind), the pre-tick guard above checked out
-		// the wrong branch — it always uses firstUnmergedStage.
+		// the wrong branch — it always uses findCurrentStage.
 		// Re-align so the agent's fix work lands on the right
 		// stage's branch. Only relevant for actions that name a
 		// concrete stage AND differ from the active one. Other
@@ -1268,7 +1306,8 @@ export default defineTool({
 					"intent_approved",
 				])
 				if (awaitedAction && RETICK_ACTIONS.has(awaitedAction)) {
-					result = dispatchOrchestratorAction(slug)
+					recomputeActiveStage()
+					result = dispatchOrchestratorAction(slug, handlerActiveStage)
 					continue
 				}
 				return awaitResponse
@@ -1358,7 +1397,11 @@ export default defineTool({
 				if (repairResult.success && !repairResult.fallbackUsed) {
 					// Repair agent succeeded — run the workflow again to get the real
 					// next action.
-					const postRepairResult = dispatchOrchestratorAction(slug)
+					recomputeActiveStage()
+					const postRepairResult = dispatchOrchestratorAction(
+						slug,
+						handlerActiveStage,
+					)
 
 					// Guard: if repair didn't actually fix things, don't loop.
 					if (postRepairResult.action === "safe_intent_repair") {
@@ -1413,7 +1456,7 @@ export default defineTool({
 				const { data } = parseFrontmatter(raw)
 				const studio = (data.studio as string) || ""
 				if (studio) {
-					const activeStage = firstUnmergedStage(slug, studio)
+					const activeStage = findCurrentStage(slug, studio)
 					if (activeStage) {
 						const branch = `haiku/${slug}/${activeStage}`
 						// pushStageBranch internally checks branchAheadOfOrigin

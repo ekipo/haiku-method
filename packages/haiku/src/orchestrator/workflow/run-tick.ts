@@ -1,9 +1,12 @@
 // orchestrator/workflow/run-tick.ts — v4 workflow tick.
 //
-// Pure observation: read disk → run migrators if needed → call
-// cursor.derivePosition → map CursorAction to OrchestratorAction →
-// return. No mutating side effects. Anyone can call run_next; same
-// disk state → same answer every time.
+// One-time idempotent fixups only: read disk → run migrators if
+// needed → run pre-tick self-repair → call cursor.derivePosition →
+// map CursorAction to OrchestratorAction → return. The migrator and
+// the self-repair gate both write to disk, but they're idempotent:
+// repeated ticks against the same disk state produce the same answer
+// (and skip the writes if there's nothing to fix). The cursor walk
+// itself never mutates.
 //
 // Replaces v3's "derive-state → handler dispatch with mutating
 // pre-tick repair" chain. The cursor walks Track C (drift) → Track B
@@ -29,6 +32,8 @@ import {
 	type CursorPosition,
 	derivePosition,
 } from "./cursor.js"
+import { recordTickResult } from "./deadlock-detector.js"
+import { selfRepairMissingApprovals } from "./self-repair-approvals.js"
 
 /** Result of a single workflow tick. */
 export interface WorkflowTickResult {
@@ -38,8 +43,10 @@ export interface WorkflowTickResult {
 
 /**
  * Drive one workflow tick and return the next OrchestratorAction.
- * Pure: no disk writes (other than migrator output, which is
- * conceptually a one-time read-time fixup).
+ * Disk writes are bounded to the migrator (v3 → v4 fixup) and the
+ * pre-tick self-repair gate (stamps missing review/approval fields
+ * on partially-migrated intents). Both are idempotent — re-running
+ * on already-fixed disk state is a no-op.
  */
 export function runWorkflowTick(
 	slug: string,
@@ -98,8 +105,11 @@ export function runWorkflowTick(
 		// state.json files come back from main's pre-migration state.
 		// Without this branch, intent.md's `plugin_version: "4.0.0"`
 		// would short-circuit the gate and the v3 files would sit forever.
-		// hasV3CruftInIntent reads at most one unit + one fb + state.json
-		// per stage, so the per-tick cost is bounded and small.
+		// hasV3CruftInIntent scans intent.md, every unit file under
+		// every stage, and the state.json sentinel — the per-tick cost
+		// is bounded by the intent's unit count. We walk every unit
+		// (not just the first) so a partial migration that stamped
+		// some units v4 but left others v3 still triggers re-migration.
 		const v3CruftPresent =
 			sourceMajor === targetMajor && hasV3CruftInIntent(iDir)
 		if (sourceMajor !== targetMajor || v3CruftPresent) {
@@ -292,6 +302,41 @@ export function runWorkflowTick(
 		}
 	}
 
+	// Pre-tick self-repair: synthesize missing review/approval stamps
+	// on stages whose units look iteration-complete but carry no
+	// approval bookkeeping AND have demonstrably been moved past
+	// (later stage has on-disk work). This catches migrated intents
+	// whose v0→v4 backfill never landed on the cursor-reachable copy
+	// of the unit files (e.g., migration ran on intent main but the
+	// writes were scattered to another branch by an auto-commit during
+	// stage-branch alignment, never reaching the disk view the cursor
+	// walks). Without this, the cursor pins on stage N forever,
+	// re-emitting `dispatch_review(spec)` while the agent has nowhere
+	// to land the stamps.
+	//
+	// Safe to run every tick — no-op when stamps are already present
+	// or when no later stage has work.
+	try {
+		const repairResult = selfRepairMissingApprovals(iDir, studio, mode)
+		if (repairResult.stagesRepaired.length > 0) {
+			emitTelemetry("haiku.self_repair.applied", {
+				intent: slug,
+				stages_repaired: repairResult.stagesRepaired.join(","),
+				units_touched: String(repairResult.unitsTouched),
+				reviews_added: String(repairResult.reviewsAdded),
+				approvals_added: String(repairResult.approvalsAdded),
+			})
+		}
+	} catch (err) {
+		// Self-repair is opportunistic; if it fails (corrupt unit FM,
+		// studio config gone), let the cursor walk surface the real
+		// error.
+		emitTelemetry("haiku.self_repair.failed", {
+			intent: slug,
+			error: String((err as Error)?.message ?? err),
+		})
+	}
+
 	// Cursor walk — pure read of the current working tree. Pre-tick
 	// branch reconciliation has already aligned the tree to the active
 	// stage branch (with main merged in), so the walk's disk view IS
@@ -355,7 +400,10 @@ function cursorActionToOrchestratorAction(
 }
 
 /** Wrap a tick result with a broadcast to the per-intent live-state
- *  pub/sub. */
+ *  pub/sub AND register it with the inter-tick deadlock detector.
+ *  Every return path from runWorkflowTick funnels through here, so
+ *  the detector sees every action — including early-return paths
+ *  (migration banner, select_* gates, sealed shortcut, error paths). */
 function broadcastTick(
 	slug: string,
 	result: WorkflowTickResult,
@@ -366,6 +414,14 @@ function broadcastTick(
 			action: (result.action as { action?: string }).action ?? "unknown",
 		})
 	}
+	// Inter-tick deadlock detection. The same OrchestratorAction
+	// emitted across consecutive ticks (or an A/B/A/B alternation)
+	// surfaces a `haiku.deadlock.suspected` / `haiku.deadlock.churn_suspected`
+	// telemetry signal. Doesn't change behavior — pure observability.
+	recordTickResult(
+		slug,
+		result.action as unknown as Record<string, unknown> | null,
+	)
 	return result
 }
 

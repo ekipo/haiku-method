@@ -165,6 +165,88 @@ for (const toolName of expectedOrchestratorTools) {
 	})
 }
 
+// Defs ↔ handlers parity. Every handler the registry exposes MUST
+// have a matching tool-def entry so the MCP server actually advertises
+// it; every tool-def must have a real handler so the server doesn't
+// dangle. Without this test, tools can ship in handlers/index.ts but
+// stay invisible to MCP — exactly what happened to haiku_intent_seal,
+// haiku_stage_elaboration_record, haiku_stage_elaboration_seal, and
+// haiku_discovery_complete before this guard landed.
+test("orchestratorToolDefs and orchestratorToolHandlers are in sync", async () => {
+	const { orchestratorToolHandlers } = await import(
+		"../src/tools/orchestrator/index.ts"
+	)
+	const defNames = new Set(orchestratorToolDefs.map((t) => t.name))
+	const handlerNames = new Set(orchestratorToolHandlers.keys())
+	const missingDefs = [...handlerNames].filter((n) => !defNames.has(n)).sort()
+	const missingHandlers = [...defNames]
+		.filter((n) => !handlerNames.has(n))
+		.sort()
+	assert.deepStrictEqual(
+		missingDefs,
+		[],
+		`Handlers without tool-def entries (won't be advertised to MCP): ${missingDefs.join(", ")}`,
+	)
+	assert.deepStrictEqual(
+		missingHandlers,
+		[],
+		`Tool-def entries without handlers (dangling): ${missingHandlers.join(", ")}`,
+	)
+})
+
+// AGENT_AUTHORABLE_INTENT_FIELDS must be DISJOINT from FSM_DRIVEN_INTENT_FIELDS.
+// haiku_intent_set's tool description interpolates the authorable list verbatim;
+// if FSM fields leak in, the description advertises fields like `verified_at` /
+// `verified_notes` / `mode` as agent-settable while the AJV schema actually
+// rejects them via propertyNames.not.enum. That's the self-contradiction
+// reported on 2026-05-11 by a user reading the haiku_intent_set surface
+// (zip: claude-session-rate-limit-travel-time-via-oban-20260511-132250).
+test("AGENT_AUTHORABLE_INTENT_FIELDS excludes every FSM_DRIVEN_INTENT_FIELDS entry", async () => {
+	const { AGENT_AUTHORABLE_INTENT_FIELDS, FSM_DRIVEN_INTENT_FIELDS } =
+		await import("../src/state/schemas/intent.ts")
+	const leaks = FSM_DRIVEN_INTENT_FIELDS.filter((f) =>
+		AGENT_AUTHORABLE_INTENT_FIELDS.includes(f),
+	)
+	assert.deepStrictEqual(
+		leaks,
+		[],
+		`FSM-driven fields leaking into AGENT_AUTHORABLE_INTENT_FIELDS: ${leaks.join(", ")} — the haiku_intent_set tool description will advertise these as settable while the schema denies the write`,
+	)
+})
+
+// Belt-and-suspenders: even if a future edit substitutes the interpolated
+// list with a hand-written one, the actual rendered description string
+// must not advertise any FSM-driven field as agent-settable. This test
+// inspects the LITERAL description on the registered tool surface.
+test("haiku_intent_set description does not advertise FSM-driven fields", async () => {
+	const { FSM_DRIVEN_INTENT_FIELDS } = await import(
+		"../src/state/schemas/intent.ts"
+	)
+	const tool = stateToolDefs.find((t) => t.name === "haiku_intent_set")
+	assert.ok(tool, "haiku_intent_set tool must be registered")
+	// Pull the "Agent-authorable fields:" segment specifically — the
+	// description also lists FSM fields in a separate "Engine-only
+	// fields (…) are rejected" clause, which is correct.
+	const desc = tool.description || ""
+	const authorableMatch = desc.match(/Agent-authorable fields:\s*([^.]+)/)
+	assert.ok(
+		authorableMatch,
+		"description must include an 'Agent-authorable fields:' segment",
+	)
+	const advertised = (authorableMatch[1] || "")
+		.split(/[,\s]+/)
+		.map((s) => s.trim())
+		.filter(Boolean)
+	const advertisedFsmLeaks = FSM_DRIVEN_INTENT_FIELDS.filter((f) =>
+		advertised.includes(f),
+	)
+	assert.deepStrictEqual(
+		advertisedFsmLeaks,
+		[],
+		`FSM-driven fields advertised as agent-authorable in haiku_intent_set description: ${advertisedFsmLeaks.join(", ")}`,
+	)
+})
+
 // ── Tool Input Schema Specifics ───────────────────────────────────────────
 
 console.log("\n=== Tool Input Schema Specifics ===")

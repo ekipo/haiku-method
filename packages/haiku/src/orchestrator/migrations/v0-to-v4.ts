@@ -62,6 +62,7 @@ import {
 import { dirname, join } from "node:path"
 import matter from "gray-matter"
 import { readReviewAgentPaths } from "../../studio-reader.js"
+import { emitTelemetry } from "../../telemetry.js"
 import {
 	emptyMigrationDetails,
 	type MigrationContext,
@@ -162,9 +163,20 @@ function tryMigrateFile(
 		migrate()
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err)
+		// Console for the developer running the MCP server locally.
 		console.warn(
 			`[haiku-migrate-v0-to-v4] Skipped ${context} at ${path} due to parse error: ${msg}. The file is preserved as-is; fix the YAML and re-tick to migrate.`,
 		)
+		// Telemetry so silent migration skips surface in dashboards —
+		// console.warn is invisible in MCP sessions, and partial-
+		// migration wedges (some units v4-stamped, others stranded
+		// in v3) only show up post-hoc when someone inspects the
+		// on-disk files by hand.
+		emitTelemetry("haiku.migrator.unit_skip", {
+			path,
+			context,
+			error: msg.slice(0, 500),
+		})
 	}
 }
 
@@ -643,11 +655,21 @@ export function hasV3CruftInIntent(intentDirPath: string): boolean {
 	for (const entry of readdirSync(stagesDir, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue
 		const stageDir = join(stagesDir, entry.name)
-		// Sentinel: first unit file per stage.
+		// Sentinel: every unit file per stage. Previously this used
+		// `.find()` and only checked the FIRST .md file — which produced
+		// a deadlock when a prior partial migration stamped some units
+		// (v4-shape) while leaving others v3-shape. If readdirSync
+		// happened to return a stamped one first, hasV3CruftInIntent
+		// returned false and the migrator was SKIPPED entirely, leaving
+		// the bare units stuck in v3 forever. The cursor then pinned
+		// on `dispatch_review(spec)` against the bare units because
+		// they had no approvals — and self-repair had to patch the
+		// downstream symptom. Walking all units detects partial
+		// migration state and re-runs the migrator until clean.
 		const unitsDir = join(stageDir, "units")
 		if (existsSync(unitsDir)) {
-			const unit = readdirSync(unitsDir).find((f) => f.endsWith(".md"))
-			if (unit) {
+			const units = readdirSync(unitsDir).filter((f) => f.endsWith(".md"))
+			for (const unit of units) {
 				try {
 					const fm = readMatter(join(unitsDir, unit)).data
 					for (const key of DEPRECATED_UNIT_FIELDS) {

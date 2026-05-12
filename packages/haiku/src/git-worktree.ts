@@ -72,6 +72,39 @@ function tryRun(args: string[], cwd?: string): string {
 	}
 }
 
+/**
+ * Are two refs pointing at identical tree contents?
+ *
+ * Compares `<ref>^{tree}` hashes — Git's deterministic hash of the
+ * directory contents (mode + name + blob SHA, recursively). Two refs
+ * with different commit IDs but identical trees return TRUE here; that
+ * means the working tree would be byte-identical after a checkout
+ * (modulo timestamps), so any merge between them produces a no-op
+ * merge commit. `--no-ff` would still create the commit; the tree
+ * comparison lets callers short-circuit before that happens.
+ *
+ * Returns false on any git failure (missing ref, not-a-repo). Callers
+ * should treat that as "fall through to the normal merge logic" — the
+ * tree-equality check is an optimization, not a correctness gate.
+ *
+ * Why this exists: bug report 2026-05-11 (admin-portal-reimagine after
+ * v0→v4 migration). Engine kept emitting alternating
+ *   merge intent-main → stage inception
+ *   merge stage inception into main
+ * with empty `git diff --stat` between branches. Each merge was a
+ * pure no-op (trees identical), but `--no-ff` minted a new commit on
+ * the target. The new commit made the OTHER side look "behind," which
+ * triggered the opposite-direction sync on the next tick. Loop guard
+ * fired forever. Tree-equality gates kill the no-op merge chain.
+ */
+function refsHaveIdenticalTrees(refA: string, refB: string): boolean {
+	const a = tryRun(["git", "rev-parse", `${refA}^{tree}`])
+	if (!a) return false
+	const b = tryRun(["git", "rev-parse", `${refB}^{tree}`])
+	if (!b) return false
+	return a === b
+}
+
 /** Variant of `tryRun` for git operations that talk to a remote
  *  (`fetch origin`, `push origin`, `ls-remote`). Bounded by
  *  `GIT_NETWORK_TIMEOUT_MS` and runs with credential / SSH prompts
@@ -100,6 +133,253 @@ export function getCurrentBranch(): string {
 export function branchExists(branch: string): boolean {
 	if (!isGitRepo()) return false
 	return tryRun(["git", "rev-parse", "--verify", branch]) !== ""
+}
+
+/**
+ * Pre-cursor downstream sync. Brings the current branch up-to-date
+ * by chaining merges DOWNSTREAM through the branch hierarchy:
+ *
+ *   <repo mainline>  →  haiku/<slug>/main  →  <current stage branch>
+ *
+ * Step 1 merges mainline into intent main so the intent picks up
+ * anything teammates landed on the org default branch. Step 2 merges
+ * intent main into the agent's current stage branch so the stage sees
+ * the freshly-updated intent main (plus the inherited mainline work).
+ *
+ * Both steps use `refsHaveIdenticalTrees` to short-circuit when no
+ * content actually differs — that's what kills the no-op-merge loop
+ * (PR #346) and keeps repeated ticks from minting fresh `--no-ff`
+ * commits on already-synced branches.
+ *
+ * NO BRANCH SWITCHING happens here. This is purely the "bring the
+ * branch up to date" phase that runs BEFORE the cursor walks. Branch
+ * switching happens AFTER the cursor produces an action (so the
+ * switch target is the action's stage, not a hoisted prediction from
+ * `findCurrentStage`).
+ *
+ * Returns an outcome the caller can surface as a structured error if
+ * a real conflict blocks the sync. Trees-identical and no-merge-
+ * needed paths return `ok: true, performed: false`. A successful
+ * merge returns `ok: true, performed: true`. A real conflict returns
+ * `ok: false, conflictAt`.
+ *
+ * Conflict recovery is DIFFERENT for the two steps and callers must
+ * branch on `conflictAt` when surfacing recovery instructions:
+ *
+ *   - `intent_main_to_stage` (step 2, in-place merge): the merge is
+ *     left mid-merge in the agent's working tree. The agent edits
+ *     the conflicted files (the workflow-fields guard's mid-merge
+ *     bypass — PR #344 — permits generic Edit/Write during a merge),
+ *     `git add`s them, and `git commit`s. Then re-tick.
+ *   - `mainline_to_intent_main` (step 1, temp worktree): the temp
+ *     worktree was force-removed by `withTempWorktree`'s finally
+ *     block. Nothing in the agent's working tree changed; the intent
+ *     main branch HEAD is still at its pre-merge position. The agent
+ *     cannot edit conflict markers locally because there are none.
+ *     Recovery is manual: `git checkout haiku/<slug>/main`, merge
+ *     the mainline ref, resolve, commit, switch back to the original
+ *     branch, re-tick.
+ *
+ * Non-git mode is a no-op (`ok: true, performed: false`).
+ *
+ * Caveat: step 1 (mainline → intent main) only runs when both
+ * branches exist locally. If intent main doesn't exist yet (brand-
+ * new intent), there's nothing to sync — the caller hasn't created
+ * the intent branch yet, so this is a no-op.
+ */
+export interface PreCursorSyncResult {
+	ok: boolean
+	performed: boolean
+	conflictAt?: "mainline_to_intent_main" | "intent_main_to_stage"
+	conflictFiles?: string[]
+	conflictBranch?: string
+	message?: string
+}
+
+export function syncBranchDownstream(slug: string): PreCursorSyncResult {
+	if (!isGitRepo())
+		return { ok: true, performed: false, message: "non-git mode" }
+	const mainlineBranch = getMainlineBranch()
+	const intentMain = `haiku/${slug}/main`
+	const currentBranch = getCurrentBranch()
+	let performed = false
+
+	// Step 1: mainline → intent main. Skip when intent main doesn't
+	// exist yet (brand-new intent) or trees already match.
+	if (mainlineBranch && intentMain && branchExists(intentMain)) {
+		// Check whether mainline is reachable (local or remote-tracking).
+		const mainlineRef = branchExists(mainlineBranch)
+			? mainlineBranch
+			: tryRun(["git", "rev-parse", "--verify", `origin/${mainlineBranch}`])
+				? `origin/${mainlineBranch}`
+				: ""
+		if (mainlineRef && !refsHaveIdenticalTrees(intentMain, mainlineRef)) {
+			// Use a temp worktree to merge mainline into intent main
+			// without disturbing the agent's current checkout. Falls back
+			// to in-place when the agent IS on intent main.
+			const step1 = mergeRefIntoBranch(
+				mainlineRef,
+				intentMain,
+				currentBranch,
+				`haiku: merge ${mainlineRef} → ${intentMain} (pre-cursor sync)`,
+			)
+			if (!step1.ok) {
+				return {
+					ok: false,
+					performed,
+					conflictAt: "mainline_to_intent_main",
+					conflictFiles: step1.conflictFiles,
+					conflictBranch: intentMain,
+					message: step1.message,
+				}
+			}
+			if (step1.performed) performed = true
+		}
+	}
+
+	// Step 2: intent main → current stage branch. Skip when current
+	// IS intent main, when intent main doesn't exist, or when trees
+	// already match.
+	if (
+		intentMain &&
+		branchExists(intentMain) &&
+		currentBranch &&
+		currentBranch !== intentMain &&
+		currentBranch.startsWith(`haiku/${slug}/`)
+	) {
+		if (!refsHaveIdenticalTrees(currentBranch, intentMain)) {
+			// Current branch IS the agent's working tree, so merge
+			// in-place — no temp worktree needed. A real conflict
+			// leaves the working tree mid-merge; the agent can resolve
+			// via the workflow-fields guard's mid-merge bypass.
+			const step2 = mergeRefInPlace(
+				intentMain,
+				`haiku: merge ${intentMain} → ${currentBranch} (pre-cursor sync)`,
+			)
+			if (!step2.ok) {
+				return {
+					ok: false,
+					performed,
+					conflictAt: "intent_main_to_stage",
+					conflictFiles: step2.conflictFiles,
+					conflictBranch: currentBranch,
+					message: step2.message,
+				}
+			}
+			if (step2.performed) performed = true
+		}
+	}
+
+	return { ok: true, performed }
+}
+
+/** Helper: merge `sourceRef` into `targetBranch`. If the agent's
+ *  current checkout is `targetBranch`, merge in-place. Otherwise use
+ *  a temp worktree so the agent's tree isn't disturbed. */
+function mergeRefIntoBranch(
+	sourceRef: string,
+	targetBranch: string,
+	currentBranch: string,
+	message: string,
+): {
+	ok: boolean
+	performed: boolean
+	conflictFiles?: string[]
+	message?: string
+} {
+	if (currentBranch === targetBranch) {
+		return mergeRefInPlace(sourceRef, message)
+	}
+	// Temp worktree path: merge in isolation, no risk to the agent's tree.
+	try {
+		const tmpResult = withWorktreeOnBranch(targetBranch, (tmpPath) => {
+			try {
+				execFileSync(
+					"git",
+					[
+						"-C",
+						tmpPath,
+						"merge",
+						sourceRef,
+						"--no-ff",
+						"--no-edit",
+						"-m",
+						message,
+					],
+					{ stdio: "pipe" },
+				)
+				return { ok: true, performed: true, conflictFiles: [] as string[] }
+			} catch (err) {
+				const conflicts = tryRun(
+					["git", "-C", tmpPath, "diff", "--name-only", "--diff-filter=U"],
+					tmpPath,
+				)
+					.split("\n")
+					.filter(Boolean)
+				if (conflicts.length === 0) {
+					tryRun(["git", "-C", tmpPath, "merge", "--abort"], tmpPath)
+					return {
+						ok: false,
+						performed: false,
+						conflictFiles: [],
+						message: err instanceof Error ? err.message : String(err),
+					}
+				}
+				return {
+					ok: false,
+					performed: false,
+					conflictFiles: conflicts,
+					message: `Merge ${sourceRef} → ${targetBranch} left conflicts in ${conflicts.length} file(s).`,
+				}
+			}
+		})
+		return tmpResult
+	} catch (err) {
+		return {
+			ok: false,
+			performed: false,
+			message: err instanceof Error ? err.message : String(err),
+		}
+	}
+}
+
+/** Helper: merge `sourceRef` into the currently-checked-out branch. */
+function mergeRefInPlace(
+	sourceRef: string,
+	message: string,
+): {
+	ok: boolean
+	performed: boolean
+	conflictFiles?: string[]
+	message?: string
+} {
+	try {
+		execFileSync(
+			"git",
+			["merge", sourceRef, "--no-ff", "--no-edit", "-m", message],
+			{ stdio: "pipe" },
+		)
+		return { ok: true, performed: true }
+	} catch (err) {
+		const conflicts = tryRun(["git", "diff", "--name-only", "--diff-filter=U"])
+			.split("\n")
+			.filter(Boolean)
+		if (conflicts.length === 0) {
+			tryRun(["git", "merge", "--abort"])
+			return {
+				ok: false,
+				performed: false,
+				conflictFiles: [],
+				message: err instanceof Error ? err.message : String(err),
+			}
+		}
+		return {
+			ok: false,
+			performed: false,
+			conflictFiles: conflicts,
+			message: `Merge ${sourceRef} → current left conflicts in ${conflicts.length} file(s).`,
+		}
+	}
 }
 
 /** Detect the mainline branch.
@@ -1475,6 +1755,20 @@ export function mergeStageBranchIntoMain(
 		run(["git", "rev-parse", "--verify", stageBranch])
 		run(["git", "rev-parse", "--verify", mainBranch])
 
+		// Tree-equality short-circuit. If stage and main already point
+		// at identical trees, a merge here would mint a `--no-ff` no-op
+		// commit on main; the opposite-direction sync in
+		// ensureOnStageBranch would then re-merge it. Skip when trees
+		// match. Without this, the two sync sites alternate forever
+		// (admin-portal-reimagine wedge after v0→v4 migration, 2026-05-11).
+		if (refsHaveIdenticalTrees(stageBranch, mainBranch)) {
+			return {
+				success: true,
+				noop: true,
+				message: `${stageBranch} and ${mainBranch} already point at identical trees — skipping no-op merge`,
+			}
+		}
+
 		const current = getCurrentBranch()
 
 		// Run the merge and surface conflicts as structured data —
@@ -2078,7 +2372,21 @@ export function ensureOnStageBranch(
 			"--count",
 			`${stageBranch}..${intentMain}`,
 		])
-		if (aheadCount && Number.parseInt(aheadCount, 10) > 0) {
+		// Tree-equality short-circuit. If main and the stage branch
+		// already point at identical trees, the merge would be a
+		// `--no-ff` no-op commit that the opposite-direction sync
+		// then re-merges. Skip the merge entirely; the checkout below
+		// is sufficient. Without this gate, two no-op merge commits
+		// would alternate forever (admin-portal-reimagine wedge after
+		// v0→v4 migration, 2026-05-11). Order matters: only probe
+		// trees when aheadCount > 0, otherwise we burn two
+		// `git rev-parse` subprocesses per tick on the common
+		// already-aligned path.
+		if (
+			aheadCount &&
+			Number.parseInt(aheadCount, 10) > 0 &&
+			!refsHaveIdenticalTrees(stageBranch, intentMain)
+		) {
 			// Stage 1: checkout stage branch. Dirty tree on this step is
 			// auto-recoverable.
 			try {

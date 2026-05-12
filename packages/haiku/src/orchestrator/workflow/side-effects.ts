@@ -130,8 +130,6 @@ function findPreviousStage(slug: string, stage: string): string | undefined {
  *  The intent's `mode` field controls iteration cadence and review
  *  rules but not branching topology — both modes branch per-stage. */
 export function workflowStartStage(slug: string, stage: string): void {
-	const intentFile = join(intentDir(slug), "intent.md")
-
 	createIntentBranch(slug)
 	cleanupOrphanedStageBranches(slug)
 
@@ -211,9 +209,10 @@ export function workflowStartStage(slug: string, stage: string): void {
 
 	appendStageIteration(slug, stage, { trigger: "initial" })
 
-	if (existsSync(intentFile)) {
-		setFrontmatterField(intentFile, "active_stage", stage)
-	}
+	// `active_stage` write removed 2026-05-12 (V4-ALIGNMENT-AUDIT
+	// Invariant 1 closure). The v4 cursor derives active stage from
+	// `findCurrentStage`; callers that need it for display derive
+	// inline. No FM cache.
 
 	cleanupOrphanedStageBranches(slug)
 
@@ -298,11 +297,8 @@ export function workflowAdvanceStage(
 ): void {
 	workflowCompleteStage(slug, currentStage, "advanced")
 
-	const intentFile = join(intentDir(slug), "intent.md")
-	if (existsSync(intentFile)) {
-		setFrontmatterField(intentFile, "active_stage", nextStage)
-	}
-
+	// `active_stage` write removed 2026-05-12 — see workflowStartStage
+	// for the rationale (cursor derives via findCurrentStage).
 	workflowStartStage(slug, nextStage)
 
 	// Reseal: workflowCompleteStage sealed against active_stage=currentStage,
@@ -332,7 +328,9 @@ export function workflowGateAsk(slug: string, stage: string): void {
 function workflowEnterIntentCompletionReview(slug: string): void {
 	const intentFile = join(intentDir(slug), "intent.md")
 	if (!existsSync(intentFile)) return
-	setFrontmatterField(intentFile, "phase", "awaiting_completion_review")
+	// `phase` write removed 2026-05-12 (Invariant 1). The engine's
+	// FSM marker `completion_review_entered_at` is what consumers
+	// actually need; phase was a derived label on top of it.
 	setFrontmatterField(intentFile, "completion_review_entered_at", timestamp())
 	emitTelemetry("haiku.intent.completion_review_entered", { intent: slug })
 	sealIntentState(slug)
@@ -444,23 +442,20 @@ export function findIncompleteStages(
  *  (when a stale completion-review marker is detected before any handler
  *  runs). Idempotent — calling it on a healthy intent is a no-op.
  *
- *  Resets every workflow-tracked completion field plus `status` and
- *  `active_stage`, then re-seals the integrity checksum. The first
- *  incomplete stage becomes the new `active_stage` so the next tick
- *  routes through `start_stage` instead of looping back into
- *  `awaiting_completion_review`. */
-export function rewindFromCompletionReview(
-	slug: string,
-	firstIncomplete: string,
-	root?: string,
-): void {
+ *  Clears every workflow-tracked completion-review FSM marker, then
+ *  re-seals the integrity checksum. v4 derives `active_stage` from
+ *  disk on the next tick via `findCurrentStage`, so routing to the
+ *  first incomplete stage falls out naturally — this function only
+ *  needs to undo the engine's own completion-review state. */
+export function rewindFromCompletionReview(slug: string, root?: string): void {
 	const iDir = root ? join(root, "intents", slug) : intentDir(slug)
 	const intentFile = join(iDir, "intent.md")
 	if (!existsSync(intentFile)) return
-	setFrontmatterField(intentFile, "status", "active")
-	setFrontmatterField(intentFile, "active_stage", firstIncomplete)
-	setFrontmatterField(intentFile, "phase", "")
-	setFrontmatterField(intentFile, "completed_at", "")
+	// status / active_stage / phase / completed_at writes removed
+	// 2026-05-12 (Invariant 1 closure). v4 derives all four from
+	// disk (sealed_at, findCurrentStage, branch-merge topology).
+	// completion_review_* fields stay — they're the engine's own
+	// FSM markers, not a v4-derived field.
 	setFrontmatterField(intentFile, "completion_review_entered_at", "")
 	setFrontmatterField(intentFile, "completion_review_dispatched", false)
 	setFrontmatterField(intentFile, "completion_review_skipped", false)
@@ -502,7 +497,7 @@ export function completeOrReviewIntent(
 	// to the first incomplete stage so the user sees what's missing.
 	const incompleteStages = findIncompleteStages(slug, studio)
 	if (incompleteStages.length > 0) {
-		rewindFromCompletionReview(slug, incompleteStages[0])
+		rewindFromCompletionReview(slug)
 		emitTelemetry("haiku.intent.completion_guard_failed", {
 			intent: slug,
 			studio,
@@ -514,7 +509,7 @@ export function completeOrReviewIntent(
 			message:
 				`Cannot complete intent '${slug}': ${incompleteStages.length} stage(s) are not yet completed: ` +
 				`[${incompleteStages.join(", ")}]. ` +
-				`Reset active_stage to '${incompleteStages[0]}' and cleared completion-review markers. ` +
+				`Cleared completion-review markers; next tick will route to '${incompleteStages[0]}' (derived from disk). ` +
 				`Call \`haiku_run_next { intent: "${slug}" }\` to resume.`,
 		}
 	}
@@ -525,10 +520,13 @@ export function completeOrReviewIntent(
 	// Authors disable per-intent with intent_completion_review: false.
 	const reviewOnCompletion = intent.intent_completion_review !== false
 
-	const finalStage =
-		typeof intent.active_stage === "string"
-			? (intent.active_stage as string)
-			: ""
+	// v4: derive the final stage from the studio topology, not from the
+	// `intent.active_stage` FM field (which is no longer written by any
+	// workflow path). The final stage is by definition the last entry in
+	// `resolveIntentStages` — that's where the terminal merge into
+	// `haiku/<slug>/main` originates.
+	const studioStages = resolveIntentStages(intent, studio)
+	const finalStage = studioStages.at(-1) ?? ""
 	if (finalStage) {
 		workflowFinalizeStageIntoIntentMain(slug, finalStage)
 	}
@@ -580,8 +578,11 @@ export function workflowIntentComplete(slug: string): void {
 				setFrontmatterField(intentFile, "draft_pr_status", "failed")
 			}
 		}
-		setFrontmatterField(intentFile, "status", "completed")
-		setFrontmatterField(intentFile, "completed_at", timestamp())
+		// status / completed_at writes removed 2026-05-12 (Invariant 1).
+		// Completion is now derived from sealed_at (when set) or "every
+		// stage merged into intent main" (when not). haiku_intent_list
+		// + dashboard derive on read. The canonical completion stamp
+		// is `sealed_at`, written by the intent-completion path.
 	}
 	emitTelemetry("haiku.intent.completed", { intent: slug })
 	gitCommitState(`haiku: complete intent ${slug}`)

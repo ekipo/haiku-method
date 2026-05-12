@@ -72,6 +72,23 @@ import {
 
 const TARGET_VERSION = "4.0.0"
 
+// DEPRECATED_*_FIELDS is the STRIP set — fields the v0→v4 migrator
+// removes from a v3 intent's frontmatter. Includes both truly-v3-only
+// fields AND fields whose values v4 derives at runtime (we clear them
+// during migration to make the storage state consistent, even though
+// v4 itself may re-write some of them).
+//
+// V3_ONLY_*_FIELDS is the SENTINEL set — strictly fields v4 NEVER
+// writes. Used by `hasV3CruftInIntent` to detect "intent.md / unit
+// files still carry pre-migration shape and the migrator needs to
+// re-fire." Critically, this set must NOT include any field v4
+// itself writes during normal operation — otherwise the migrator
+// re-fires on every tick after the agent has done any work
+// (haiku_unit_start writes `status`, `bolt`, `hat`, `hat_started_at`;
+// the gate-review prep writes `gate_review_session_id` etc.). The
+// pre-2026-05-12 sentinel conflated the two sets and re-fired on
+// every wave, masking dispatch instructions and forcing the agent to
+// manually re-dispatch hats. See session.txt 2026-05-12.
 const DEPRECATED_INTENT_FIELDS = new Set([
 	"status",
 	"active_stage",
@@ -102,6 +119,55 @@ const DEPRECATED_UNIT_FIELDS = new Set([
 	"visit",
 	"scope_reject_attempts",
 ])
+
+// Sentinels: truly-v3-only fields v4 NEVER writes. If hasV3CruftInIntent
+// sees any of these, the file is genuinely v3-shape and needs migration.
+// Cross-reference these against every `setFrontmatterField` site before
+// adding — a field that v4 writes WILL re-trigger the migrator forever.
+const V3_ONLY_INTENT_FIELDS = new Set([
+	// `status`, `completed_at` — removed: v4's side-effects.ts writes
+	// these on intent state transitions (start/complete).
+	// `gate_review_*` — removed: v4's haiku_run_next writes these as
+	// transient pointers when opening a review session.
+	"active_stage", // v4 derives via findCurrentStage
+	"phase", // v4 derives per-tick
+	"iteration", // v3 singular; v4 uses plural `iterations` on units
+	"completion_review_dispatched",
+	"completion_review_skipped",
+	"completion_review_entered_at",
+	"completion_review_dispatched_at",
+	"composite",
+	"intent_reviewed",
+	"autopilot",
+])
+
+const V3_ONLY_UNIT_FIELDS = new Set([
+	// As of 2026-05-12 (Invariant 1 closure), `haiku_unit_start` no
+	// longer writes `status`, `bolt`, `hat`, or `hat_started_at` on
+	// units — v4 derives those from `iterations[]` + `started_at`.
+	// All four are now genuinely v3-only and safe to include as
+	// sentinel triggers for re-migration when a post-v3 merge brings
+	// them back.
+	"status",
+	"bolt",
+	"hat",
+	"hat_started_at",
+	"completed_at", // unit root — v4 only writes inside iteration entries
+	"iteration", // singular — v3 only (v4 uses plural `iterations`)
+	"visit",
+	"scope_reject_attempts",
+])
+
+/** Returns true if `fm` has v3-only field values v4 never writes.
+ *  Retained for backward-compat with pre-2026-05-12 audit logic,
+ *  but as of that date `status` is itself a v3-only field (v4
+ *  doesn't write status on units at all). The key-presence check
+ *  in V3_ONLY_UNIT_FIELDS already catches all v3 units; this
+ *  function is now a no-op that we keep for the API surface in
+ *  case future v3 cousins need value-shape distinguishing. */
+function isV3UnitShape(_fm: Record<string, unknown>): boolean {
+	return false
+}
 
 // `replies` was originally listed as deprecated, but v4 still reads
 // `replies` from FB FM in `readFeedbackFiles` (state-tools.ts) and
@@ -643,7 +709,14 @@ export function hasV3CruftInIntent(intentDirPath: string): boolean {
 	if (existsSync(intentMd)) {
 		try {
 			const fm = readMatter(intentMd).data
-			for (const key of DEPRECATED_INTENT_FIELDS) {
+			// Sentinel uses V3_ONLY_INTENT_FIELDS (strict subset of fields
+			// v4 NEVER writes). Using the broader DEPRECATED_INTENT_FIELDS
+			// here re-fires migration every tick after the agent does any
+			// work, because v4 writes `status`/`completed_at`/
+			// `gate_review_*` on intent.md during normal operation. See
+			// the comment above V3_ONLY_INTENT_FIELDS for the wedge this
+			// fixed (session.txt 2026-05-12).
+			for (const key of V3_ONLY_INTENT_FIELDS) {
 				if (key in fm) return true
 			}
 		} catch {
@@ -672,9 +745,17 @@ export function hasV3CruftInIntent(intentDirPath: string): boolean {
 			for (const unit of units) {
 				try {
 					const fm = readMatter(join(unitsDir, unit)).data
-					for (const key of DEPRECATED_UNIT_FIELDS) {
+					// Two-part sentinel:
+					// 1. Key-presence for fields v4 NEVER writes
+					//    (V3_ONLY_UNIT_FIELDS).
+					// 2. Value-shape for fields v4 DOES write but with
+					//    different values (`isV3UnitShape`: a unit with
+					//    `status: "completed"` is unambiguously v3 —
+					//    v4 only writes `status: "active"`).
+					for (const key of V3_ONLY_UNIT_FIELDS) {
 						if (key in fm) return true
 					}
+					if (isV3UnitShape(fm)) return true
 				} catch {
 					/* skip, same reasoning */
 				}

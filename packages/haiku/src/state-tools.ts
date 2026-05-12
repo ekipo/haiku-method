@@ -28,6 +28,7 @@ import {
 import { Ajv } from "ajv"
 import matter from "gray-matter"
 import { features, resolvePluginRoot } from "./config.js"
+import { findCurrentStage } from "./orchestrator/workflow/cursor.js"
 import { sanitizeFeedbackBody } from "./state/sanitize-feedback.js"
 
 // V-04 (Symlink TOCTOU): `haiku_human_write` (registered via this module's
@@ -4362,6 +4363,12 @@ export function syncSessionMetadata(
 			readFileSync(intentFile, "utf8"),
 		)
 		const studio = (intentData.studio as string) || ""
+		// Telemetry snapshot only — reads the FM `active_stage` cache
+		// rather than calling findCurrentStage to avoid a state-tools →
+		// cursor import cycle. Drift between the cache and the disk-
+		// derived truth shows up here as stale telemetry, not as
+		// incorrect engine routing. The cache is written by side-effects
+		// on stage transitions; this is a non-authoritative read.
 		const activeStage = (intentData.active_stage as string) || ""
 
 		let phase = ""
@@ -4386,6 +4393,11 @@ export function syncSessionMetadata(
 		let hat: string | null = null
 		let bolt: number | null = null
 		if (activeStage) {
+			// "Active unit" derivation: the v4 source of truth is per-unit
+			// `iterations[]` + `started_at`, NOT the legacy `status: "active"`
+			// FM cache. A unit is "active for telemetry" when started_at is
+			// set AND the last iteration hasn't reached terminal advance.
+			// hat / bolt come from the last iteration entry.
 			const unitsDir = join(stageDir(intent, activeStage), "units")
 			if (existsSync(unitsDir)) {
 				for (const f of readdirSync(unitsDir).filter((f) =>
@@ -4394,12 +4406,27 @@ export function syncSessionMetadata(
 					const { data: unitData } = parseFrontmatter(
 						readFileSync(join(unitsDir, f), "utf8"),
 					)
-					if (unitData.status === "active") {
-						activeUnit = f.replace(".md", "")
-						hat = (unitData.hat as string) || null
-						bolt = (unitData.bolt as number) || null
-						break
-					}
+					const startedAt =
+						typeof unitData.started_at === "string" &&
+						(unitData.started_at as string).length > 0
+					if (!startedAt) continue
+					const iterations = Array.isArray(unitData.iterations)
+						? (unitData.iterations as Array<Record<string, unknown>>)
+						: []
+					const lastIter =
+						iterations.length > 0 ? iterations[iterations.length - 1] : null
+					// "Completed" check: last iter ended in terminal advance.
+					const isCompleted =
+						lastIter !== null &&
+						(lastIter.result === "advance" || lastIter.result === "closed")
+					if (isCompleted) continue
+					activeUnit = f.replace(".md", "")
+					hat =
+						lastIter !== null && typeof lastIter.hat === "string"
+							? (lastIter.hat as string)
+							: null
+					bolt = iterations.length > 0 ? iterations.length : 1
+					break
 				}
 			}
 		}
@@ -6664,7 +6691,7 @@ Forbidden FM fields (workflow-driven, mutating these returns \`fsm_field_forbidd
 	{
 		name: "haiku_feedback",
 		description:
-			'Create a feedback item for an intent. Writes a markdown file with frontmatter tracking status, origin, and author. Omit `stage` to log an intent-scope finding (used by the studio-level pre-intent-completion review layer). To request a stage rewind from the agent side (planner blocked, upstream gap, etc.), pass `stage: "<earlier-stage>"` and `resolution: "stage_revisit"` — the next `haiku_run_next` will route through the pre-tick gate and emit a `revisited` action. Revisit is a property of run_next mechanics, not a separate verb. Pass `inline_anchor: { selected_text, paragraph, location, file_path? }` when the finding points at a specific span of an artifact — the SPA will scroll-and-flash the excerpt when the reviewer clicks the feedback card. Adversarial-review and studio-review hats should attach an anchor whenever they cite a specific line.',
+			'Create a feedback item for an intent. Writes a markdown file with frontmatter tracking status, origin, and author. Omit `stage` to log an intent-scope finding (used by the studio-level pre-intent-completion review layer). To request a stage rewind from the agent side (planner blocked, upstream gap, etc.), pass `stage: "<earlier-stage>"` and `resolution: "stage_revisit"` — the next `haiku_run_next` will route the agent to that stage via the feedback walk (emits `start_feedback_hat` at the target stage; post-cursor branch switch moves the working tree there). Revisit is a property of run_next mechanics, not a separate verb. Pass `inline_anchor: { selected_text, paragraph, location, file_path? }` when the finding points at a specific span of an artifact — the SPA will scroll-and-flash the excerpt when the reviewer clicks the feedback card. Adversarial-review and studio-review hats should attach an anchor whenever they cite a specific line.',
 		// SCHEMA IS THE SSOT — defined in state/schemas/feedback.ts
 		// (HAIKU_FEEDBACK_INPUT_SCHEMA). The handler runs the same
 		// schema through AJV at entry so the MCP-runtime check and the
@@ -7022,12 +7049,32 @@ export function handleStateTool(
 			// skills use this to skip the "which intent?" prompt when the
 			// user's git branch already names the intent.
 			const branchMatch = intentFromCurrentBranch()
+			// status + active_stage are DERIVED, not read from the FM
+			// cache. v4 source of truth:
+			//   - status: "sealed" if sealed_at; "completed" if every
+			//     stage merged into intent main; else "active"
+			//   - active_stage: findCurrentStage(slug, studio); null
+			//     means every stage merged (intent in completion-review
+			//     or sealed)
+			// The FM `data.status` / `data.active_stage` fields are no
+			// longer written by v4 side-effects; deriving here keeps
+			// the haiku_intent_list response shape stable. Per
+			// V4-ALIGNMENT-AUDIT.md Invariant 1.
 			const intents = entries.map(({ slug, data }) => {
+				const studio = (data.studio as string) || ""
+				const sealedAt =
+					typeof data.sealed_at === "string" && data.sealed_at.length > 0
+				const activeStage = studio ? findCurrentStage(slug, studio) : null
+				// Both "sealed_at set" and "every stage merged" surface as
+				// "completed" to callers. The distinction (sealed vs.
+				// pre-seal-complete) is internal to the engine.
+				const derivedStatus =
+					sealedAt || activeStage === null ? "completed" : "active"
 				const base: Record<string, unknown> = {
 					slug,
 					studio: data.studio,
-					status: data.status,
-					active_stage: data.active_stage,
+					status: derivedStatus,
+					active_stage: activeStage ?? "",
 				}
 				if (includeArchived) {
 					base.archived = data.archived === true
@@ -7350,20 +7397,38 @@ export function handleStateTool(
 			if (unitStartBranchErr) return unitStartBranchErr
 			const uPath = unitPath(args.intent as string, stage, args.unit as string)
 
-			// Guard: reject if unit is already active (prevents duplicate work)
+			// Guard: reject if unit is already active (prevents duplicate
+			// work). v4 derivation: a unit is "already active" when
+			// `started_at` is set AND no terminal-advance iteration has
+			// landed yet. The legacy `status: "active"` FM field is no
+			// longer the source of truth — we read iterations[].
 			if (existsSync(uPath)) {
 				const { data: existingFm } = parseFrontmatter(
 					readFileSync(uPath, "utf8"),
 				)
-				if (existingFm.status === "active") {
+				const startedAt =
+					typeof existingFm.started_at === "string" &&
+					(existingFm.started_at as string).length > 0
+				const iters = Array.isArray(existingFm.iterations)
+					? (existingFm.iterations as Array<Record<string, unknown>>)
+					: []
+				const lastIter = iters.length > 0 ? iters[iters.length - 1] : null
+				const isTerminal =
+					lastIter !== null &&
+					(lastIter.result === "advance" || lastIter.result === "closed")
+				if (startedAt && !isTerminal) {
 					const scope = resolveStageScope(args.intent as string, stage)
+					const currentHat =
+						lastIter !== null && typeof lastIter.hat === "string"
+							? (lastIter.hat as string)
+							: ""
 					return reply(
 						{
 							error: "unit_already_active",
 							unit: args.unit,
-							hat: existingFm.hat || "",
+							hat: currentHat,
 							scope: scope || null,
-							message: `Unit '${args.unit}' is already active (hat: ${existingFm.hat || "unknown"}). Do not start it again — continue working on it or call haiku_unit_advance_hat when done.`,
+							message: `Unit '${args.unit}' is already active (hat: ${currentHat || "unknown"}). Do not start it again — continue working on it or call haiku_unit_advance_hat when done.`,
 						},
 						{ isError: true },
 					)
@@ -7406,11 +7471,16 @@ export function handleStateTool(
 			const stageHats = resolveStageHats(args.intent as string, stage)
 			const firstHat = stageHats[0] || ""
 
-			setFrontmatterField(uPath, "status", "active")
-			setFrontmatterField(uPath, "bolt", 1)
-			setFrontmatterField(uPath, "hat", firstHat)
+			// v4 unit-start: only `started_at` + the first iteration
+			// entry are written. The cache fields (`status`, `bolt`,
+			// `hat`, `hat_started_at`) used to be set here for v3
+			// telemetry / dashboard / repair consumers, but every
+			// consumer that reads them as authoritative now derives via
+			// `iterations[]` + `started_at` instead (deriveUnitState in
+			// orchestrator/units.ts; syncSessionMetadata; the unit-
+			// start "already active" guard above). Per
+			// V4-ALIGNMENT-AUDIT.md Invariant 1.
 			setFrontmatterField(uPath, "started_at", timestamp())
-			setFrontmatterField(uPath, "hat_started_at", timestamp())
 			startUnitIteration(uPath, firstHat)
 			// Reseal: these are UNIT_FIELDS, so the tamper detector needs the
 			// updated checksum before the next verifyIntentState() call.

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.4] - 2026-05-13
+
+### Fixed
+
+- User-gate decisions now process inline during workflow advancement, eliminating a separate confirmation step.
+- The workflow exits cleanly when the browser disconnects instead of leaving the system in a hanging state.
+
 ## [4.5.3] - 2026-05-13
 
 ### Fixed

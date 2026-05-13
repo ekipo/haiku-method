@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.2] - 2026-05-13
+
+### Fixed
+- Stage approval is now blocked when open feedback remains, ensuring all findings are addressed before advancement.
+- Feedback sidebar in the review interface is more reliable when managing multiple findings across stages.
+- Stage cursor position now correctly tracks filesystem-based approvals across branch boundaries.
+- Decision mode type safety improved by defaulting ad-hoc mode to false.
+
+### Changed
+- Intent and unit detail views on the website display richer stage progression metadata.
+
 ## [4.5.1] - 2026-05-13
 
 ### Fixed

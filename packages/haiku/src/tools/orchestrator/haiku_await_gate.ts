@@ -369,6 +369,26 @@ export default defineTool({
 				})
 			}
 
+			// V4 alignment (2026-05-13): "advance" is the new neutral
+			// SPA signal — the user clicked the button, the gate is
+			// done waiting, the next `haiku_run_next` tick re-evaluates
+			// disk state and emits whatever's natural. No workflow verb
+			// encoded here; cursor handles routing on the re-tick.
+			if (reviewResult.decision === "advance") {
+				syncSessionMetadata(slug, stFile)
+				return text(
+					withInstructions({
+						action: "advance",
+						intent: slug,
+						stage,
+						message: withAnnouncement(
+							"User signaled advance. Run the next tick — the cursor will pick up on-disk feedback / approvals / drift and emit the natural next action.",
+							"Call haiku_run_next to continue.",
+						),
+					}),
+				)
+			}
+
 			if (reviewResult.decision === "approved") {
 				if (gateContext === "intent_completion") {
 					const studioForCompletion =
@@ -752,6 +772,29 @@ export default defineTool({
 			// (top of file) for the testable helpers.
 			if (isAwaitWaitTimeoutError(errorMsg)) {
 				return buildAwaitTimeoutResponse(slug)
+			}
+
+			// Presence-loss is a distinct user-action error: the SPA tab
+			// disconnected mid-await (no heartbeat for ≥120s). The throw
+			// message from `awaitGateReviewSession` already names the
+			// recovery path ("re-open the URL and call haiku_await_gate
+			// when ready") — wrapping it in the generic "Review UI
+			// failed to start" / "investigate the SPA server (port
+			// conflict? blocked browser launch?)" boilerplate below
+			// would direct the agent at a problem that doesn't exist
+			// (the UI started fine; the user closed the tab). Surface
+			// the message verbatim. Reported on PR #352 review.
+			if (errorMsg.includes("lost presence")) {
+				syncSessionMetadata(slug, stFile)
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `GATE DISCONNECTED: ${errorMsg}`,
+						},
+					],
+					isError: true,
+				}
 			}
 
 			const agentFixable =

@@ -38,6 +38,7 @@ import {
 } from "../../../organisms/ReplaceOutputDialog"
 import type { ParsedUnit } from "../../../parsed"
 import type { FeedbackItemData } from "../../../types"
+import { authedAssetUrl } from "../shared/asset-url"
 import { DeclaringUnitsBanner } from "../shared/DeclaringUnitsBanner"
 import {
 	markdownToSimpleHtml,
@@ -294,6 +295,13 @@ interface ArtifactViewModel {
 	 *  `output_declared_by` for the "Declared by" banner). Optional
 	 *  because knowledge ViewModels don't carry it. */
 	intentRelativePath?: string
+	/** Server-rewritten tunnel URL for binary outputs (image, file) so
+	 *  the SPA can use it as an `<img src>` / `<a href>`. Text-type
+	 *  outputs (markdown, html) inline content in `body` instead and
+	 *  leave this undefined. Reported 2026-05-13: image outputs in the
+	 *  StageReview walkthrough rendered empty because the VM dropped
+	 *  the tunnel URL the server prepared. */
+	assetUrl?: string
 }
 
 export function StageReview({
@@ -349,6 +357,13 @@ export function StageReview({
 	const outputArtifacts = (session.output_artifacts ?? []).filter(
 		(a) => a.stage === stageName,
 	)
+	// Stray files for this stage — anything the parser saw under
+	// `stages/<stage>/` that no unit declared and isn't in
+	// artifacts/ / knowledge/ / discovery/. Surfaced in the "Other"
+	// tab so a reviewer can associate them if needed.
+	const otherFiles = (session.other_files ?? []).filter(
+		(a) => a.stage === stageName,
+	)
 	// Intent-level knowledge files apply to every stage (per the
 	// H·AI·K·U data model — `.haiku/intents/{slug}/knowledge/`). We merge
 	// them with stage-scoped artifacts so stages that produce no new
@@ -371,14 +386,29 @@ export function StageReview({
 			mime: inferMime(k.name),
 		})),
 	]
-	const outputVMs: ArtifactViewModel[] = outputArtifacts.map((a) => ({
+	const toArtifactVM = (a: {
+		name: string
+		type: string
+		content?: string
+		relativePath?: string
+		intentRelativePath?: string
+	}): ArtifactViewModel => ({
 		name: a.name,
 		kind: inferOutputKind(a),
 		summary: summaryFor(a.name, a.content ?? "", a.type),
 		body: a.content ?? "",
 		mime: a.type,
 		intentRelativePath: a.intentRelativePath,
-	}))
+		// Server rewrote `relativePath` to a tunnel URL (see
+		// `buildStageArtifactUrl` in server/tool-call.ts). Carry it
+		// onto the VM so the image render below has a non-empty
+		// `src`. Without this, image outputs render with `body: ""`
+		// and the `<img src={body}>` guard rejects them — reviewer
+		// sees a `<pre>` placeholder instead of the asset.
+		assetUrl: a.relativePath ?? undefined,
+	})
+	const outputVMs: ArtifactViewModel[] = outputArtifacts.map(toArtifactVM)
+	const otherVMs: ArtifactViewModel[] = otherFiles.map(toArtifactVM)
 
 	// Pre-compute feedback → target maps (keyed by unit slug / knowledge name / output name)
 	const { feedbackByUnit, feedbackByKnowledge, feedbackByOutput } =
@@ -433,7 +463,7 @@ export function StageReview({
 	// Controlled variant mirrors the `tab` prop pattern — parent owns
 	// detail state for URL sync when `onDetailChange` is wired.
 	const [localDetail, setLocalDetail] = useState<{
-		tab: "units" | "knowledge" | "outputs"
+		tab: ReviewDetailKind
 		name: string
 	} | null>(
 		detailProp && onDetailChange === undefined
@@ -449,7 +479,7 @@ export function StageReview({
 	const setDetail = useCallback(
 		(
 			next: {
-				tab: "units" | "knowledge" | "outputs"
+				tab: ReviewDetailKind
 				name: string
 			} | null,
 		) => {
@@ -465,7 +495,7 @@ export function StageReview({
 	)
 
 	const openDetail = useCallback(
-		(tab: "units" | "knowledge" | "outputs", name: string) => {
+		(tab: ReviewDetailKind, name: string) => {
 			setActiveTab(tab)
 			setDetail({ tab, name })
 		},
@@ -522,11 +552,18 @@ export function StageReview({
 	// by walkthrough.test.ts.
 	const walkthroughItems = useMemo(
 		() =>
-			resolveWalkthroughForDetail(gateWalkthroughItems, detail, {
-				units,
-				knowledgeVMs,
-				outputVMs,
-			}),
+			resolveWalkthroughForDetail(
+				gateWalkthroughItems,
+				// The walkthrough doesn't include the "other" catchall —
+				// stray files aren't gate-relevant. When the reviewer is
+				// browsing an "other" item, pass null so the resolver
+				// falls back to the gate set rather than trying to find
+				// the item in units/knowledge/outputs.
+				detail && detail.tab !== "other"
+					? { tab: detail.tab, name: detail.name }
+					: null,
+				{ units, knowledgeVMs, outputVMs },
+			),
 		// biome-ignore lint/correctness/useExhaustiveDependencies: derived arrays whose identity flips per render; only the names matter
 		[detail, gateWalkthroughItems, units, knowledgeVMs, outputVMs],
 	)
@@ -724,6 +761,63 @@ export function StageReview({
 							onReplaceOutput ? (name) => setReplaceTarget(name) : undefined
 						}
 						driftPendingByName={driftPendingOutputs}
+					/>
+				),
+		},
+		// Catchall tab for stray stage files: anything under
+		// `stages/<stage>/` not declared by any unit, not under
+		// `artifacts/`, `knowledge/`, or `discovery/`. Reviewer can
+		// see them and link them if relevant. Disabled when empty so
+		// the tab strip doesn't clutter with a noise tab. Same render
+		// shape as Outputs (no per-file drift / replace surface —
+		// these aren't tracked outputs).
+		{
+			id: "other",
+			label: `Other (${otherVMs.length})`,
+			disabled: otherVMs.length === 0,
+			content:
+				detail?.tab === "other" ? (
+					<ArtifactDetailView
+						kind="output"
+						artifacts={otherVMs}
+						currentName={detail.name}
+						seen={seen}
+						stageId={stageName}
+						intentSlug={intentSlug}
+						feedbackByName={new Map()}
+						walkIndex={otherVMs.findIndex((a) => a.name === detail.name)}
+						walkTotal={otherVMs.length}
+						onWalkPrev={() => {
+							const idx = otherVMs.findIndex((a) => a.name === detail.name)
+							if (idx > 0) openDetail("other", otherVMs[idx - 1].name)
+						}}
+						onWalkNext={() => {
+							const idx = otherVMs.findIndex((a) => a.name === detail.name)
+							if (idx >= 0 && idx < otherVMs.length - 1)
+								openDetail("other", otherVMs[idx + 1].name)
+						}}
+						hasWalkPrev={otherVMs.findIndex((a) => a.name === detail.name) > 0}
+						hasWalkNext={
+							otherVMs.findIndex((a) => a.name === detail.name) <
+							otherVMs.length - 1
+						}
+						onBack={closeDetail}
+						onInlineCommentsChange={onInlineCommentsChange}
+						onSaveInline={onSaveInline}
+						flashAnchor={flashAnchor ?? null}
+						onFlashCommentConsumed={onFlashCommentConsumed}
+					/>
+				) : (
+					<ArtifactsTab
+						kind="output"
+						artifacts={otherVMs}
+						feedbackByName={new Map()}
+						seen={seen}
+						stageId={stageName}
+						highlightRequestId={null}
+						onHighlightConsumed={() => {}}
+						feedback={feedback}
+						onOpenDetail={(name) => openDetail("other", name)}
 					/>
 				),
 		},
@@ -2003,13 +2097,25 @@ function ArtifactBody({
 	if (artifact.mime === "svg") {
 		return <SvgPreview body={artifact.body} />
 	}
-	if (artifact.mime === "image" && artifact.body) {
+	if (artifact.mime === "image") {
+		// Images use the tunnel URL the server prepared (carried on the
+		// VM as `assetUrl`), NOT `body` — the server inlines content
+		// for text/html only, so `body` is empty for binary outputs.
+		// Fall back to `body` when assetUrl is missing (covers the case
+		// where the artifact was constructed via the legacy inline-data
+		// path, e.g. ad-hoc previews). Reported 2026-05-13.
+		const src = artifact.assetUrl
+			? authedAssetUrl(artifact.assetUrl)
+			: artifact.body
+		if (!src) {
+			return (
+				<p className="text-xs italic text-stone-500">
+					No preview available for {artifact.name}.
+				</p>
+			)
+		}
 		const img = (
-			<img
-				src={artifact.body}
-				alt={artifact.name}
-				className="w-full h-auto bg-white"
-			/>
+			<img src={src} alt={artifact.name} className="w-full h-auto bg-white" />
 		)
 		if (onSubmitAnnotation) {
 			return (

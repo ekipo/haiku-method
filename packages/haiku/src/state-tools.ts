@@ -2803,15 +2803,6 @@ export interface AppendIterationResult {
 	signature: string
 }
 
-/** Path to the per-stage iteration log. v4 disk-artifact home —
- *  replaces state.json's `iterations[]` array. JSONL append-only:
- *  every appendStageIteration writes one line, every
- *  closeCurrentStageIteration appends a "close" line. Read by
- *  re-folding the lines into the in-memory iteration array. */
-function stageIterationsPath(slug: string, stage: string): string {
-	return join(stageDir(slug, stage), "iterations.jsonl")
-}
-
 /** Path to the per-stage decision log. v4 disk-artifact home —
  *  replaces state.json's `decision_log[]` array. JSONL append-only:
  *  every `haiku_decision_record` (and the implicit acknowledgement
@@ -2862,64 +2853,55 @@ function readDecisionLog(
 	return out
 }
 
-/** Reduce the iterations.jsonl log into the canonical in-memory array.
- *  Each "open" line opens a new entry; the next "close" line attaches
- *  result/completed_at to it. Malformed lines are skipped. */
+/** Derive the per-stage iteration history from closed feedback files.
+ *
+ *  The prior implementation persisted iterations to a sidecar
+ *  `iterations.jsonl` log — a second source of truth alongside the
+ *  canonical feedback files. Removed 2026-05-13: each closed FB at the
+ *  stage IS a completed revisit cycle. The current (incomplete) cycle
+ *  is synthesized as the trailing entry. No persistence; the read
+ *  derives on every call from `readFeedbackFiles`.
+ *
+ *  Ordering: closed FBs sorted by `closed_at` ascending. Indices
+ *  start at 1; the trailing in-flight cycle (if any) gets the next
+ *  index with `completed_at: null`.
+ *
+ *  Loop-detection signatures are dropped (the prior implementation
+ *  hashed titles at revisit-time; without history-of-titles-at-time-T
+ *  we can't reconstruct the same signal). `maybeEscalate`'s
+ *  `loopDetected` branch becomes permanently false — but that
+ *  function is also currently unwired (no caller), so this loses no
+ *  live functionality. The `exceeded` branch (count-based cap) still
+ *  works off the derived count. */
 function readStageIterations(slug: string, stage: string): StageIteration[] {
-	const path = stageIterationsPath(slug, stage)
-	if (!existsSync(path)) return []
-	const raw = readFileSync(path, "utf8")
-	const out: StageIteration[] = []
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim()
-		if (!trimmed) continue
-		let parsed: Record<string, unknown>
-		try {
-			parsed = JSON.parse(trimmed) as Record<string, unknown>
-		} catch {
-			continue
-		}
-		if (parsed.kind === "open") {
-			out.push({
-				index: out.length + 1,
-				started_at: (parsed.at as string) || timestamp(),
-				completed_at: null,
-				trigger: (parsed.trigger as StageIterationTrigger) || "initial",
-				result: null,
-				...(parsed.reason ? { reason: parsed.reason as string } : {}),
-				...(parsed.feedback_signature
-					? { feedback_signature: parsed.feedback_signature as string }
-					: {}),
-			})
-		} else if (parsed.kind === "close" && out.length > 0) {
-			const last = out[out.length - 1]
-			last.completed_at = (parsed.at as string) || timestamp()
-			last.result =
-				(parsed.result as StageIterationResult) ||
-				("advanced" as StageIterationResult)
-			if (parsed.reason && !last.reason) last.reason = parsed.reason as string
-		}
-	}
+	const fbs = readFeedbackFiles(slug, stage)
+	const closed = fbs
+		.filter((f) => typeof f.closed_at === "string" && f.closed_at.length > 0)
+		.slice()
+		.sort((a, b) => (a.closed_at ?? "").localeCompare(b.closed_at ?? ""))
+	const out: StageIteration[] = closed.map((f, i) => ({
+		index: i + 1,
+		started_at: f.created_at || "",
+		completed_at: f.closed_at ?? null,
+		trigger: "feedback" as StageIterationTrigger,
+		result: "feedback-revisit" as StageIterationResult,
+		...(f.title ? { reason: f.title } : {}),
+	}))
 	return out
 }
 
-/** Append a structured line to iterations.jsonl. Best-effort — never
- *  throws; failures are logged but don't roll back the engine
- *  transition that triggered the append. */
+/** No-op — kept as a stub so any in-flight engine paths that touched
+ *  the old JSONL writer don't throw. Stage iteration data is now
+ *  derived from closed feedback files; there is nothing to persist.
+ *  The previous implementation wrote to a sidecar `iterations.jsonl`
+ *  log — see `readStageIterations` for the derivation that
+ *  replaces it. */
 function appendIterationLogLine(
-	slug: string,
-	stage: string,
-	line: Record<string, unknown>,
+	_slug: string,
+	_stage: string,
+	_line: Record<string, unknown>,
 ): void {
-	const path = stageIterationsPath(slug, stage)
-	try {
-		mkdirSync(dirname(path), { recursive: true })
-		appendFileSync(path, `${JSON.stringify(line)}\n`)
-	} catch (err) {
-		console.error(
-			`[haiku] failed to append iteration log for ${slug}/${stage}: ${err instanceof Error ? err.message : String(err)}`,
-		)
-	}
+	// intentionally empty
 }
 
 /** Normalized iteration count — read from the JSONL log. The legacy
@@ -4013,7 +3995,88 @@ function stageHaikuStateForCommit(haikuRoot: string): void {
 }
 
 /**
- * Git add + commit + push for lifecycle state changes.
+ * Like `gitCommitState`, but stages EVERY dirty path in the working
+ * tree (`git add -A`) instead of just `.haiku/**`. Use when the caller
+ * has already validated that all dirty files belong to a single
+ * scope-bounded operation (a hat advance whose `validateUnitScope`
+ * just passed, an output validation that confirmed every declared
+ * artifact exists). Without this, hat advances that produced user-
+ * code files (anything outside `.haiku/`) left those files
+ * uncommitted in the parent worktree — the next branch switch / merge
+ * then refused with a dirty-tree error and the agent had to run
+ * `git add` + `git commit` by hand (the
+ * `kagami-slice-1-sendgrid-mirror` wedge reported 2026-05-13,
+ * image 3 of the session screenshots).
+ *
+ * Edge case to be aware of (clean-entry invariant): `validateUnitScope`
+ * uses the unit's `hat_started_at` timestamp to scope its check to
+ * files modified DURING the hat's run. `gitCommitAll` then stages every
+ * dirty path with `git add -A`, which includes any pre-hat dirty files
+ * the scope check did NOT validate. In the intended workflow the
+ * worktree is clean when a hat is dispatched (the prior hat's
+ * `advance_hat` committed; nothing else writes between hats), so
+ * pre-hat dirty files shouldn't exist. They CAN appear when a prior
+ * advance crashed after `validateUnitScope` but before its commit —
+ * in that case the leftover dirty files get rolled into the current
+ * hat's commit. That's the same outcome the agent would have reached
+ * by running `git add -A && git commit` manually, so the auto-bundle
+ * is the right call; just note the implicit assumption when reading
+ * git history.
+ */
+export function gitCommitAll(message: string): {
+	committed: boolean
+	pushed: boolean
+	pushError?: string
+} {
+	if (!isGitRepo()) return { committed: false, pushed: false }
+	try {
+		// Stage every dirty path in the worktree — `git add -A` covers
+		// modifications, deletions, and untracked files. Exclude
+		// `.haiku/worktrees/**` to mirror `stageHaikuStateForCommit`'s
+		// long-standing rule (those are linked-worktree trees, not part
+		// of the primary's content).
+		execFileSync(
+			"git",
+			[
+				"add",
+				"-A",
+				"--",
+				":(exclude,glob,top).haiku/worktrees/**",
+				findHaikuRoot(),
+				".",
+			],
+			{ encoding: "utf8", stdio: "pipe" },
+		)
+		execFileSync("git", ["commit", "-m", message, "--allow-empty"], {
+			encoding: "utf8",
+			stdio: "pipe",
+		})
+		try {
+			execFileSync("git", ["push"], {
+				encoding: "utf8",
+				stdio: "pipe",
+				timeout: GIT_NETWORK_TIMEOUT_MS,
+				env: GIT_NONINTERACTIVE_ENV,
+			})
+			return { committed: true, pushed: true }
+		} catch (pushErr) {
+			const pushError =
+				pushErr instanceof Error ? pushErr.message : String(pushErr)
+			return { committed: true, pushed: false, pushError }
+		}
+	} catch {
+		return { committed: false, pushed: false }
+	}
+}
+
+/**
+ * Git add + commit + push for lifecycle state changes (`.haiku/**`
+ * only). Use this when the caller is mutating engine state and the
+ * surrounding user-code working tree may legitimately be dirty —
+ * the narrow stage keeps engine commits free of unrelated changes.
+ * For hat advances, where the caller has already validated user-
+ * code dirty paths are in scope, use `gitCommitAll` instead.
+ *
  * No-op in non-git environments (filesystem mode).
  * Non-fatal: git failures are logged but never crash the MCP.
  */
@@ -7854,7 +7917,14 @@ export function handleStateTool(
 							unit: args.unit,
 						})
 				}
-				const completeGit = gitCommitState(
+				// Commit ALL dirty files (not just .haiku/*) — at this
+				// point validateUnitScope + the outputs check have
+				// already confirmed every dirty path is part of the
+				// unit's declared scope, so committing them is safe
+				// and prevents the "user code stays dirty after
+				// advance" wedge reported on
+				// kagami-slice-1-sendgrid-mirror.
+				const completeGit = gitCommitAll(
 					`haiku: complete unit ${args.unit as string}`,
 				)
 
@@ -8053,7 +8123,11 @@ export function handleStateTool(
 				unit: args.unit as string,
 				hat: nextHat,
 			})
-			const advGit = gitCommitState(
+			// Mid-chain advance: same scope-guarantee as terminal
+			// advance — validateUnitScope just passed, so all dirty
+			// paths are in-scope. Commit them all so the parent tree
+			// stays clean for the next hat's subagent dispatch.
+			const advGit = gitCommitAll(
 				`haiku: advance hat to ${nextHat} on ${args.unit as string}`,
 			)
 			syncSessionMetadata(

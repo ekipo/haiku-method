@@ -1426,13 +1426,60 @@ export default defineTool({
 			// Field translation:
 			//   - gate_review (legacy): pre-computed fields present
 			//   - user_gate (v4): map gate_kind → gate_review_context;
-			//     gate_type is implicit "ask" (local SPA review);
-			//     next_stage/next_phase aren't supplied because the
-			//     await tool's stampGateApproval handles advancement off
-			//     the gate_review_context alone for per-unit reviews.
+			//     gate_type is implicit "ask" (local SPA review).
+			//
+			// next_stage handling for user_gate (#357 fix, 2026-05-13):
+			//
+			// Pre-fix: nextStage was unconditionally null for user_gate.
+			// The comment claimed `await_gate` derived advancement from
+			// `gate_review_context` alone. That worked for per-unit
+			// review approvals (where the agent stamps `approvals.user`
+			// on units, not the stage) but it was wrong for stage-gate
+			// approvals on a non-final stage. The await_gate "approved"
+			// branch routes:
+			//   1. gateContext === "intent_completion" → complete intent
+			//   2. gateContext === "intent_review"     → advance phase
+			//   3. gateContext === "elaborate_to_execute" → spec gate
+			//   4. nextStage truthy                     → advance_stage
+			//   5. else                                  → completeOrReviewIntent
+			// When nextStage was null, a stage-gate approval on a
+			// non-final stage fell into (5), which called
+			// `completeOrReviewIntent` → `findIncompleteStages` →
+			// returned "Cannot complete intent" because later stages
+			// (design/product/etc) had not run yet. The SPA's cached
+			// `approved` decision then replayed on every tick → loop.
+			//
+			// Fix: when gate_kind === "approval" AND stage is non-final,
+			// compute nextStage from the studio's stage list so the FM
+			// stamp routes the await_gate to branch (4) cleanly. Final
+			// stage stays nextStage=null so branch (5) fires for the
+			// real completion path.
 			const isUserGate = result.action === "user_gate"
 			const gateKind = isUserGate ? (result.gate_kind as string) : ""
-			const nextStage = isUserGate ? null : (result.next_stage as string | null)
+			let nextStage: string | null = isUserGate
+				? null
+				: ((result.next_stage as string | null) ?? null)
+			if (isUserGate && gateKind === "approval" && stage) {
+				try {
+					const { resolveStudioStages } = await import(
+						"../../orchestrator/studio.js"
+					)
+					const intentFile = join(findHaikuRoot(), "intents", slug, "intent.md")
+					const intentFm = existsSync(intentFile)
+						? parseFrontmatter(readFileSync(intentFile, "utf8")).data
+						: {}
+					const studioName = (intentFm.studio as string) || ""
+					if (studioName) {
+						const stages = resolveStudioStages(studioName) ?? []
+						const idx = stages.indexOf(stage)
+						if (idx >= 0 && idx < stages.length - 1) {
+							nextStage = stages[idx + 1]
+						}
+					}
+				} catch {
+					/* fall back to null — final-stage path still works */
+				}
+			}
 			const nextPhase = isUserGate ? null : (result.next_phase as string | null)
 			const gateContext = isUserGate
 				? gateKind === "spec"
@@ -1551,11 +1598,24 @@ export default defineTool({
 				if (!prepared.browser_attached) {
 					launchBrowserBestEffort(prepared.review_url, "Gate review")
 					const deadline = Date.now() + BROWSER_ATTACH_GRACE_MS
+					// Respect AbortSignal during the poll — if the MCP call
+					// is cancelled (user Ctrl-C, client reconnect, host
+					// timeout), exit the wait immediately rather than
+					// draining the full grace window. Without this, abort
+					// could land up to ~8s after the user requested it.
+					// Reported on PR #352 review.
 					while (
 						Date.now() < deadline &&
-						!isBrowserAttached(prepared.session_id)
+						!isBrowserAttached(prepared.session_id) &&
+						!signal?.aborted
 					) {
 						await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+					}
+					// If the wait was cut short by abort, propagate via
+					// the same path the inline await would have taken
+					// instead of emitting the URL fallback.
+					if (signal?.aborted) {
+						throw new Error("aborted")
 					}
 					if (!isBrowserAttached(prepared.session_id)) {
 						// No SPA heartbeat within the grace window. Either the
@@ -1632,6 +1692,11 @@ export default defineTool({
 					"advance_phase",
 					"advance_stage",
 					"intent_approved",
+					// V4 alignment (2026-05-13): generic "advance" =
+					// SPA's neutral signal back to the MCP. Just
+					// re-tick; the cursor reads disk state and emits
+					// whatever's natural-next.
+					"advance",
 				])
 				if (awaitedAction && RETICK_ACTIONS.has(awaitedAction)) {
 					// pre-tick merge + cursor walk handle branch alignment
@@ -1643,15 +1708,38 @@ export default defineTool({
 				const errorMsg = err instanceof Error ? err.message : String(err)
 				const errorStack = err instanceof Error ? err.stack : ""
 
-				console.error(`[haiku] gate_review prepare failed: ${errorMsg}`)
-				reportError(err, { intent: slug, stage })
+				// The try block covers prepare + browser launch + inline
+				// await, so distinguish the failure phase in the surface
+				// message. "Lost presence" comes from awaitGateReviewSession
+				// when the SPA tab disconnects mid-await; "aborted" is the
+				// AbortSignal-cut short of the attach poll above; anything
+				// else is treated as a prepare-phase failure. Reported on
+				// PR #352 review — agents were seeing "GATE PREPARE FAILED"
+				// for what was really an await-phase disconnect.
+				const isAwaitDisconnect = errorMsg.includes("lost presence")
+				const isAborted = errorMsg === "aborted" || signal?.aborted
+				// Single ordering source. Abort wins over disconnect (a
+				// cancelled MCP call should always read as cancelled even
+				// if the SPA tab also went away). Used by BOTH the log
+				// line and the response-routing if-chain below so they
+				// can't drift. Reported on PR #355 review — prior version
+				// had log saying `phase: await` while response said
+				// `GATE ABORTED`.
+				const failurePhase = isAborted
+					? "abort"
+					: isAwaitDisconnect
+						? "await"
+						: "prepare"
+
+				console.error(`[haiku] gate_review ${failurePhase} failed: ${errorMsg}`)
+				if (!isAborted) reportError(err, { intent: slug, stage })
 
 				try {
 					const logDir = join(process.cwd(), ".haiku", "logs")
 					mkdirSync(logDir, { recursive: true })
 					writeFileSync(
 						join(logDir, "gate-review-error.log"),
-						`${new Date().toISOString()}\nintent: ${slug}\nstage: ${stage}\nphase: prepare\nerror: ${errorMsg}\n${errorStack}\n---\n`,
+						`${new Date().toISOString()}\nintent: ${slug}\nstage: ${stage}\nphase: ${failurePhase}\nerror: ${errorMsg}\n${errorStack}\n---\n`,
 						{ flag: "a" },
 					)
 				} catch {
@@ -1659,6 +1747,30 @@ export default defineTool({
 				}
 
 				syncSessionMetadata(slug, args.state_file as string | undefined)
+				// Route off `failurePhase` (computed above) so the log
+				// line and the response label are always the same phase.
+				if (failurePhase === "abort") {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `GATE ABORTED: the tool call was cancelled while waiting for the browser. Call haiku_run_next { intent: "${slug}" } to retry.`,
+							},
+						],
+						isError: true,
+					}
+				}
+				if (failurePhase === "await") {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `GATE DISCONNECTED: ${errorMsg}`,
+							},
+						],
+						isError: true,
+					}
+				}
 				return {
 					content: [
 						{

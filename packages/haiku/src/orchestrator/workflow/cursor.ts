@@ -51,7 +51,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { basename, join } from "node:path"
 import matter from "gray-matter"
-import { primaryRepoRoot } from "../../state-tools.js"
+import { findHaikuRoot } from "../../state-tools.js"
 import {
 	readReviewAgentPaths,
 	readStageArtifactDefs,
@@ -150,9 +150,9 @@ export type CursorAction =
 			units: string[]
 	  }
 	| { kind: "close_feedback"; stage: string; feedback_id: string }
-	| { kind: "merge_stage"; stage: string }
+	| { kind: "complete_stage"; stage: string }
 	| { kind: "intent_review"; role: string }
-	| { kind: "merge_intent" }
+	| { kind: "seal_intent" }
 	| { kind: "sealed" }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -174,7 +174,14 @@ type Iteration = {
 	reason?: string | null
 }
 
-type ApprovalRecord = { at: string; migrated?: boolean } | null
+// Approval slot shapes the cursor accepts as "stamped":
+//   - object `{ at, migrated? }` — production write from a hat advance or
+//     a synthesized backfill stamp (the canonical shape).
+//   - bare `true` — post-migration backfill (`backfillCompletedUnitStamps`
+//     writes plain booleans on v3-shaped units). `isUnitFullyApproved`
+//     keys off truthy presence; the SHAPE of the stamp is not the signal.
+//   - null — no stamp.
+type ApprovalRecord = { at: string; migrated?: boolean } | boolean | null
 
 function readFm(path: string): { data: UnitFm; body: string } | null {
 	if (!existsSync(path)) return null
@@ -346,14 +353,18 @@ function hasStarted(fm: UnitFm): boolean {
 function isUnitFullyApproved(fm: UnitFm, approvalRoles: string[]): boolean {
 	const approvals = pickApprovals(fm)
 	for (const role of approvalRoles) {
-		const record = approvals[role]
-		if (
-			!record ||
-			typeof record !== "object" ||
-			typeof (record as { at?: unknown }).at !== "string"
-		) {
-			return false
-		}
+		// Truthy presence is the signal — same shape that walkIntentTrack
+		// step 9's `!approvals[role]` check accepts. The two sides MUST
+		// agree on what counts as "approved" or `findCurrentStage` pins
+		// on a stage that walkIntentTrack thinks is already past, and
+		// the cursor loops on merge_stage. Production stamps are
+		// `{at: <timestamp>, ...}` (object with `.at`); post-migration
+		// backfill stamps can be bare booleans or `{}`. All three shapes
+		// are truthy — we accept all three. The filesystem (FM) is the
+		// signal; the SHAPE of the stamp is not. Reported 2026-05-12 on
+		// admin-portal-reimagine: pre-fix `.at`-strict check disagreed
+		// with step 9's truthy check, producing the merge_stage loop.
+		if (!approvals[role]) return false
 	}
 	return true
 }
@@ -497,12 +508,26 @@ export function isStageComplete(
  * handled by Track B and Track C in `derivePosition`, which preempt
  * Track A. A previously-signed stage with an open FB still gets
  * rewound through that path. See gigsmart/haiku-method#333.
+ *
+ * **Path resolution**: callers should pass `intentDir` (the same value
+ * the rest of the engine uses, resolved via `findHaikuRoot()`). When
+ * omitted, the fallback walks up from `process.cwd()` via
+ * `findHaikuRoot()`. The function used to re-resolve via
+ * `primaryRepoRoot()`, which returns the *primary* worktree path even
+ * inside a linked worktree where `.haiku/` lives in the linked tree.
+ * In that setup the re-resolved path didn't exist, every per-stage
+ * `isStageComplete` answered "false", and the walk pinned on the first
+ * stage forever — see admin-portal-reimagine merge_stage loop
+ * (2026-05-12).
  */
-export function findCurrentStage(slug: string, studio: string): string | null {
-	const root = primaryRepoRoot()
-	const intentDir = join(root, ".haiku", "intents", slug)
+export function findCurrentStage(
+	slug: string,
+	studio: string,
+	intentDir?: string,
+): string | null {
+	const resolvedIntentDir = intentDir ?? join(findHaikuRoot(), "intents", slug)
 
-	const intentMdPath = join(intentDir, "intent.md")
+	const intentMdPath = join(resolvedIntentDir, "intent.md")
 	const intentFm = readFm(intentMdPath)?.data ?? {}
 	// Use the intent's effective stage list — intersection of studio
 	// stages with `intent.stages` (if set) minus `intent.skip_stages`.
@@ -517,7 +542,7 @@ export function findCurrentStage(slug: string, studio: string): string | null {
 			? (intentFm.mode as string)
 			: "continuous"
 	for (const stage of stages) {
-		if (!isStageComplete(intentDir, studio, stage, mode)) return stage
+		if (!isStageComplete(resolvedIntentDir, studio, stage, mode)) return stage
 	}
 	return null
 }
@@ -946,8 +971,15 @@ function walkIntentTrack(args: {
 		return { kind: "dispatch_approval", stage, role, units: missing }
 	}
 
-	// 8. Every approval signed. Merge stage branch into intent main.
-	return { kind: "merge_stage", stage }
+	// 8. Every approval signed. Emit `complete_stage` — a SEMANTIC
+	//    action ("this stage is done"), NOT a VCS verb. The underlying
+	//    implementation under a git-backed portfolio happens to merge
+	//    the stage branch into intent main, but the action's name
+	//    doesn't reflect that — the engine handles git as an
+	//    implementation detail. Filesystem-only backings perform
+	//    whatever "complete" means there (stamp `completed_at`, move
+	//    artifacts, etc.) without touching git.
+	return { kind: "complete_stage", stage }
 }
 
 // ── Top-level derivePosition ─────────────────────────────────────────
@@ -1028,7 +1060,7 @@ export function derivePosition(args: {
 				firstStageDir && existsSync(firstStageDir)
 					? listUnitPaths(firstStageDir).length > 0
 					: false
-			const activeForGate = findCurrentStage(slug, studio)
+			const activeForGate = findCurrentStage(slug, studio, intentDir)
 			const isTrulyFresh = activeForGate === firstStage && !firstStageHasUnits
 			if (isTrulyFresh) {
 				return {
@@ -1044,7 +1076,7 @@ export function derivePosition(args: {
 	// current branch and aligned the working tree to the cursor's named
 	// stage (see haiku_run_next's pre-tick branch alignment). The walk
 	// here just reads the disk view we were given.
-	const activeStage = findCurrentStage(slug, studio)
+	const activeStage = findCurrentStage(slug, studio, intentDir)
 
 	// Track C — drift sweep, only against the active stage.
 	if (activeStage) {
@@ -1135,7 +1167,7 @@ export function derivePosition(args: {
 		if (intentResult.data.sealed_at == null) {
 			return {
 				track: "intent",
-				action: { kind: "merge_intent" },
+				action: { kind: "seal_intent" },
 			}
 		}
 	}

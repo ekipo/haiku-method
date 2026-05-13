@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-05-13
+
+### Added
+- New `haiku_await_gate` tool for blocking intent progression while waiting for external reviews or customer response
+
+### Changed
+- `/haiku:reset` skill split into `/haiku:reset-stage` (for single stages) and `/haiku:reset-intent` (for full intents)
+- Review UI now visually distinguishes user-authored feedback from agent-authored findings
+- Stage transitions now invalidate downstream approvals when revisiting earlier stages, preventing stale blocks
+
+### Fixed
+- Stage reset now properly clears all gate markers and approval state
+- Improved cursor position tracking during hat progression and v3-to-v4 intent migrations
+
 ## [4.5.6] - 2026-05-13
 
 ### Fixed

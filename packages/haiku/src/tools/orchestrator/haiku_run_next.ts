@@ -1480,7 +1480,32 @@ export default defineTool({
 					/* fall back to null — final-stage path still works */
 				}
 			}
-			const nextPhase = isUserGate ? null : (result.next_phase as string | null)
+			// next_phase handling for user_gate (sibling of the #357
+			// approval fix; reported on `admin-portal-reimagine` 2026-05-13).
+			//
+			// `gate_kind: "spec"` is the elaborate→execute gate. When the
+			// SPA approves it, await_gate's "approved" branch checks (3):
+			// `gateContext === "elaborate_to_execute" && nextPhase`. With
+			// `nextPhase` unconditionally null for user_gate, that
+			// check failed → fell through to (5) → completeOrReviewIntent
+			// → "Cannot complete intent: N stages not completed." Same
+			// shape as the approval bug, different routing branch.
+			//
+			// Fix: when gate_kind === "spec", write
+			// `gate_review_next_phase: "execute"` so await_gate routes
+			// to advance_phase via branch (3). Non-spec gates keep
+			// nextPhase = null (their advancement runs through the
+			// nextStage path or the legacy gate_review pre-computed
+			// field).
+			let nextPhase: string | null = isUserGate
+				? null
+				: ((result.next_phase as string | null) ?? null)
+			if (isUserGate && gateKind === "spec") {
+				// Spec gates always transition elaborate → execute. The
+				// cursor doesn't emit alternate phases for this gate
+				// kind today.
+				nextPhase = "execute"
+			}
 			const gateContext = isUserGate
 				? gateKind === "spec"
 					? "elaborate_to_execute"
@@ -1593,7 +1618,19 @@ export default defineTool({
 				// engine inlines the wait; the URL+await-gate two-step
 				// is the fallback when we can't open a browser or no
 				// signal arrives in time."
-				const BROWSER_ATTACH_GRACE_MS = 8_000
+				//
+				// Grace defaults to 60s — that's the realistic budget
+				// for a user to switch windows, click open, and let the
+				// tab finish loading. Previously 8s, which fired
+				// fallback before the user could open the tab on a
+				// busy laptop or remote desktop (reported 2026-05-13 on
+				// `admin-portal-reimagine` design spec gate). Tests
+				// override via `HAIKU_GATE_ATTACH_GRACE_MS` to keep
+				// suites fast.
+				const BROWSER_ATTACH_GRACE_MS = (() => {
+					const env = Number(process.env.HAIKU_GATE_ATTACH_GRACE_MS)
+					return Number.isFinite(env) && env > 0 ? env : 60_000
+				})()
 				const POLL_INTERVAL_MS = 250
 				if (!prepared.browser_attached) {
 					launchBrowserBestEffort(prepared.review_url, "Gate review")

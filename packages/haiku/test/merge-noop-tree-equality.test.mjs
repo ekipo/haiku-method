@@ -255,6 +255,158 @@ iterations: []
 	}
 })
 
+// 2026-05-12 sibling bug: trees differ AND the merge is still a no-op
+// because the stage is already an ancestor of intent main.
+//
+// Topology: intent main has accreted commits from elsewhere (e.g., a
+// downstream `dev` sync merged into intent main). Intent main now
+// contains everything the stage has PLUS additional content from the
+// downstream sync. Trees differ (intent main is a strict superset),
+// but `git merge inception` against intent main reports "Already up
+// to date" — there is no merge debt. PR #347's tree-equality
+// short-circuit caught the prior shape but not this one; the cursor
+// kept emitting `merge_stage(inception)` and the loop guard fired
+// after 2 iterations.
+//
+// Fix: `hasNoMergeDebt` also checks `git merge-base --is-ancestor
+// stageBranch intentMain`. Either signal kills the no-op merge loop.
+function setupRepoWithAncestorOfMainShape() {
+	const repo = mkdtempSync(join(tmpdir(), "haiku-ancestor-merge-"))
+	git(repo, "init", "-q")
+	git(repo, "config", "user.email", "test@haiku.test")
+	git(repo, "config", "user.name", "test")
+
+	const slug = "ancestor-of-main"
+	const intentDir = join(repo, ".haiku/intents", slug)
+	mkdirSync(join(intentDir, "stages/inception/units"), { recursive: true })
+	writeFileSync(join(intentDir, "intent.md"), "---\ntitle: x\n---\nbody\n")
+	writeFileSync(
+		join(intentDir, "stages/inception/units/unit-01.md"),
+		"---\ntitle: u1\n---\n",
+	)
+	git(repo, "add", "-A")
+	git(repo, "commit", "-qm", "seed")
+	git(repo, "checkout", "-qb", `haiku/${slug}/main`)
+	// Fork inception from the seed commit. Inception holds the
+	// original tree; main will diverge ahead via new content.
+	git(repo, "checkout", "-qb", `haiku/${slug}/inception`)
+	git(repo, "checkout", "-q", `haiku/${slug}/main`)
+	// Accrete real content on main from "elsewhere" (simulating a
+	// mainline → intent-main downstream sync). Inception is now a
+	// proper ancestor of main; trees differ because main has new
+	// blobs inception doesn't.
+	writeFileSync(
+		join(repo, "downstream-sync.md"),
+		"content from downstream dev sync\n",
+	)
+	git(repo, "add", "-A")
+	git(repo, "commit", "-qm", "haiku: merge dev → intent main (downstream sync)")
+	writeFileSync(
+		join(repo, "downstream-sync.md"),
+		"content from downstream dev sync, second commit\n",
+	)
+	git(repo, "add", "-A")
+	git(repo, "commit", "-qm", "haiku: another downstream commit on intent main")
+
+	// Sanity: trees DIFFER, inception is ancestor of main, no merge debt.
+	const tA = git(repo, "rev-parse", `haiku/${slug}/main^{tree}`)
+	const tB = git(repo, "rev-parse", `haiku/${slug}/inception^{tree}`)
+	assert.notStrictEqual(tA, tB, "fixture setup: trees must differ")
+	const inceptionBehindMain = git(
+		repo,
+		"rev-list",
+		"--count",
+		`haiku/${slug}/inception..haiku/${slug}/main`,
+	)
+	assert.notStrictEqual(
+		inceptionBehindMain,
+		"0",
+		"fixture setup: main must have commits inception doesn't",
+	)
+	const mainBehindInception = git(
+		repo,
+		"rev-list",
+		"--count",
+		`haiku/${slug}/main..haiku/${slug}/inception`,
+	)
+	assert.strictEqual(
+		mainBehindInception,
+		"0",
+		"fixture setup: inception must have NOTHING main doesn't (ancestor topology)",
+	)
+	return { repo, slug }
+}
+
+test("mergeStageBranchIntoMain: stage is ancestor of main → returns noop, no new commit minted", async (t) => {
+	if (!HAS_GIT) {
+		t.skip("no git in environment")
+		return
+	}
+	const { repo, slug } = setupRepoWithAncestorOfMainShape()
+	const origCwd = process.cwd()
+	try {
+		process.chdir(repo)
+		const { mergeStageBranchIntoMain } = await import("../src/git-worktree.ts")
+		const before = git(repo, "rev-parse", `haiku/${slug}/main`)
+		const result = mergeStageBranchIntoMain(slug, "inception")
+		const after = git(repo, "rev-parse", `haiku/${slug}/main`)
+		assert.strictEqual(result.success, true)
+		assert.strictEqual(
+			result.noop,
+			true,
+			"stage-is-ancestor-of-main must return noop=true — without this guard, the cursor loops on merge_stage forever (admin-portal-reimagine 2026-05-12)",
+		)
+		assert.strictEqual(
+			before,
+			after,
+			"no commit must be minted when the stage is already an ancestor of main — the merge_stage handler must short-circuit before the --no-ff merge runs",
+		)
+	} finally {
+		process.chdir(origCwd)
+		rmSync(repo, { recursive: true, force: true })
+	}
+})
+
+test("isAncestor: detects ancestor relationship from exit code, not stdout", async (t) => {
+	if (!HAS_GIT) {
+		t.skip("no git in environment")
+		return
+	}
+	const { repo, slug } = setupRepoWithAncestorOfMainShape()
+	const origCwd = process.cwd()
+	try {
+		process.chdir(repo)
+		const { isAncestor, hasNoMergeDebt, refsHaveIdenticalTrees } = await import(
+			"../src/git-worktree.ts"
+		)
+		const inception = `haiku/${slug}/inception`
+		const intentMain = `haiku/${slug}/main`
+		assert.strictEqual(
+			isAncestor(inception, intentMain),
+			true,
+			"inception must be detected as ancestor of intent main",
+		)
+		assert.strictEqual(
+			isAncestor(intentMain, inception),
+			false,
+			"intent main is NOT an ancestor of inception (main has accreted commits)",
+		)
+		assert.strictEqual(
+			refsHaveIdenticalTrees(inception, intentMain),
+			false,
+			"trees differ in this topology — the pre-2026-05-12 short-circuit would have missed this case",
+		)
+		assert.strictEqual(
+			hasNoMergeDebt(inception, intentMain),
+			true,
+			"hasNoMergeDebt must return true when stage is ancestor of main, even though trees differ",
+		)
+	} finally {
+		process.chdir(origCwd)
+		rmSync(repo, { recursive: true, force: true })
+	}
+})
+
 test("mergeStageBranchIntoMain: trees DIFFER → merge proceeds normally", async (t) => {
 	if (!HAS_GIT) {
 		t.skip("no git in environment")

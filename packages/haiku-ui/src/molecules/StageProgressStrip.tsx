@@ -146,11 +146,7 @@ export function StageProgressStrip({
 								data-viewing={isViewing ? "true" : undefined}
 								disabled={!(isClickable || isCurrent)}
 								onClick={() => isClickable && onStageClick?.(stage.name)}
-								/* `title` retained for backward-compat + as a plain-text
-								 * fallback when the styled hover card is suppressed
-								 * (reduced-motion preferences, headless tooling). The
-								 * styled card is the primary affordance. */
-								title={`${stage.name} (${stage.status})${isViewingDifferent ? " — viewing" : ""}`}
+								// Intentionally no `title=`: it double-rendered with the styled hover card and the strings disagreed.
 								aria-label={
 									isViewingDifferent
 										? `${ariaLabel}, currently viewing`

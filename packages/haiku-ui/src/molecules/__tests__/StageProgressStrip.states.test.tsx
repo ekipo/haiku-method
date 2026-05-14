@@ -10,10 +10,33 @@
  * rendered button — not by snapshot-equality of arrangement variants.
  */
 
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { StageProgressStrip } from "../StageProgressStrip"
+
+/**
+ * Pre-2026-05-13 these tests queried by `getByTitle("inception (completed)")`
+ * etc. The `title` attribute was removed from the marker button because it
+ * caused the native OS tooltip to render simultaneously with the styled
+ * hover card, with contradictory text (the styled card uses topology-derived
+ * state copy while the native title was raw `stage.status`). All queries
+ * now read the marker via its `data-stage` attribute (the same attribute
+ * the click-target / e2e tooling reads).
+ */
+function byStage(name: string): HTMLButtonElement {
+	const el = document.querySelector(`button[data-stage="${name}"]`)
+	if (!el) throw new Error(`No marker with data-stage="${name}"`)
+	return el as HTMLButtonElement
+}
+
+/** Non-throwing variant for "marker may not be rendered" probes (e.g.
+ *  iterating an enum where some entries are intentionally omitted). */
+function byStageOrNull(name: string): HTMLButtonElement | null {
+	return document.querySelector<HTMLButtonElement>(
+		`button[data-stage="${name}"]`,
+	)
+}
 
 afterEach(() => {
 	cleanup()
@@ -99,7 +122,7 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={() => {}}
 			/>,
 		)
-		const completedDot = screen.getByTitle("inception (completed)")
+		const completedDot = byStage("inception")
 		// The class that drives :hover styling must be present.
 		expect(completedDot.className).toMatch(/hover:scale-\[?/)
 	})
@@ -114,7 +137,7 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={() => {}}
 			/>,
 		)
-		const clickableFuture = screen.getByTitle("development (future)")
+		const clickableFuture = byStage("development")
 		expect(clickableFuture.className).toContain("hover:border-teal-400")
 	})
 
@@ -126,14 +149,14 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={() => {}}
 			/>,
 		)
-		for (const title of [
-			"inception (completed)",
-			"design (completed)",
-			"product (current)",
-			"development (future)",
-			"review (future)",
+		for (const name of [
+			"inception",
+			"design",
+			"product",
+			"development",
+			"review",
 		]) {
-			const dot = screen.getByTitle(title)
+			const dot = byStage(name)
 			expect(dot.className).toContain("focus-visible:outline-none")
 			expect(dot.className).toContain("focus-visible:ring-2")
 			expect(dot.className).toContain("focus-visible:ring-teal-500")
@@ -149,7 +172,7 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={() => {}}
 			/>,
 		)
-		const dot = screen.getByTitle("inception (completed)")
+		const dot = byStage("inception")
 		dot.focus()
 		expect(document.activeElement).toBe(dot)
 	})
@@ -164,7 +187,7 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={onStageClick}
 			/>,
 		)
-		await user.click(screen.getByTitle("inception (completed)"))
+		await user.click(byStage("inception"))
 		expect(onStageClick).toHaveBeenCalledWith("inception")
 	})
 
@@ -178,9 +201,7 @@ describe("StageProgressStrip — state matrix", () => {
 				currentStage="inception"
 			/>,
 		)
-		const disabledDot = screen.getByTitle(
-			"design (future)",
-		) as HTMLButtonElement
+		const disabledDot = byStage("design")
 		expect(disabledDot.disabled).toBe(true)
 		expect(disabledDot.className).toContain("cursor-not-allowed")
 	})
@@ -198,7 +219,7 @@ describe("StageProgressStrip — state matrix", () => {
 				onStageClick={onStageClick}
 			/>,
 		)
-		await user.click(screen.getByTitle("design (future)"))
+		await user.click(byStage("design"))
 		expect(onStageClick).not.toHaveBeenCalled()
 	})
 
@@ -218,7 +239,7 @@ describe("StageProgressStrip — state matrix", () => {
 				viewingStage="inception"
 			/>,
 		)
-		const viewed = screen.getByTitle("inception (completed) — viewing")
+		const viewed = byStage("inception")
 		expect(viewed.getAttribute("aria-current")).toBe("location")
 		expect(viewed.getAttribute("aria-label")).toMatch(/currently viewing/)
 		expect(viewed.getAttribute("data-viewing")).toBe("true")
@@ -240,7 +261,7 @@ describe("StageProgressStrip — state matrix", () => {
 				viewingStage="inception"
 			/>,
 		)
-		const fsmCurrent = screen.getByTitle("product (current)")
+		const fsmCurrent = byStage("product")
 		expect(fsmCurrent.getAttribute("aria-current")).toBe("step")
 	})
 
@@ -252,11 +273,11 @@ describe("StageProgressStrip — state matrix", () => {
 				viewingStage="product"
 			/>,
 		)
-		const fsmCurrent = screen.getByTitle("product (current)")
+		const fsmCurrent = byStage("product")
 		expect(fsmCurrent.getAttribute("aria-current")).toBe("step")
 		// No stage should report aria-current="location" when viewing == current
 		for (const s of STAGES) {
-			const btn = screen.queryByTitle(`${s.name} (${s.status})`)
+			const btn = byStageOrNull(s.name)
 			if (btn && btn !== fsmCurrent) {
 				expect(btn.getAttribute("aria-current")).toBeNull()
 			}
@@ -273,7 +294,7 @@ describe("StageProgressStrip — state matrix", () => {
 				viewingStage="development"
 			/>,
 		)
-		const viewed = screen.getByTitle("development (future) — viewing")
+		const viewed = byStage("development")
 		expect(viewed.getAttribute("aria-current")).toBe("location")
 		const marker = viewed.querySelector('[aria-hidden="true"].rounded-full')
 		expect(marker?.className).toMatch(/ring-4/)
@@ -296,7 +317,7 @@ describe("StageProgressStrip — state matrix", () => {
 				currentStage="design"
 			/>,
 		)
-		const designButton = screen.getByTitle("design (current)")
+		const designButton = byStage("design")
 		// The hover card lives inside the button as a role=tooltip span
 		// so SR users get the same content via aria-describedby's
 		// implicit fallthrough. We assert on the rendered text.
@@ -315,7 +336,7 @@ describe("StageProgressStrip — state matrix", () => {
 				currentStage="design"
 			/>,
 		)
-		const inceptionButton = screen.getByTitle("inception (completed)")
+		const inceptionButton = byStage("inception")
 		expect(inceptionButton.textContent).not.toMatch(/phase$/i)
 		// Status sub-line still reads "completed".
 		expect(inceptionButton.textContent).toMatch(/completed/i)
@@ -336,7 +357,7 @@ describe("StageProgressStrip — state matrix", () => {
 				currentStage="design"
 			/>,
 		)
-		const inceptionButton = screen.getByTitle("inception (completed)")
+		const inceptionButton = byStage("inception")
 		expect(inceptionButton.textContent).toMatch(/3 pending feedback/i)
 	})
 })

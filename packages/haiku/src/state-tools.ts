@@ -42,6 +42,13 @@ import { sanitizeFeedbackBody } from "./state/sanitize-feedback.js"
 // the same module that registers the human-write tool.
 export { safeMkdirAndRename } from "./state/safe-write.js"
 
+// Imported AFTER the other modules above so that `feedback-close-hook`
+// — which depends on `dispatch-stamps` and `sign-slot` (both of which
+// pull from this file) — sees `state-tools`'s exports already
+// initialized at import-resolution time. Lazy-loading via a side-
+// effect-free import is fine because the hook only runs from a tool
+// handler, never during module init.
+import { closeFeedbackPostHook } from "./feedback-close-hook.js"
 // workflow-fields module retained for state-integrity sealing; no direct imports
 // needed here since the completion-only guard is narrow to status/completed.
 import {
@@ -8386,6 +8393,61 @@ export function handleStateTool(
 				}
 			}
 			const outputsPresent = presentOutputs.length > 0
+
+			// Bug 1 from 2026-05-14 report: a design-reviewer subagent
+			// running in an isolated git worktree that wasn't seeded
+			// with the unit's stage branch saw an empty filesystem and
+			// rejected the unit with "artifacts missing on disk" even
+			// though every declared output existed on the stage branch.
+			// The host re-spawned the reviewer 5 times; each iteration
+			// hallucinated the same absence; the bolt cap fired; the
+			// unit got stuck.
+			//
+			// Filesystem is the source of truth: if every declared
+			// output exists on disk (intent dir, unit worktree, or repo
+			// root — `unitOutputExists` walks all three) AND the reject
+			// reason claims the files are missing, refuse the reject.
+			// The reviewer is wrong about a verifiable fact; we don't
+			// promote that mistake into iterations history.
+			//
+			// Strict gate: only reject reasons that explicitly invoke
+			// absence ("missing", "no artifacts", "empty", "not
+			// produced", "no files", "no output") trigger this refusal.
+			// Content-quality rejects ("the prose is shallow", "the
+			// design doesn't address Q13") pass through untouched —
+			// those are legitimate reviewer judgments the doer needs to
+			// hear.
+			const reasonImpliesMissing = rejectReasonRaw
+				? /\b(missing|no\s+artifacts?|empty|no\s+files?|not\s+produced|no\s+output)\b/.test(
+						rejectReasonRaw.toLowerCase(),
+					)
+				: false
+			if (
+				declaredOutputs.length > 0 &&
+				missingOutputsList.length === 0 &&
+				reasonImpliesMissing
+			) {
+				return reply(
+					{
+						error: "reject_contradicts_filesystem",
+						unit: args.unit,
+						reason: rejectReasonRaw,
+						declared_outputs: declaredOutputs,
+						files_present: presentOutputs,
+						message:
+							"Reject refused: every declared output for this unit exists on " +
+							"disk, but the reject reason claims they are missing. The " +
+							"reviewer's filesystem view is stale (likely running in an " +
+							"isolated git worktree that wasn't seeded with the unit's " +
+							"stage branch). Re-dispatch the reviewer from a worktree that " +
+							"sees the stage branch state, or — if the reviewer's real " +
+							"concern is content quality, not file presence — re-issue the " +
+							"reject with a reason that describes the substantive problem. " +
+							"No iteration was recorded; the bolt count is unchanged.",
+					},
+					{ isError: true },
+				)
+			}
 			// Tag selection — see issue #24:
 			//   - reason mentions missing/empty AND files exist → reviewer
 			//     is wrong about absence; flag the contradiction loudly.
@@ -9444,7 +9506,7 @@ export function handleStateTool(
 			// caller routes through the proper workflow tool.
 			return errOut(
 				"stage_field_engine_only",
-				`Stage state.json is workflow engine-managed — agents cannot set fields directly. Stage fields are mutated by haiku_run_next ticks (start, advance phase, complete) and lifecycle tools (haiku_unit_advance_hat, haiku_feedback_advance_hat). To force a stage transition manually, use /haiku:repair or /haiku:revisit. Field '${field}' on stage '${stage}' of intent '${slug}' was not written.`,
+				`Stage state.json is workflow engine-managed — agents cannot set fields directly. Stage fields are mutated by haiku_run_next ticks (start, advance phase, complete) and lifecycle tools (haiku_unit_advance_hat, haiku_feedback_advance_hat). To force a stage transition manually, use /haiku:repair, or file a stage_revisit feedback via \`haiku_feedback({ resolution: "stage_revisit" })\` to re-open the target stage. Field '${field}' on stage '${stage}' of intent '${slug}' was not written.`,
 			)
 		}
 
@@ -11396,6 +11458,25 @@ export function handleStateTool(
 						error: String((err as Error)?.message ?? err),
 					})
 				}
+
+				// Apply `targets.invalidates` — delete the named review /
+				// approval roles from the targeted unit's FM so the cursor
+				// re-routes the gate. Mirrors the close_feedback handler
+				// in run_next.ts; without this hook the closure leaves
+				// the witnessed approval slot alive and the drift sweep
+				// keeps re-firing on the same SHA mismatch forever
+				// (reported 2026-05-14 on admin-portal-reimagine design).
+				//
+				// For drift-origin FBs, also REBUILD the surviving slots
+				// with fresh witnesses against the current on-disk content
+				// so the next drift sweep tick compares against today's
+				// SHAs, not the pre-drift ones.
+				closeFeedbackPostHook({
+					slug: intentArg,
+					stage: stageArg ?? undefined,
+					feedbackId,
+					fbFm: advFm,
+				})
 			}
 
 			emitTelemetry(

@@ -110,6 +110,9 @@ export type ModalKind =
 	| { kind: "intentCreation" }
 	| { kind: "cursorTracks" }
 	| { kind: "tickSemantics" }
+	| { kind: "discoveryQuestionRouting" }
+	| { kind: "verifyDecomposeFlow" }
+	| { kind: "fbAsUnitFixLoop" }
 
 export interface PayloadModalData {
 	stage: string

@@ -19,6 +19,7 @@ export {
 export type { HttpMethod, RouteSpec } from "./routes.js"
 // Route table + path builders
 export { paths, routeBodyLimit, routes, routesWithSchemas } from "./routes.js"
+export * from "./schemas/advance.js"
 // Schema barrel exports
 export * from "./schemas/auth.js"
 export * from "./schemas/common.js"
@@ -27,7 +28,6 @@ export * from "./schemas/feedback.js"
 export * from "./schemas/files.js"
 export * from "./schemas/question.js"
 export * from "./schemas/review.js"
-export * from "./schemas/revisit.js"
 export * from "./schemas/session.js"
 export * from "./schemas/websocket.js"
 

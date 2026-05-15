@@ -443,15 +443,28 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 
 					<div className="phase" data-phase="elaborate">
 						<h3>
-							Elaborate
+							Elaborate Loop{" "}
+							<span
+								style={{
+									textTransform: "none",
+									letterSpacing: 0,
+									color: "#7c3aed",
+									fontSize: "0.6em",
+									fontWeight: 600,
+								}}
+								title="GAPS § 1a → Option A (2026-05-14): the cursor emits a single elaborate_loop action whose signals_unmet[] enumerates every unmet completion signal — conversation / verify_conversation / discovery / decompose / verify_decompose. The agent may make progress on any subset in one tick; the loop self-cycles until every signal flips and the cursor falls through to execute."
+							>
+								· single cursor state · multi-signal payload
+							</span>
 							<button
 								type="button"
 								className="revisit-chip"
 								onClick={() =>
 									setModal({ kind: "revisit", stageKey: lower, stageIdx: idx })
 								}
+								title="Stage revisit — file `haiku_feedback({ resolution: 'stage_revisit' })` and call `haiku_run_next`. Track B's by-file-location routing reroutes through the target stage."
 							>
-								↺ /haiku:revisit
+								↺ stage revisit
 							</button>
 						</h3>
 						{mStage !== "auto" ? (
@@ -508,6 +521,17 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 											)
 										})}
 									</div>
+									<button
+										type="button"
+										className="check"
+										onClick={() =>
+											setModal({ kind: "discoveryQuestionRouting" })
+										}
+										style={{ marginTop: 6 }}
+										title="How a discovery subagent routes user-decidable forks through Track B"
+									>
+										ⓘ user-decidable forks → feedback_question
+									</button>
 								</div>
 							)
 						})()}
@@ -573,6 +597,32 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 								) : null}
 							</div>
 						</div>
+						{mStage !== "auto" ? (
+							<div className="elab-step">
+								<div className="step-label">
+									⑤ verify_decompose (coverage verifier){" "}
+									<span
+										style={{
+											textTransform: "none",
+											letterSpacing: 0,
+											color: "#7c3aed",
+											fontWeight: 600,
+										}}
+									>
+										· 5th elaborate-loop signal
+									</span>
+								</div>
+								<button
+									type="button"
+									className="check"
+									onClick={() => setModal({ kind: "verifyDecomposeFlow" })}
+									title="Coverage verifier flow + nonce mechanics"
+									style={{ marginTop: 6 }}
+								>
+									ⓘ verifier flow + nonce
+								</button>
+							</div>
+						) : null}
 					</div>
 
 					<div className="phase-arrow">↓</div>
@@ -1153,24 +1203,15 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 								</div>
 							)
 						})()}
-						<div
-							className="agents-caption"
-							style={{
-								textAlign: "left",
-								fontSize: 11,
-								lineHeight: 1.5,
-								marginTop: 8,
-							}}
+						<button
+							type="button"
+							className="check"
+							onClick={() => setModal({ kind: "fbAsUnitFixLoop" })}
+							style={{ marginTop: 8 }}
+							title="FB-as-unit fix-loop mechanics — Track B dispatch flow"
 						>
-							Track B's <code>start_feedback_hat</code> dispatches directly
-							against the FB file. <strong>FB-as-unit:</strong> fixers edit the
-							FB body via <code>haiku_feedback_write</code>; the flagged unit
-							stays read-only via <code>haiku_unit_read</code>. The chain
-							progresses via <code>haiku_feedback_advance_hat</code>; the engine
-							emits <code>close_feedback</code> when the terminal hat advances,
-							then stamps <code>closed_at</code> and applies{" "}
-							<code>targets.invalidates</code> to the targeted unit's approvals.
-						</div>
+							ⓘ FB-as-unit fix-loop mechanics
+						</button>
 						<div
 							style={{
 								marginTop: 8,
@@ -1494,7 +1535,7 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 									<div className="ng-head">
 										<span className="ng-caption" style={{ color: "#92400e" }}>
 											↳ pre-cursor selection chain (run-tick.ts gates) → first
-											stage's <code>elaborate</code>
+											stage's <code>elaborate_loop</code>
 										</span>
 										<span className="ig-type" style={{ color: "#92400e" }}>
 											blocking
@@ -1513,14 +1554,14 @@ export function ArchitectureMap({ initialStudioDir }: ArchitectureMapProps) {
 									>
 										<code>select_studio</code> → <code>select_mode</code> →{" "}
 										<code>(quick? select_stage)</code> →{" "}
-										<code>elaborate</code>
+										<code>elaborate_loop</code>
 									</div>
 									<div className="ng-branch-row" style={{ marginTop: 6 }}>
 										<span className="ng-branch reject-branch">
 											↑ picker dismiss → re-pop on next tick
 										</span>
 										<span className="ng-branch approve-branch">
-											↓ pick → write FM, re-tick → elaborate
+											↓ pick → write FM, re-tick → elaborate_loop
 										</span>
 									</div>
 									<div

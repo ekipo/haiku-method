@@ -16,8 +16,10 @@ import {
 	resolveIntentStages,
 	resolveStudioStages,
 } from "../orchestrator/studio.js"
+import { runDriftSweep } from "../orchestrator/workflow/drift-sweep.js"
 import { getSession, type ReviewSession } from "../sessions.js"
 import { intentDir, parseFrontmatter } from "../state-tools.js"
+import { readStudioReviewAgentPaths } from "../studio-reader.js"
 
 function titleCase(s: string): string {
 	return s
@@ -81,9 +83,10 @@ function scrubUnitsForWire<T extends ParsedUnitLike>(units: T[]): T[] {
 
 /** Read intent.md frontmatter fresh from disk. Mirrors getCurrentState's
  *  philosophy — the cached `session.parsedIntent.frontmatter` was captured
- *  at session creation, and fields like `intent_completion_review` could
- *  in principle be edited mid-flow. Returns an empty object when the
- *  file or slug is missing so callers can read fields with `||` fallbacks. */
+ *  at session creation, and a few user-authorable fields (title,
+ *  description, mode) can be edited mid-flow. Returns an empty object
+ *  when the file or slug is missing so callers can read fields with `||`
+ *  fallbacks. */
 function readIntentFrontmatterFresh(
 	slug: string | undefined,
 ): Record<string, unknown> {
@@ -191,8 +194,16 @@ function computeApproveAction(
 		}
 	}
 	if (isLastStage) {
-		const completionReviewEnabled = intentFm.intent_completion_review !== false
-		if (completionReviewEnabled) {
+		// Intent completion review is universal — every intent runs the
+		// studio's review-agents after the final stage gate. The only
+		// "skip" path is a studio shipping zero review-agents, in which
+		// case the dispatch is a no-op and we go straight to completion.
+		const studioName =
+			(current?.studio as string) || (intentFm.studio as string) || ""
+		const hasReviewAgents =
+			!!studioName &&
+			Object.keys(readStudioReviewAgentPaths(studioName)).length > 0
+		if (hasReviewAgents) {
 			return {
 				label: "Submit Intent for Final Review",
 				kind: "submit_intent_review",
@@ -273,6 +284,40 @@ export function respondSessionApi(
 			? getCurrentState(session.intent_slug)
 			: null
 		if (current) data.current_state = current
+		// Track-C drift sweep — same call the cursor makes pre-tick.
+		// Surfaced under `drift` so the SPA's DriftBanner can render
+		// the same set of mutated artifacts the engine would react to
+		// on the next `run_next`. We only run the sweep when the intent
+		// has an active stage; the sweep folds in intent-scope approval
+		// drift on intent.md too.
+		const slugForDrift = session.intent_slug
+		if (slugForDrift && current?.stage && current.studio) {
+			try {
+				const sweep = runDriftSweep({
+					intentDir: intentDir(slugForDrift),
+					stage: current.stage,
+					studio: current.studio,
+				})
+				if (sweep.events.length > 0) {
+					data.drift = sweep.events.map((e) => ({
+						path: e.file,
+						stage: e.unit === "(intent)" ? "" : current.stage,
+						intent: slugForDrift,
+						// Drift sweep only flags hash-mismatch on a
+						// witnessed file — always a modification.
+						// Add/delete are not surfaced.
+						action: "modified" as const,
+						age: e.since,
+						kind: e.kind,
+						unit: e.unit,
+						role: e.role,
+					}))
+				}
+			} catch {
+				// Drift sweep is best-effort — a worktree quirk or a
+				// transient FS read shouldn't fail the session payload.
+			}
+		}
 		// Best-effort PR/MR discovery via raw git plumbing
 		// (`git ls-remote origin 'refs/pull/*/head'` for GitHub,
 		// `refs/merge-requests/*/head` for GitLab). The engine never

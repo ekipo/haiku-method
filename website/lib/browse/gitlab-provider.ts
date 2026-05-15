@@ -14,7 +14,10 @@ import ReadFileQuery from "./graphql/gitlab/__generated__/operationsReadFileQuer
 import {
 	classifyArtifact,
 	deriveActiveStageFromStageTree,
-	deriveStageStatusFromUnits,
+	deriveStageStateFromUnits,
+	deriveV4ActiveStage,
+	parseElaborationVerified,
+	parseIntentApprovals,
 	mergeKnowledge as mergeKnowledgeShared,
 	parseFeedback,
 	parseIntentFromRaw as parseIntentFromRawShared,
@@ -601,7 +604,12 @@ export class GitLabProvider implements BrowseProvider {
 		return { blobByPath, allBlobs, allTrees, assets }
 	}
 
-	/** Parse a single stage from fetched blob data. Returns null if the stage has no content. */
+	/** Parse a single stage from fetched blob data. Returns null if the stage has no content.
+	 *
+	 *  `intentMode` is the value from intent.md (`continuous` /
+	 *  `discrete` / `discrete-hybrid` / `autopilot`). Threaded through
+	 *  to the derivation so autopilot intents skip the elaborate-verifier
+	 *  signals — same shape the cursor uses. */
 	private parseStageFromBlobs(
 		slug: string,
 		stageName: string,
@@ -609,6 +617,7 @@ export class GitLabProvider implements BrowseProvider {
 		activeStage: string,
 		stageNames: string[],
 		ref: string,
+		intentMode: string,
 	): HaikuStageState | null {
 		const basePath = `.haiku/intents/${slug}`
 		const stagePath = `${basePath}/stages/${stageName}`
@@ -674,18 +683,34 @@ export class GitLabProvider implements BrowseProvider {
 		// v4 intents have no state.json (deleted by the migrator); the
 		// dual-path falls through to per-unit derivation.
 		const stateBlob = data.blobByPath.get(`${stagePath}/state.json`)
-		const { phase, startedAt, completedAt, gateOutcome, stateStatus } =
+		const { phase: v3Phase, startedAt, completedAt, gateOutcome, stateStatus } =
 			parseStageStateJson(stateBlob)
 
-		// Status resolution priority:
+		// elaboration.md verification — load the file's frontmatter so the
+		// derivation can tell whether the elaborate gate has cleared. v4
+		// stamps `verified_at` on the file when the verify-conversation
+		// hat signs off; without that the cursor reports phase
+		// `elaborate`. Pass `null` (grandfather) when the file is absent.
+		const elaborationBlob = data.blobByPath.get(`${stagePath}/elaboration.md`)
+		const elaborationVerified = parseElaborationVerified(elaborationBlob)
+
+		// Status + phase resolution priority:
 		//   1. v3 state.json.status (authoritative when present)
-		//   2. v4 derived from per-unit iterations[] + approvals
+		//   2. v4 derived from per-unit iterations[] + approvals + mode +
+		//      elaboration verification, via the shared pure helper.
 		//   3. v3 active_stage / stage-order fallback
 		let status: "pending" | "active" | "complete" = "pending"
+		let phase: HaikuStageState["phase"] = v3Phase
 		if (stateStatus === "active") status = "active"
 		else if (stateStatus === "completed") status = "complete"
 		else if (units.length > 0 || stateBlob == null) {
-			status = deriveStageStatusFromUnits(units)
+			const derived = deriveStageStateFromUnits(units, {
+				stage: stageName,
+				intentMode,
+				elaborationVerified,
+			})
+			status = derived.status
+			phase = derived.phase
 		} else if (stageName === activeStage) status = "active"
 		else if (stageNames.indexOf(stageName) < stageNames.indexOf(activeStage))
 			status = "complete"
@@ -932,6 +957,7 @@ export class GitLabProvider implements BrowseProvider {
 		const studio = (frontmatter.studio as string) || "ideation"
 		const stageNames = (frontmatter.stages as string[]) || []
 		const activeStage = (frontmatter.active_stage as string) || ""
+		const intentMode = (frontmatter.mode as string) || "continuous"
 
 		// Determine ordered stage list from frontmatter or directory listing
 		const fallbackDirNames = this.deriveStageDirNames(
@@ -963,6 +989,7 @@ export class GitLabProvider implements BrowseProvider {
 					activeStage,
 					stageNames,
 					stageBranchRef.branch,
+					intentMode,
 				)
 			}
 
@@ -976,6 +1003,7 @@ export class GitLabProvider implements BrowseProvider {
 					activeStage,
 					stageNames,
 					intentBranch,
+					intentMode,
 				)
 			}
 
@@ -988,6 +1016,7 @@ export class GitLabProvider implements BrowseProvider {
 					activeStage,
 					stageNames,
 					"HEAD",
+					intentMode,
 				)
 			}
 
@@ -1014,6 +1043,38 @@ export class GitLabProvider implements BrowseProvider {
 				prNumber: meta?.prNumber ?? null,
 			})
 		}
+
+		// Refine the active stage from the cursor's "first non-completed
+		// stage" rule, mirroring the engine's getCurrentState walk. v4
+		// dropped intent.md.active_stage, so trusting the frontmatter
+		// here would always read empty — we'd fall back to the wrong
+		// stage in the UI. The per-stage status above is already derived
+		// from the stage-branch trust source.
+		const stageStatusByName: Record<
+			string,
+			"pending" | "active" | "complete"
+		> = {}
+		for (const s of stages) stageStatusByName[s.name] = s.status
+		const refinedActiveStage =
+			deriveV4ActiveStage(orderedStages, stageStatusByName) || activeStage
+
+		// Re-parse intent.md off the current stage's branch when one is
+		// present. Engine invariant: every commit during a stage's work
+		// lands on that stage's branch first, including any intent.md
+		// edits (intent-completion approvals, sealed_at, etc.). Reading
+		// the most volatile fields off the active stage's branch keeps
+		// the UI in sync with what the cursor sees on its next tick.
+		const currentStageIntentRaw = stageBranchData
+			.get(refinedActiveStage)
+			?.blobByPath.get(`${basePath}/intent.md`)
+		const currentStageFrontmatter = currentStageIntentRaw
+			? parseFrontmatter(currentStageIntentRaw, {
+					provider: "gitlab",
+					path: `${basePath}/intent.md`,
+					slug,
+					branch: stageBranches.get(refinedActiveStage)?.branch,
+				}).data
+			: frontmatter
 
 		// Knowledge: merge from all levels (each can contribute)
 		let knowledge = defaultData
@@ -1065,18 +1126,28 @@ export class GitLabProvider implements BrowseProvider {
 					defaultData ?? GitLabProvider.EMPTY_REF_DATA,
 				)
 
+		// Volatile fields read off the current stage's branch (cursor's
+		// trust source); structural fields (studio, stages list, mode,
+		// created_at) come from the intent-branch parse since they're
+		// stable post-setup.
 		return {
 			slug,
-			title: (frontmatter.title as string) || slug,
+			title:
+				(currentStageFrontmatter.title as string) ||
+				(frontmatter.title as string) ||
+				slug,
 			studio,
-			activeStage,
+			activeStage: refinedActiveStage,
 			mode: (frontmatter.mode as string) || "continuous",
 			createdAt:
 				(frontmatter.created_at as string) ||
 				(frontmatter.created as string) ||
 				null,
 			startedAt: (frontmatter.started_at as string) || null,
-			completedAt: (frontmatter.completed_at as string) || null,
+			completedAt:
+				(currentStageFrontmatter.completed_at as string) ||
+				(frontmatter.completed_at as string) ||
+				null,
 			studioStages: (frontmatter.stages as string[]) || [],
 			composite:
 				(frontmatter.composite as Array<{
@@ -1084,15 +1155,19 @@ export class GitLabProvider implements BrowseProvider {
 					stages: string[]
 				}>) || null,
 			...normalizeIntentStatus(
-				(frontmatter.status as string) || "active",
-				(frontmatter.completed_at as string) || null,
-				stageNames.indexOf(activeStage),
+				(currentStageFrontmatter.status as string) ||
+					(frontmatter.status as string) ||
+					"active",
+				(currentStageFrontmatter.completed_at as string) ||
+					(frontmatter.completed_at as string) ||
+					null,
+				stageNames.indexOf(refinedActiveStage),
 				stageNames.length,
 			),
 			stagesTotal: stageNames.length,
 			archived: frontmatter.archived === true,
 			follows: (frontmatter.follows as string) || null,
-			raw: frontmatter,
+			raw: currentStageFrontmatter,
 			stages,
 			knowledge,
 			operations,
@@ -1100,6 +1175,7 @@ export class GitLabProvider implements BrowseProvider {
 			content,
 			assets,
 			intentFeedback,
+			intentApprovals: parseIntentApprovals(currentStageFrontmatter),
 			...(this.intentMetaMap.get(slug) || {}),
 		}
 	}
@@ -1124,14 +1200,15 @@ export class GitLabProvider implements BrowseProvider {
 		const studio = (frontmatter.studio as string) || "ideation"
 		const stageNames = (frontmatter.stages as string[]) || []
 		const activeStage = (frontmatter.active_stage as string) || ""
+		const intentMode = (frontmatter.mode as string) || "continuous"
 		const ref = this.branch || "HEAD"
 
 		const fallbackDirNames = this.deriveStageDirNames(slug, data)
 
+		const orderedStages =
+			stageNames.length > 0 ? stageNames : fallbackDirNames
 		const stages: HaikuStageState[] = []
-		for (const stageName of stageNames.length > 0
-			? stageNames
-			: fallbackDirNames) {
+		for (const stageName of orderedStages) {
 			const parsed = this.parseStageFromBlobs(
 				slug,
 				stageName,
@@ -1139,9 +1216,20 @@ export class GitLabProvider implements BrowseProvider {
 				activeStage,
 				stageNames,
 				ref,
+				intentMode,
 			)
 			if (parsed) stages.push(parsed)
 		}
+
+		// Cursor walk: pick the active stage from the per-stage status
+		// we just derived, mirroring engine getCurrentState.
+		const stageStatusByName: Record<
+			string,
+			"pending" | "active" | "complete"
+		> = {}
+		for (const s of stages) stageStatusByName[s.name] = s.status
+		const refinedActiveStage =
+			deriveV4ActiveStage(orderedStages, stageStatusByName) || activeStage
 
 		const knowledge = this.parseKnowledgeFromBlobs(slug, data)
 		const operations = this.parseOperationsFromBlobs(slug, data)
@@ -1152,7 +1240,7 @@ export class GitLabProvider implements BrowseProvider {
 			slug,
 			title: (frontmatter.title as string) || slug,
 			studio,
-			activeStage,
+			activeStage: refinedActiveStage,
 			mode: (frontmatter.mode as string) || "continuous",
 			createdAt:
 				(frontmatter.created_at as string) ||
@@ -1169,7 +1257,7 @@ export class GitLabProvider implements BrowseProvider {
 			...normalizeIntentStatus(
 				(frontmatter.status as string) || "active",
 				(frontmatter.completed_at as string) || null,
-				stageNames.indexOf(activeStage),
+				stageNames.indexOf(refinedActiveStage),
 				stageNames.length,
 			),
 			stagesTotal: stageNames.length,
@@ -1183,6 +1271,7 @@ export class GitLabProvider implements BrowseProvider {
 			content,
 			assets: data.assets,
 			intentFeedback,
+			intentApprovals: parseIntentApprovals(frontmatter),
 			branch: this.branch,
 		}
 	}

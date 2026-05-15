@@ -53,7 +53,6 @@ function makeRichV3Fixture() {
 				gate_review_url: "https://review.example/abc",
 				started_at: "2026-04-15T09:00:00Z",
 				created_at: "2026-04-15T08:55:00Z",
-				intent_completion_review: true,
 			},
 		),
 	)
@@ -289,7 +288,6 @@ test("realistic v3 → v4 — multi-stage migration leaves no v3 fields on inten
 		assert.strictEqual(fm.studio, "software")
 		assert.strictEqual(fm.mode, "discrete")
 		assert.strictEqual(fm.started_at, "2026-04-15T09:00:00Z")
-		assert.strictEqual(fm.intent_completion_review, true)
 	} finally {
 		rmSync(root, { recursive: true, force: true })
 	}
@@ -540,7 +538,7 @@ test("realistic v3 → v4 — FB with upstream_stage relocates to that stage's f
 		)
 		// Target must have a renumbered FB containing the original body.
 		const designFbDir = join(intentDir, "stages", "design", "feedback")
-		const designFiles = readFileSync ? null : null // satisfy ts; use require
+		const _designFiles = readFileSync ? null : null // satisfy ts; use require
 		const fs = await import("node:fs")
 		const allDesign = fs
 			.readdirSync(designFbDir)

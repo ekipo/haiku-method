@@ -131,21 +131,38 @@ function gateBadgeCopy(mode: GateMode): { label: string; classes: string } {
 }
 
 /**
- * Derive the "what phase/gate is active for this stage right now" label.
- * The workflow engine exposes `phase` on stage_state; we map it to the canonical
- * mockup's gate-phase nouns: "Final Review Gate" when the stage is at
- * its close-out review, "In Review" for mid-review, etc.
+ * Per-stage phase model. Matches ARCHITECTURE.md §2.1 and the cursor's
+ * walkIntentTrack walk:
+ *   elaborate → execute → review → approve → complete
+ *
+ * "review" = pre-execution sign-offs (`reviews.<role>` — spec, adversarial
+ *            agents, user_gate { gate_kind: "spec" }).
+ * "approve" = post-execution sign-offs (`approvals.<role>` — spec,
+ *             quality_gates, adversarial agents, user_gate { gate_kind:
+ *             "approval" }).
+ * "complete" = the merge step the cursor emits as `complete_stage`.
+ *
+ * The legacy "gate" phase (a single bucket conflating everything
+ * post-execute) is gone; user gates fire INSIDE both `review` and
+ * `approve`, distinguished by `gate_kind`.
  */
-// Canonical phase sequence inside a stage (excluding the implicit
-// pre-elaborate seed state). Surfaced as a mini stepper in the banner
-// so reviewers can see where the stage sits in its own lifecycle.
-export const STAGE_PHASES = ["elaborate", "execute", "review", "gate"] as const
+export const STAGE_PHASES = [
+	"elaborate",
+	"execute",
+	"review",
+	"approve",
+	"complete",
+] as const
 
 const PHASE_TOOLTIPS: Record<(typeof STAGE_PHASES)[number], string> = {
-	elaborate: "Elaborate — specify the work (hats plan unit files)",
+	elaborate:
+		"Elaborate — concurrent loop: conversation, discovery, unit drafting, verifiers",
 	execute: "Execute — hats land code and artifacts for each unit",
-	review: "Review — adversarial agents + quality gates",
-	gate: "Gate — final review checkpoint; human or external approval",
+	review:
+		"Review — pre-execution sign-offs (spec / adversarial / user spec gate)",
+	approve:
+		"Approve — post-execution sign-offs (spec / quality_gates / adversarial / final user gate)",
+	complete: "Complete — merge stage into intent main",
 }
 
 function phaseBadgeCopy(
@@ -159,9 +176,16 @@ function phaseBadgeCopy(
 				"bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300",
 		}
 	}
-	if (phase === "gate") {
+	if (phase === "complete") {
 		return {
-			label: "Final Review Gate",
+			label: "Completing",
+			classes:
+				"bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-300 dark:border-green-700",
+		}
+	}
+	if (phase === "approve") {
+		return {
+			label: "Approving",
 			classes:
 				"bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-300 dark:border-amber-700",
 		}
@@ -184,6 +208,15 @@ function phaseBadgeCopy(
 		return {
 			label: "Elaborating",
 			classes: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400",
+		}
+	}
+	// Back-compat: surfaces emitting the legacy "gate" string land in the
+	// approve bucket (which is what the old name conflated).
+	if (phase === "gate") {
+		return {
+			label: "Approving",
+			classes:
+				"bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-300 dark:border-amber-700",
 		}
 	}
 	return null
@@ -567,18 +600,26 @@ export function ReviewPage({
 									stagePhase={stageStates[selectedStage ?? ""]?.phase ?? null}
 									gateBadges={gateBadges}
 									adHoc={isAdHoc}
+									pendingSignals={
+										// Only show when the banner is rendering the
+										// engine's current stage — pending_signals
+										// is a per-cursor-emission live snapshot,
+										// meaningless for stages the user is just
+										// browsing.
+										selectedStage === activeStage
+											? (session.current_state?.pending_signals ?? null)
+											: null
+									}
 								/>
 
 								{/* Drift banner — sticky strip between StageBanner and
-								    RereviewBanner per SPA-UI-SPECS §3. Renders nothing
-								    when `drift` is empty (DriftBanner returns null
-								    internally), so the integration is safe even before
-								    the WS plumbing that pushes drift entries lands. The
-								    drift entries themselves come from the existing
-								    `manual_change_assessment` action's findings via
-								    the WS bridge — wiring `drift` to that feed is the
-								    next iteration's work. */}
-								<DriftBanner drift={[] as DriftEntry[]} />
+								    RereviewBanner per SPA-UI-SPECS §3. Drift entries
+								    come from the cursor's Track-C sweep
+								    (`runDriftSweep`), surfaced fresh on every session
+								    payload by `session-api.ts`. DriftBanner returns
+								    null internally when the array is empty, so this
+								    integration is safe across drift / no-drift cycles. */}
+								<DriftBanner drift={(session.drift ?? []) as DriftEntry[]} />
 
 								<div className="px-6 lg:px-10 pb-6">
 									{session.previous_review && (
@@ -623,6 +664,7 @@ function StageBanner({
 	stagePhase,
 	gateBadges,
 	adHoc,
+	pendingSignals,
 }: {
 	stageName: string
 	stageStatus: string
@@ -632,6 +674,13 @@ function StageBanner({
 	 *  badges and render an "Ad-hoc" pill instead so the user can see
 	 *  at a glance that this surface won't advance the workflow. */
 	adHoc?: boolean
+	/** Cursor's `signals_unmet[]` for the current stage when `phase ===
+	 *  "elaborate"`. Rendered as small chips beneath the phase pill so
+	 *  the reviewer can see which sub-signal (conversation /
+	 *  verify_conversation / discovery / decompose / verify_decompose)
+	 *  is currently keeping the loop from advancing. Null when the
+	 *  caller is browsing a non-current stage. */
+	pendingSignals?: ReadonlyArray<string> | null
 }): React.ReactElement {
 	const statusPill =
 		stageStatus === "current" || stageStatus === "active"
@@ -704,10 +753,75 @@ function StageBanner({
 							))
 						)}
 					</div>
+					{pendingSignals && pendingSignals.length > 0 && (
+						<fieldset
+							className="flex items-center gap-1.5 mt-2 flex-wrap border-0 p-0 m-0"
+							data-testid="elaborate-pending-signals"
+							aria-label="Elaborate-loop signals waiting on the agent"
+						>
+							<span className="text-[11px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 leading-none">
+								Pending:
+							</span>
+							{pendingSignals.map((sig) => (
+								<span
+									key={sig}
+									className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[11px] font-semibold leading-none bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+									title={pendingSignalTooltip(sig)}
+								>
+									{pendingSignalLabel(sig)}
+								</span>
+							))}
+						</fieldset>
+					)}
 				</div>
 			</div>
 		</div>
 	)
+}
+
+/** Friendly label for a serialized elaborate-loop signal name. Mirrors
+ *  `serializeElaborateSignals` in the engine: discovery entries arrive
+ *  as `discovery:<agent>` and we want to show just the agent name as a
+ *  chip; everything else gets a short prose label. */
+function pendingSignalLabel(sig: string): string {
+	if (sig.startsWith("discovery:")) {
+		const agent = sig.slice("discovery:".length)
+		return `discovery · ${agent}`
+	}
+	switch (sig) {
+		case "conversation":
+			return "conversation"
+		case "verify_conversation":
+			return "verify conversation"
+		case "decompose":
+			return "decompose"
+		case "verify_decompose":
+			return "verify decompose"
+		default:
+			return sig
+	}
+}
+
+/** Tooltip text — explains what the engine is waiting for, in
+ *  reviewer-facing language. Mirrors the cursor's signal definitions
+ *  without exposing FM field names. */
+function pendingSignalTooltip(sig: string): string {
+	if (sig.startsWith("discovery:")) {
+		const agent = sig.slice("discovery:".length)
+		return `Discovery template "${agent}" hasn't produced its required artifact yet.`
+	}
+	switch (sig) {
+		case "conversation":
+			return "elaboration.md hasn't been authored yet — the engine is waiting for the elaborate hat to capture the per-stage conversation."
+		case "verify_conversation":
+			return "elaboration.md exists but hasn't been signed by the verifier hat yet."
+		case "decompose":
+			return "No units drafted yet — the engine is waiting for decomposition into work units."
+		case "verify_decompose":
+			return "Units exist but the decompose-verifier hasn't signed off that they cover the conversation."
+		default:
+			return sig
+	}
 }
 
 /**

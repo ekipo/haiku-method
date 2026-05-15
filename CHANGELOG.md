@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-05-15
+
+### Added
+- Automatic migration from v5 to v6 workflows, preserving all intent history and configuration during upgrades.
+
+### Changed
+- Improved formatting and clarity of review feedback comments in bot-generated responses.
+- Enhanced intent completion review interface for clearer workflow status visualization.
+
+### Fixed
+- Session API integration routes now support broader external tool connectivity scenarios.
+- GitHub and GitLab provider integrations corrected for platform-specific requirements.
+
 ## [6.0.0] - 2026-05-15
 
 ### Added

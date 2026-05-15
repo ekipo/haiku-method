@@ -38,7 +38,11 @@ import {
 	type CursorPosition,
 	derivePosition,
 } from "./cursor.js"
-import { recordTickResult } from "./deadlock-detector.js"
+import {
+	buildLoopHaltAction,
+	recordTickResult,
+	wouldDeadlock,
+} from "./deadlock-detector.js"
 import { selfRepairMissingApprovals } from "./self-repair-approvals.js"
 import { ensureNonce } from "./verifier-nonce.js"
 
@@ -243,7 +247,14 @@ export function runWorkflowTick(
 					to: schemaTarget,
 					error: String((err as Error)?.message ?? err),
 				})
-				return {
+				// Per claude-bot review on PR #367: route through
+				// `broadcastTick` so a stuck migration error (same `action:
+				// "error"` returned every tick because intent.md is corrupt
+				// or the schema edge is missing) hits the deadlock detector
+				// and halts after HALT_THRESHOLD repeats. Without this, the
+				// engine would emit the same migration error indefinitely
+				// with no halting mechanism.
+				return broadcastTick(slug, {
 					position: {
 						track: "intent",
 						// Migration error path — `role` is required by the
@@ -257,7 +268,7 @@ export function runWorkflowTick(
 						intent: slug,
 						message: `Migration from plugin_version='${sourceVersion}' to '${schemaTarget}' failed: ${String((err as Error)?.message ?? err)}. Resolve manually before continuing.`,
 					},
-				}
+				})
 			}
 		}
 	}
@@ -272,26 +283,31 @@ export function runWorkflowTick(
 	// handle it.
 	const studio = (intentFm.studio as string) || ""
 	if (!studio) {
-		return {
+		// Route through broadcastTick so the deadlock detector sees the
+		// emit. select_* gates are usually transient — the user picks via
+		// the SPA and the next tick advances — but a bug in the picker
+		// (or a runaway test harness that never picks) would otherwise
+		// loop without bound.
+		return broadcastTick(slug, {
 			position: { track: "intent", action: null },
 			action: {
 				action: "select_studio",
 				intent: slug,
 				message: `Intent '${slug}' has no studio.`,
 			},
-		}
+		})
 	}
 
 	const mode = (intentFm.mode as string) || ""
 	if (!mode) {
-		return {
+		return broadcastTick(slug, {
 			position: { track: "intent", action: null },
 			action: {
 				action: "select_mode",
 				intent: slug,
 				message: `Intent '${slug}' has no mode.`,
 			},
-		}
+		})
 	}
 
 	const stages = Array.isArray(intentFm.stages)
@@ -299,14 +315,14 @@ export function runWorkflowTick(
 		: []
 
 	if (mode === "quick" && stages.length === 0) {
-		return {
+		return broadcastTick(slug, {
 			position: { track: "intent", action: null },
 			action: {
 				action: "select_stage",
 				intent: slug,
 				message: `Intent '${slug}' is in quick mode with no stage selected.`,
 			},
-		}
+		})
 	}
 
 	// Pre-tick self-repair: synthesize missing review/approval stamps
@@ -486,21 +502,51 @@ function broadcastTick(
 	slug: string,
 	result: WorkflowTickResult,
 ): WorkflowTickResult {
-	if (result.action) {
+	// Loop-halt gate. If returning this action would push the
+	// inter-tick deadlock detector past HALT_THRESHOLD (or trigger the
+	// churn-halt path), swap the action for a `loop_halted` directive
+	// BEFORE we broadcast/record. The agent reads the halt and stops
+	// re-ticking; the user sees an explicit message naming the wedge.
+	//
+	// Per goal "ensure nothing in our engine can put us in an infinite
+	// loop, that includes an internal loop to the call itself, or an
+	// agent loop that cannot progress" (2026-05-15). This is the
+	// architectural floor — even if every other prevention misses
+	// (drift dedup, bolt cap, migration idempotency), the same
+	// signature CANNOT be returned more than HALT_THRESHOLD consecutive
+	// times. A fresh signature on the next tick resets the counter,
+	// so the halt is recoverable: fix the underlying state, the halt
+	// disappears.
+	const verdict = wouldDeadlock(
+		slug,
+		result.action as unknown as Record<string, unknown> | null,
+	)
+	let finalResult = result
+	if (verdict !== null) {
+		const halt = buildLoopHaltAction(slug, verdict)
+		finalResult = {
+			position: result.position,
+			action: halt as unknown as WorkflowTickResult["action"],
+		}
+	}
+
+	if (finalResult.action) {
 		broadcastIntent(slug, {
 			type: "tick_committed",
-			action: (result.action as { action?: string }).action ?? "unknown",
+			action: (finalResult.action as { action?: string }).action ?? "unknown",
 		})
 	}
 	// Inter-tick deadlock detection. The same OrchestratorAction
 	// emitted across consecutive ticks (or an A/B/A/B alternation)
 	// surfaces a `haiku.deadlock.suspected` / `haiku.deadlock.churn_suspected`
-	// telemetry signal. Doesn't change behavior — pure observability.
+	// telemetry signal. Records whatever action ACTUALLY went out
+	// (the halt action, when we swapped) so the next tick's check
+	// sees fresh state.
 	recordTickResult(
 		slug,
-		result.action as unknown as Record<string, unknown> | null,
+		finalResult.action as unknown as Record<string, unknown> | null,
 	)
-	return result
+	return finalResult
 }
 
 // v3 compatibility shims — kept transiently so callers that imported

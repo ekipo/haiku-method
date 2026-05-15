@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-05-15
+
+### Added
+- Intent-scope quality gates validate completion criteria across entire intents.
+- Discovery phase can now iterate through multiple questioning rounds to refine investigation scope.
+
+### Changed
+- Revisit workflows now integrate directly into the primary flow; `/haiku:revisit` skill removed.
+
+### Fixed
+- Drift detection no longer falsely blocks progress when open feedback exists.
+- Feedback moving across stages now preserves attachments and maintains numbering.
+- Execute phase no longer permits empty iteration counts on units.
+
 ## [5.0.3] - 2026-05-14
 
 ### Added

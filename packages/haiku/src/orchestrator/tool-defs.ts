@@ -19,6 +19,7 @@
 
 import {
 	HAIKU_AWAIT_GATE_INPUT_SCHEMA,
+	HAIKU_DEBUG_INPUT_SCHEMA,
 	HAIKU_DISCOVERY_COMPLETE_INPUT_SCHEMA,
 	HAIKU_INTENT_SEAL_INPUT_SCHEMA,
 	HAIKU_SELECT_MODE_INPUT_SCHEMA,
@@ -215,6 +216,15 @@ export const orchestratorToolDefs = [
 	},
 	// v4: haiku_classify_drift removed. Drift sweep auto-files FBs;
 	// the feedback track handles assessment.
+	{
+		name: "haiku_debug",
+		description:
+			"ADMIN: bypass-the-FSM tools to unstick corrupt intents. Force a stage complete (signs all reviews/approvals/QGs for units that have moved through every hat), set an intent field (mode, etc.), reset drift (re-stamp witnesses), mutate any feedback frontmatter, or preview the next cursor head after edits. Every mutation requires SPA-picker confirmation — the agent cannot act unilaterally. Use only when the normal workflow can't recover (corrupt FM, stuck loop, lost stamps).",
+		// Shared schema with the handler — both sides import it from
+		// `state/schemas/inputs/debug.ts` so adding a field can never leave
+		// the MCP advertisement and the dispatcher out of sync.
+		inputSchema: jsonSchemaOf(HAIKU_DEBUG_INPUT_SCHEMA),
+	},
 	{
 		name: "haiku_dispatch_quality_gates",
 		description:
